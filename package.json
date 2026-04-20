@@ -1,0 +1,31 @@
+{
+  "name": "obsidian-brain-mcp-server",
+  "version": "0.2.0",
+  "description": "Second Brain MCP server for Obsidian vaults — filesystem-native, with automatic knowledge capture from Claude Code sessions.",
+  "type": "module",
+  "bin": "./server.ts",
+  "scripts": {
+    "start": "node server.ts",
+    "test": "node --test --test-reporter=spec tests/*.test.ts"
+  },
+  "keywords": [
+    "mcp",
+    "obsidian",
+    "knowledge-management",
+    "second-brain",
+    "claude-code"
+  ],
+  "license": "MIT",
+  "author": "amolani",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amolani/obsidian-brain-mcp-server.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "yaml": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

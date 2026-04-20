@@ -1,0 +1,33 @@
+{
+  "_comment": "Tag-Aliases: Links = alternative Schreibweise, Rechts = kanonischer Tag. Case-insensitive Match.",
+
+  "lmn": "linuxmuster",
+  "linuxmuster.net": "linuxmuster",
+
+  "pve": "proxmox",
+  "proxmox-ve": "proxmox",
+
+  "ad": "active-directory",
+  "active directory": "active-directory",
+
+  "gpo": "group-policy",
+  "group policy": "group-policy",
+
+  "reverse proxy": "reverse-proxy",
+  "reverse-proxies": "reverse-proxy",
+
+  "ssh-key": "ssh-keys",
+  "ssh key": "ssh-keys",
+
+  "vm": "vms",
+  "virtual machine": "vms",
+  "virtual-machine": "vms",
+
+  "letsencrypt": "lets-encrypt",
+  "lets encrypt": "lets-encrypt",
+  "le": "lets-encrypt",
+
+  "k8s": "kubernetes",
+
+  "container": "containers"
+}

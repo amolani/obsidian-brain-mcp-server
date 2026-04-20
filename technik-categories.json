@@ -1,0 +1,195 @@
+{
+  "_comment": "Technik-Kategorien mit Unterkategorien. Format: Main -> keywords/filenameHints + optional subcategories. Subcategory-Erkennung läuft nur wenn Hauptkategorie zugeordnet wurde. Neue Einträge mit JSON-Syntax hinzufügen.",
+
+  "Linuxmuster": {
+    "keywords": ["linuxmuster", "sophomorix", "lmn"],
+    "filenameHints": ["lmn", "linuxmuster", "sophomorix"],
+    "priority": 10,
+    "subcategories": {
+      "Linbo": {
+        "keywords": ["linbo", "linbofs", "linbo-api", "patchclass", "start.conf"],
+        "filenameHints": ["linbo", "linbofs"]
+      },
+      "Sophomorix": {
+        "keywords": ["sophomorix", "sophomorix-user", "sophomorix-check"],
+        "filenameHints": ["sophomorix"]
+      },
+      "Samba-AD": {
+        "keywords": ["samba-tool", "samba ad", "kerberos auth", "krbtgt"],
+        "filenameHints": ["samba", "ad-"]
+      },
+      "WebUI": {
+        "keywords": ["linuxmuster-webui", "webui"],
+        "filenameHints": ["webui"]
+      }
+    }
+  },
+
+  "Proxmox": {
+    "keywords": ["proxmox", "pve", "qemu"],
+    "filenameHints": ["proxmox", "pve", "esxi", "cluster"],
+    "priority": 9,
+    "subcategories": {
+      "Ceph": {
+        "keywords": ["ceph osd", "ceph pool", "pveceph", "rbd"],
+        "filenameHints": ["ceph"]
+      },
+      "Cluster": {
+        "keywords": ["cluster node", "corosync", "quorum"],
+        "filenameHints": ["cluster", "corosync"]
+      },
+      "VM-Management": {
+        "keywords": ["qm create", "qm migrate", "qm snapshot"],
+        "filenameHints": ["qm-", "vm-"]
+      },
+      "Migration": {
+        "keywords": ["esxi", "migration", "p2v", "v2v"],
+        "filenameHints": ["migration", "esxi"]
+      }
+    }
+  },
+
+  "Docker": {
+    "keywords": ["docker", "container", "compose", "dockerfile"],
+    "filenameHints": ["docker", "container", "compose"],
+    "priority": 8,
+    "subcategories": {
+      "Edulution-Satellite": {
+        "keywords": ["edulution-satellite", "edulution-sat", "edu-sat"],
+        "filenameHints": ["edulution-satellite", "edulution-sat", "satellite"]
+      },
+      "Edulution-UI": {
+        "keywords": ["edulution-ui", "edulution ui"],
+        "filenameHints": ["edulution-ui"]
+      },
+      "Traefik": {
+        "keywords": ["traefik", "traefik.yml"],
+        "filenameHints": ["traefik"]
+      },
+      "Compose": {
+        "keywords": ["docker compose", "docker-compose"],
+        "filenameHints": ["compose"]
+      }
+    }
+  },
+
+  "Netzwerk": {
+    "keywords": ["netzwerk", "vlan", "firewall", "routing", "dhcp", "dns"],
+    "filenameHints": ["netzwerk", "vlan", "firewall", "netplan"],
+    "priority": 7,
+    "subcategories": {
+      "OPNsense": {
+        "keywords": ["opnsense", "opnsense-firewall"],
+        "filenameHints": ["opnsense"]
+      },
+      "VLAN": {
+        "keywords": ["vlan", "802.1q", "vlan-aware"],
+        "filenameHints": ["vlan"]
+      },
+      "DHCP": {
+        "keywords": ["dhcp", "isc-dhcp", "kea"],
+        "filenameHints": ["dhcp"]
+      },
+      "DNS": {
+        "keywords": ["bind9", "dns", "unbound", "named.conf"],
+        "filenameHints": ["dns", "bind"]
+      },
+      "Palo-Alto": {
+        "keywords": ["palo alto", "paloalto", "pan-os"],
+        "filenameHints": ["palo", "pan-os"]
+      },
+      "Netplan": {
+        "keywords": ["netplan apply", "netplan.yaml"],
+        "filenameHints": ["netplan"]
+      }
+    }
+  },
+
+  "Windows": {
+    "keywords": ["windows", "active directory", "gpo"],
+    "filenameHints": ["gpo", "windows", "active-directory"],
+    "priority": 6,
+    "subcategories": {
+      "GPO": {
+        "keywords": ["gpo", "group policy", "gpupdate"],
+        "filenameHints": ["gpo", "group-policy"]
+      },
+      "Kerberos": {
+        "keywords": ["kerberos", "kinit", "klist", "krb5"],
+        "filenameHints": ["kerberos", "krb"]
+      },
+      "MDM": {
+        "keywords": ["mdm-profil", "intune", "mdm"],
+        "filenameHints": ["mdm"]
+      }
+    }
+  },
+
+  "Ubuntu": {
+    "keywords": ["ubuntu", "debian", "apt", "systemd"],
+    "filenameHints": ["ubuntu", "debian", "apt", "systemd"],
+    "priority": 5,
+    "subcategories": {
+      "Systemd": {
+        "keywords": ["systemctl", "systemd.service", "systemd.timer"],
+        "filenameHints": ["systemd"]
+      },
+      "Netplan": {
+        "keywords": ["netplan"],
+        "filenameHints": ["netplan"]
+      }
+    }
+  },
+
+  "Web": {
+    "keywords": ["nginx", "apache", "traefik", "reverse-proxy"],
+    "filenameHints": ["nginx", "apache", "traefik"],
+    "priority": 4,
+    "subcategories": {
+      "Nginx": {
+        "keywords": ["nginx.conf", "sites-enabled"],
+        "filenameHints": ["nginx"]
+      },
+      "Apache": {
+        "keywords": ["apache2", "httpd", "vhost"],
+        "filenameHints": ["apache"]
+      },
+      "Traefik": {
+        "keywords": ["traefik"],
+        "filenameHints": ["traefik"]
+      },
+      "LetsEncrypt": {
+        "keywords": ["letsencrypt", "certbot", "acme"],
+        "filenameHints": ["letsencrypt", "certbot"]
+      }
+    }
+  },
+
+  "SSH": {
+    "keywords": ["ssh", "ssh-keygen", "ssh-copy-id"],
+    "filenameHints": ["ssh", "jumphost"],
+    "priority": 3,
+    "subcategories": {
+      "Jumphost": {
+        "keywords": ["proxyjump", "jumphost", "ssh -j"],
+        "filenameHints": ["jumphost", "jump"]
+      },
+      "Keys": {
+        "keywords": ["ssh-keygen", "authorized_keys", "id_ed25519"],
+        "filenameHints": ["ssh-key", "ssh-keys"]
+      }
+    }
+  },
+
+  "Git": {
+    "keywords": ["git clone", "git push", "git pull", "github", "gitlab"],
+    "filenameHints": ["git", "github", "gitlab"],
+    "priority": 2,
+    "subcategories": {
+      "Token": {
+        "keywords": ["personal access token", "pat", "github token"],
+        "filenameHints": ["token"]
+      }
+    }
+  }
+}
