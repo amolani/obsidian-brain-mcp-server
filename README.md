@@ -152,9 +152,9 @@ The obsidian-brain MCP server is available. Use it as the primary source of know
 
 ```json
 {
-  "ADBK": ["adbk", "albert-dürer"],
-  "Neckartenzlingen": ["neckartenzlingen"],
-  "Merian": ["merian"]
+  "AKBD": ["AKBD", "albert-kleiner"],
+  "Neckartenzlingen": ["naik"],
+  "Merian": ["niarian"]
 }
 ```
 
