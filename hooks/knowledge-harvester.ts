@@ -8,12 +8,10 @@
 // Uses assistant summaries ("Erledigt:", bullet lists) as note content.
 // One capture per session, dedup by session ID.
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:fs'
-import { join, basename, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, statSync, readFileSync } from 'node:fs'
+import { join, basename } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
-
-const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+import { configPaths, loadClients } from '../config.ts'
 
 if (!process.env.VAULT_PATH) {
   process.stderr.write('knowledge-harvester: VAULT_PATH environment variable required\n')
@@ -22,33 +20,13 @@ if (!process.env.VAULT_PATH) {
 const VAULT_PATH = process.env.VAULT_PATH
 const LOG_PATH = process.env.HARVESTER_LOG || '/tmp/knowledge-harvester.log'
 const STATE_DIR = process.env.HARVESTER_STATE_DIR || '/tmp/knowledge-harvester-state'
-const CLIENTS_PATH = process.env.CLIENTS_PATH || join(PROJECT_ROOT, 'clients.json')
 const SUGGESTIONS_LOG = process.env.HARVESTER_SUGGESTIONS_LOG || '/tmp/knowledge-harvester-suggestions.log'
 
 function log(msg: string): void {
   try { appendFileSync(LOG_PATH, `${new Date().toISOString()} ${msg}\n`) } catch {}
 }
 
-// ── Known Entities (loaded from JSON) ──────────────────────────────
-
-const CLIENT_MAP: Record<string, string> = {}
-
-function loadClients(): void {
-  try {
-    const raw = readFileSync(CLIENTS_PATH, 'utf-8')
-    const data = JSON.parse(raw)
-    for (const [canonical, keywords] of Object.entries(data)) {
-      if (canonical.startsWith('_')) continue
-      if (Array.isArray(keywords)) {
-        for (const kw of keywords) {
-          if (typeof kw === 'string') CLIENT_MAP[kw.toLowerCase()] = canonical
-        }
-      }
-    }
-  } catch (err) {
-    log(`Failed to load clients.json: ${err}`)
-  }
-}
+// CLIENT_MAP resolved lazily via config.loadClients()
 
 // Non-client path segments to skip when suggesting new clients
 const SKIP_SEGMENTS = new Set([
@@ -142,13 +120,14 @@ function parseTranscript(path: string): TranscriptEntry[] {
 
 function detectClient(cwd: string): string | null {
   const cwdLower = cwd.toLowerCase()
-  for (const [key, name] of Object.entries(CLIENT_MAP)) {
+  for (const [key, name] of Object.entries(loadClients())) {
     if (cwdLower.includes(key)) return name
   }
   return null
 }
 
 function suggestClientFromCwd(cwd: string): string | null {
+  const clientMap = loadClients()
   // Walk path segments, find the first segment that looks like a client name
   const segments = cwd.split('/').filter(Boolean).map(s => s.toLowerCase())
   for (const seg of segments.reverse()) {
@@ -157,7 +136,7 @@ function suggestClientFromCwd(cwd: string): string | null {
     if (seg.length < 3 || seg.length > 25) continue
     if (!/^[a-zäöüß][a-zäöüß0-9\-_]+$/i.test(seg)) continue
     // Already known? no suggestion needed
-    if (CLIENT_MAP[seg]) return null
+    if (clientMap[seg]) return null
     return seg
   }
   return null
@@ -166,7 +145,7 @@ function suggestClientFromCwd(cwd: string): string | null {
 function logSuggestion(candidate: string, cwd: string): void {
   try {
     const msg = `${new Date().toISOString()} VORSCHLAG: "${candidate}" als Kunde registrieren? (Pfad: ${cwd})\n` +
-                `  → Zeile in ${CLIENTS_PATH} hinzufügen:\n` +
+                `  → Zeile in ${configPaths().clients} hinzufügen:\n` +
                 `    "${candidate.charAt(0).toUpperCase() + candidate.slice(1)}": ["${candidate}"],\n\n`
     appendFileSync(SUGGESTIONS_LOG, msg)
   } catch {}
@@ -484,7 +463,6 @@ process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk: string) => input += chunk)
 process.stdin.on('end', () => {
   clearTimeout(timeout)
-  loadClients()
 
   try {
     const data = JSON.parse(input)

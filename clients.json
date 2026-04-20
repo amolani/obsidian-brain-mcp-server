@@ -1,6 +1,15 @@
 {
   "_comment": "Kunden-Liste. Format: 'Kanonischer Name': ['keyword1', 'keyword2', ...]. Keywords werden (lowercase) gegen CWD-Pfad und Content geprüft. Neue Kunden hier eintragen — oder warten bis der Harvester einen Vorschlag in /tmp/knowledge-harvester-suggestions.log loggt.",
 
-  "_example_ExampleCorp": ["examplecorp", "example-corp"],
-  "_example_AcmeGmbH": ["acme", "acme-gmbh"]
+  "Merian": ["merian"],
+  "HUG": ["hug"],
+  "THG": ["thg"],
+  "Weiß CNC": ["weiß", "weiss"],
+  "Logodiakt": ["logodiakt"],
+  "Rotteck": ["rotteck"],
+  "Hebelschule": ["hebelschule"],
+  "Düsseldorf": ["düsseldorf", "duesseldorf"],
+  "VHS Offenbach": ["offenbach"],
+  "Stühlingen": ["stühlingen", "stuehlingen"],
+  "Neckartenzlingen": ["neckartenzlingen"]
 }

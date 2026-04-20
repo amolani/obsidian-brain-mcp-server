@@ -6,37 +6,16 @@
 // Also ensures the daily note exists.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync } from 'node:fs'
-import { join, basename, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, basename } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { classifyNote } from '../technik-categories.ts'
-
-const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+import { loadClients } from '../config.ts'
 
 if (!process.env.VAULT_PATH) {
   console.log(JSON.stringify({ result: 'continue' }))
   process.exit(0)
 }
 const VAULT_PATH = process.env.VAULT_PATH
-const CLIENTS_PATH = process.env.CLIENTS_PATH || join(PROJECT_ROOT, 'clients.json')
-
-const CLIENT_MAP: Record<string, string> = {}
-
-function loadClients(): void {
-  try {
-    const raw = readFileSync(CLIENTS_PATH, 'utf-8')
-    const data = JSON.parse(raw)
-    for (const [canonical, keywords] of Object.entries(data)) {
-      if (canonical.startsWith('_')) continue
-      if (Array.isArray(keywords)) {
-        for (const kw of keywords) {
-          if (typeof kw === 'string') CLIENT_MAP[kw.toLowerCase()] = canonical
-        }
-      }
-    }
-  } catch {}
-}
-loadClients()
 
 function today(): string {
   return new Date().toISOString().split('T')[0]
@@ -166,7 +145,7 @@ process.stdin.on('end', () => {
     // Detect client from CWD
     const cwdLower = cwd.toLowerCase()
     let detectedClient: string | null = null
-    for (const [key, name] of Object.entries(CLIENT_MAP)) {
+    for (const [key, name] of Object.entries(loadClients())) {
       if (cwdLower.includes(key)) {
         detectedClient = name
         break

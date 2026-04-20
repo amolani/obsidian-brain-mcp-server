@@ -21,14 +21,14 @@ Acceptance gate: `npm test` passes + server boots cleanly + config is single-sou
 | Task | Description | Status | Acceptance |
 |------|-------------|--------|------------|
 | 1.1 | fix-runtime | ✅ done | `npm test` green (78/78); `VAULT_PATH=... node server.ts` boots; versions synced at 0.2.0 |
-| 1.2 | unify-config | ⏳ pending | single entrypoints for clients/categories/aliases; no hardcoded lists in vault.ts |
+| 1.2 | unify-config | ✅ done | `config.ts` exposes `loadClients/loadCategories/loadTagAliases/loadTechTerms` + `reloadConfig()`; `vault.ts` drops `KNOWN_CLIENTS`/`TECH_TERMS`; hooks + `suggestions.ts` + `technik-categories.ts` route through `config.ts`; `tech-terms.json` added; tests 78/78 green |
 | 1.3 | extract-service-layer | ⏳ pending | analyzers live in `services/`; regression tests green |
 | 1.4 | action-log | ⏳ pending | `services/action-log.ts`; every vault write emits one append-only entry |
 
 ### Known drift (from prompt)
 
-- `package.json` version 0.2.0 ≠ `server.ts` version 0.1.0
-- `vault.ts` holds `KNOWN_CLIENTS` and `TECH_TERMS` constants while hooks use JSON
+- ~~`package.json` version 0.2.0 ≠ `server.ts` version 0.1.0~~ — fixed in 1.1
+- ~~`vault.ts` holds `KNOWN_CLIENTS` and `TECH_TERMS` constants while hooks use JSON~~ — fixed in 1.2 (now loaded via `config.ts` from `clients.json` / `tech-terms.json`)
 - `server.ts` tool descriptions still say "Referenz/" when repo has evolved to `Technik/`
 - `hooks/session-context.ts` re-implements auto-organize instead of calling `vault.ts#organizeReferenz`
 - `npm test` and `node server.ts` may not run reliably against `.ts` in the current environment

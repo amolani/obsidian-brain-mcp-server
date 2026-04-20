@@ -1,52 +1,14 @@
 // Technik-Kategorisierung mit Haupt- und Unterkategorien
-// Regeln werden aus technik-categories.json geladen (editable)
-// Unbekannte Topics werden als Vorschläge geloggt
+// Regeln werden aus technik-categories.json geladen (über config.ts).
+// Unbekannte Topics werden als Vorschläge geloggt.
 
-import { readFileSync, appendFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { appendFileSync } from 'node:fs'
+import { loadCategories, type CategoryRule, type SubCategoryRule } from './config.ts'
 
-const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
-const CATEGORIES_JSON = process.env.TECHNIK_CATEGORIES_PATH || join(PROJECT_ROOT, 'technik-categories.json')
+export { loadCategories }
+export type { CategoryRule, SubCategoryRule }
+
 const SUGGESTIONS_LOG = process.env.TECHNIK_SUGGESTIONS_LOG || '/tmp/technik-suggestions.log'
-
-export interface SubCategoryRule {
-  keywords: string[]
-  filenameHints: string[]
-}
-
-export interface CategoryRule {
-  name: string
-  keywords: string[]
-  filenameHints: string[]
-  priority: number
-  subcategories: Record<string, SubCategoryRule>
-}
-
-let CACHED_CATEGORIES: CategoryRule[] | null = null
-
-export function loadCategories(): CategoryRule[] {
-  if (CACHED_CATEGORIES) return CACHED_CATEGORIES
-  try {
-    const raw = readFileSync(CATEGORIES_JSON, 'utf-8')
-    const data = JSON.parse(raw)
-    const categories: CategoryRule[] = []
-    for (const [name, rule] of Object.entries<any>(data)) {
-      if (name.startsWith('_')) continue
-      categories.push({
-        name,
-        keywords: rule.keywords || [],
-        filenameHints: rule.filenameHints || [],
-        priority: rule.priority || 0,
-        subcategories: rule.subcategories || {},
-      })
-    }
-    CACHED_CATEGORIES = categories
-    return categories
-  } catch {
-    return []
-  }
-}
 
 export interface Classification {
   category: string | null

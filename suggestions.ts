@@ -4,18 +4,16 @@
 //   - /tmp/knowledge-harvester-suggestions.log  (Kunden)
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
+import { configPaths, reloadConfig } from './config.ts'
 
 // Resolved on each call so tests (and runtime env changes) work correctly
 function paths() {
+  const cfg = configPaths()
   return {
     technikLog: process.env.TECHNIK_SUGGESTIONS_LOG || '/tmp/technik-suggestions.log',
     clientLog: process.env.HARVESTER_SUGGESTIONS_LOG || '/tmp/knowledge-harvester-suggestions.log',
-    categoriesJson: process.env.TECHNIK_CATEGORIES_PATH || join(PROJECT_ROOT, 'technik-categories.json'),
-    clientsJson: process.env.CLIENTS_PATH || join(PROJECT_ROOT, 'clients.json'),
+    categoriesJson: cfg.categories,
+    clientsJson: cfg.clients,
   }
 }
 
@@ -136,6 +134,7 @@ export function promoteTechnikSuggestion(
   data[parent].subcategories[subName] = { keywords, filenameHints }
 
   writeFileSync(categoriesJson, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+  reloadConfig()
 
   // Clear matching entries from suggestions log so they don't resurface
   clearTechnikSuggestion(parent, candidate)
@@ -161,6 +160,7 @@ export function promoteClientSuggestion(
   data[name] = keywords
 
   writeFileSync(clientsJson, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+  reloadConfig()
 
   clearClientSuggestion(candidate)
 

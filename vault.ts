@@ -1,10 +1,8 @@
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, watch, renameSync, unlinkSync } from 'node:fs'
 import { join, relative, basename, dirname, extname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { parse as parseYaml } from 'yaml'
 import { classifyNote } from './technik-categories.ts'
-
-const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
+import { loadClients, loadTagAliases, loadTechTerms } from './config.ts'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -163,31 +161,7 @@ datum: ${today()}
 }
 
 // ── Known entities for auto-categorization ─────────────────────────────
-
-const KNOWN_CLIENTS: Record<string, string> = {
-  merian: 'Merian',
-  hug: 'HUG',
-  thg: 'THG',
-  'weiß': 'Weiß CNC',
-  'weiss': 'Weiß CNC',
-  logodiakt: 'Logodiakt',
-  rotteck: 'Rotteck',
-  hebelschule: 'Hebelschule',
-  'düsseldorf': 'Düsseldorf',
-  duesseldorf: 'Düsseldorf',
-  offenbach: 'VHS Offenbach',
-  'stühlingen': 'Stühlingen',
-  stuehlingen: 'Stühlingen',
-  neckartenzlingen: 'Neckartenzlingen',
-}
-
-const TECH_TERMS = [
-  'kerberos', 'docker', 'proxmox', 'ceph', 'linuxmuster', 'linbo',
-  'opnsense', 'firewall', 'vlan', 'rsync', 'gpo', 'ldap', 'samba',
-  'apache', 'nginx', 'ssh', 'dns', 'dhcp', 'radius', 'mdm',
-  'ubuntu', 'debian', 'windows', 'esxi', 'vmware', 'edulution',
-  'git', 'python', 'bash', 'powershell', 'active directory',
-]
+// Clients and tech-terms are loaded from config.ts (clients.json, tech-terms.json).
 
 const SECURITY_KEYWORDS = [
   'vulnerability', 'schwachstelle', 'sicherheit', 'cve', 'befund',
@@ -692,13 +666,13 @@ export class Vault {
 
     // Auto-detect tags
     const autoTags: string[] = []
-    for (const term of TECH_TERMS) {
+    for (const term of loadTechTerms()) {
       if (contentLower.includes(term)) autoTags.push(term)
     }
 
     // Auto-detect client
     let detectedClient: string | null = null
-    for (const [key, name] of Object.entries(KNOWN_CLIENTS)) {
+    for (const [key, name] of Object.entries(loadClients())) {
       if (contentLower.includes(key)) {
         detectedClient = name
         autoTags.push(`kunde/${key}`)
@@ -1173,7 +1147,7 @@ ${sourceLinks}
     // 5. Determine output path
     let folder = outputFolder || 'Referenz'
     // Auto-detect Kunden folder
-    for (const [key, name] of Object.entries(KNOWN_CLIENTS)) {
+    for (const [key, name] of Object.entries(loadClients())) {
       if (topicLower.includes(key)) {
         folder = `Kunden/${name}`
         break
@@ -2088,32 +2062,6 @@ const KNOWN_FIELDS = new Set([
   'status', 'tags', 'datum', 'erstellt', 'aktualisiert', 'projekt',
   'kunde', 'quelle', 'verknüpft', 'quellen', 'aliases',
 ])
-
-// Load tag alias map (cached)
-let TAG_ALIASES: Record<string, string> | null = null
-function loadTagAliases(vaultPath?: string): Record<string, string> {
-  if (TAG_ALIASES) return TAG_ALIASES
-  const pathsToTry = [
-    process.env.TAG_ALIASES_PATH,
-    join(PROJECT_ROOT, 'tag-aliases.json'),
-  ].filter(Boolean) as string[]
-
-  for (const p of pathsToTry) {
-    try {
-      const raw = readFileSync(p, 'utf-8')
-      const data = JSON.parse(raw)
-      const map: Record<string, string> = {}
-      for (const [k, v] of Object.entries(data)) {
-        if (k.startsWith('_') || typeof v !== 'string') continue
-        map[k.toLowerCase()] = v.toLowerCase()
-      }
-      TAG_ALIASES = map
-      return map
-    } catch {}
-  }
-  TAG_ALIASES = {}
-  return TAG_ALIASES
-}
 
 // Normalize a tag: lowercase, trim, replace spaces with hyphens, apply aliases
 function normalizeTag(tag: string): string {

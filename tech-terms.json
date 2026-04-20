@@ -1,0 +1,37 @@
+{
+  "_comment": "Auto-Tag-Vokabular: wenn einer dieser Begriffe (case-insensitive) im Capture-Content erscheint, wird er als Tag vorgeschlagen. Neue Begriffe in 'terms' ergänzen.",
+
+  "terms": [
+    "kerberos",
+    "docker",
+    "proxmox",
+    "ceph",
+    "linuxmuster",
+    "linbo",
+    "opnsense",
+    "firewall",
+    "vlan",
+    "rsync",
+    "gpo",
+    "ldap",
+    "samba",
+    "apache",
+    "nginx",
+    "ssh",
+    "dns",
+    "dhcp",
+    "radius",
+    "mdm",
+    "ubuntu",
+    "debian",
+    "windows",
+    "esxi",
+    "vmware",
+    "edulution",
+    "git",
+    "python",
+    "bash",
+    "powershell",
+    "active directory"
+  ]
+}
