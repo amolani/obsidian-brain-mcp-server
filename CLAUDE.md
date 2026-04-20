@@ -22,7 +22,7 @@ Acceptance gate: `npm test` passes + server boots cleanly + config is single-sou
 |------|-------------|--------|------------|
 | 1.1 | fix-runtime | ✅ done | `npm test` green (78/78); `VAULT_PATH=... node server.ts` boots; versions synced at 0.2.0 |
 | 1.2 | unify-config | ✅ done | `config.ts` exposes `loadClients/loadCategories/loadTagAliases/loadTechTerms` + `reloadConfig()`; `vault.ts` drops `KNOWN_CLIENTS`/`TECH_TERMS`; hooks + `suggestions.ts` + `technik-categories.ts` route through `config.ts`; `tech-terms.json` added; tests 78/78 green |
-| 1.3 | extract-service-layer | ⏳ pending | analyzers live in `services/`; regression tests green |
+| 1.3 | extract-service-layer | ✅ done | analyzers live in `services/` (duplicate, broken-link, frontmatter, moc, review-queue); `vault.ts` is facade delegating to services; 78/78 tests green; vault.ts 2180 → 1307 lines |
 | 1.4 | action-log | ⏳ pending | `services/action-log.ts`; every vault write emits one append-only entry |
 
 ### Known drift (from prompt)
