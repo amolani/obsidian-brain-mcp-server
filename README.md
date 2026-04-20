@@ -24,6 +24,7 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 - `lint_frontmatter` / `fix_frontmatter` — normalize tags, add missing status, typo detection
 - `generate_mocs` — Maps of Content with live Dataview queries per folder
 - `organize_referenz` — auto-sort flat `Referenz/` into `Technik/{category}/{sub}/`
+- `list_suggestions` / `promote_suggestion` — review and accept auto-detected new clients & subcategories
 - `run_vault_maintenance` — orchestrates all analyzers and writes a review queue
 
 **Automated background workflow** (via Claude Code hooks)

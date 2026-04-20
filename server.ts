@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { Vault, type LintIssue } from './vault.ts'
+import { listSuggestions, promoteTechnikSuggestion, promoteClientSuggestion } from './suggestions.ts'
 
 // ── Config ─────────────────────────────────────────────────────────────
 
@@ -248,6 +249,32 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object' as const,
         properties: {},
+      },
+    },
+    {
+      name: 'list_suggestions',
+      description:
+        'List pending suggestions from the harvester logs: new client candidates and new Technik subcategory candidates. Shows frequency and context for each. Use this before promote_suggestion to decide which to accept.',
+      inputSchema: { type: 'object' as const, properties: {} },
+    },
+    {
+      name: 'promote_suggestion',
+      description:
+        'Promote a suggested client or Technik subcategory to the respective JSON config. Writes the entry and removes matching suggestions from the log. Subsequent captures will auto-categorize correctly.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          type: { type: 'string', enum: ['technik', 'client'], description: 'Which suggestion type to promote.' },
+          candidate: { type: 'string', description: 'The candidate keyword as it appeared in the log (e.g. "edulution-satellite").' },
+          parent: { type: 'string', description: 'For type=technik: parent category (e.g. "Docker", "Linuxmuster").' },
+          canonical: { type: 'string', description: 'Canonical name for the folder (defaults to TitleCase of candidate).' },
+          keywords: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Additional keywords/aliases to match (candidate itself is always included).',
+          },
+        },
+        required: ['type', 'candidate'],
       },
     },
     {
@@ -601,6 +628,65 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
               skippedText,
             ].join('\n'),
           }],
+        }
+      }
+
+      case 'list_suggestions': {
+        const all = listSuggestions()
+        if (all.technik.length === 0 && all.clients.length === 0) {
+          return { content: [{ type: 'text', text: 'Keine Vorschläge. Der Harvester hat noch keine Kandidaten geloggt.' }] }
+        }
+
+        const sections: string[] = ['# Pending Suggestions']
+        if (all.clients.length > 0) {
+          const lines = all.clients.map(s =>
+            `- **${s.candidate}** (${s.count}× gesehen, zuletzt ${s.lastSeen.slice(0, 10)})\n` +
+            `  Pfade: ${s.contexts.slice(0, 3).join(', ')}`,
+          ).join('\n\n')
+          sections.push(`\n## Kunden (${all.clients.length})\n\n${lines}`)
+        }
+        if (all.technik.length > 0) {
+          const lines = all.technik.map(s =>
+            `- **${s.candidate}** unter _${s.parent}_ (${s.count}× gesehen, zuletzt ${s.lastSeen.slice(0, 10)})\n` +
+            `  Kontext: ${s.contexts.slice(0, 3).join(' | ')}`,
+          ).join('\n\n')
+          sections.push(`\n## Technik-Unterkategorien (${all.technik.length})\n\n${lines}`)
+        }
+        sections.push(`\n---\n**Übernehmen mit:** \`promote_suggestion\` — type, candidate (+ parent für technik).`)
+
+        return { content: [{ type: 'text', text: sections.join('\n') }] }
+      }
+
+      case 'promote_suggestion': {
+        const type = args.type as string
+        const candidate = args.candidate as string
+        const canonical = args.canonical as string | undefined
+        const keywords = (args.keywords as string[] | undefined) ?? []
+
+        if (type === 'technik') {
+          const parent = args.parent as string
+          if (!parent) {
+            return { content: [{ type: 'text', text: 'Fehler: parent muss angegeben sein für type=technik' }], isError: true }
+          }
+          const result = promoteTechnikSuggestion(parent, candidate, canonical, keywords)
+          const existedNote = result.existed ? ' (Keywords ergänzt)' : ' (neu angelegt)'
+          return {
+            content: [{
+              type: 'text',
+              text: `Technik-Unterkategorie **${result.category}/${result.subcategory}** übernommen${existedNote}.\n\nKonfiguration: ${result.path}\n\nTipp: Lauf \`organize_referenz\` um bestehende Notes jetzt sofort in die neue Unterkategorie zu sortieren.`,
+            }],
+          }
+        } else if (type === 'client') {
+          const result = promoteClientSuggestion(candidate, canonical, keywords)
+          const existedNote = result.existed ? ' (Keywords ergänzt)' : ' (neu angelegt)'
+          return {
+            content: [{
+              type: 'text',
+              text: `Kunde **${result.name}** übernommen${existedNote}.\n\nKonfiguration: ${result.path}\n\nAb der nächsten Session werden Captures mit diesem Namen nach \`Kunden/${result.name}/\` einsortiert.`,
+            }],
+          }
+        } else {
+          return { content: [{ type: 'text', text: `Unbekannter type: ${type}. Erlaubt: technik, client` }], isError: true }
         }
       }
 
