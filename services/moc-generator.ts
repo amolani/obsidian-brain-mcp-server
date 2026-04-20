@@ -1,6 +1,7 @@
 import { writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { Vault } from '../vault.ts'
+import { appendActionLog } from './action-log.ts'
 
 export interface MocResult {
   path: string
@@ -141,6 +142,20 @@ export function generateMocs(vault: Vault, dryRun: boolean = false, minNotes: nu
     results.push({ path: mocPath, noteCount: notes.length, subfolders: subdirs, action })
   }
 
-  if (!dryRun) vault.buildLinkIndex()
+  if (!dryRun) {
+    vault.buildLinkIndex()
+    const written = results.filter(r => r.action === 'created' || r.action === 'updated')
+    if (written.length > 0) {
+      const created = written.filter(r => r.action === 'created').length
+      const updated = written.filter(r => r.action === 'updated').length
+      appendActionLog(vault.vaultPath, {
+        tool: 'generate_mocs',
+        mode: 'apply',
+        targets: written.map(r => r.path),
+        summary: `${created} MOC(s) erstellt, ${updated} aktualisiert`,
+        meta: { results: written },
+      })
+    }
+  }
   return results
 }

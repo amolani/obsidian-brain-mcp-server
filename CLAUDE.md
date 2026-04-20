@@ -12,9 +12,9 @@ Mode: orchestrator, local-only, phased refactor.
 - One conventional commit per feature.
 - Prefer incremental refactors over rewrites.
 
-## Current Phase: 1 — Stabilize
+## Current Phase: 1 — Stabilize ✅ **complete**
 
-Acceptance gate: `npm test` passes + server boots cleanly + config is single-sourced + write ops are observable.
+Acceptance gate: `npm test` passes + server boots cleanly + config is single-sourced + write ops are observable — **all four satisfied** (83/83 tests green, server boot clean, config via `config.ts`, writes logged to `.action-log.jsonl`).
 
 ### Task Status
 
@@ -23,7 +23,7 @@ Acceptance gate: `npm test` passes + server boots cleanly + config is single-sou
 | 1.1 | fix-runtime | ✅ done | `npm test` green (78/78); `VAULT_PATH=... node server.ts` boots; versions synced at 0.2.0 |
 | 1.2 | unify-config | ✅ done | `config.ts` exposes `loadClients/loadCategories/loadTagAliases/loadTechTerms` + `reloadConfig()`; `vault.ts` drops `KNOWN_CLIENTS`/`TECH_TERMS`; hooks + `suggestions.ts` + `technik-categories.ts` route through `config.ts`; `tech-terms.json` added; tests 78/78 green |
 | 1.3 | extract-service-layer | ✅ done | analyzers live in `services/` (duplicate, broken-link, frontmatter, moc, review-queue); `vault.ts` is facade delegating to services; 78/78 tests green; vault.ts 2180 → 1307 lines |
-| 1.4 | action-log | ⏳ pending | `services/action-log.ts`; every vault write emits one append-only entry |
+| 1.4 | action-log | ✅ done | `services/action-log.ts` writes JSONL to `{vault}/.action-log.jsonl`; every vault-write (create_note, capture, daily_note, generate_runbook, organize_referenz, fix_broken_links, fix_frontmatter, generate_mocs, run_maintenance, auto_capture, create_daily_note, auto_organize) emits one entry; dry-runs do not log; tests 83/83 green |
 
 ### Known drift (from prompt)
 

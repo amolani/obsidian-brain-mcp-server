@@ -12,6 +12,7 @@ import { writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, unli
 import { join, basename } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
+import { appendActionLog } from '../services/action-log.ts'
 
 if (!process.env.VAULT_PATH) {
   process.stderr.write('knowledge-harvester: VAULT_PATH environment variable required\n')
@@ -531,11 +532,31 @@ process.stdin.on('end', () => {
     markSessionCaptured(sessionId)
     log(`Captured: ${folder}/${safeTitle}.md`)
 
+    const relativeTarget = `${folder}/${safeTitle}.md`
+    appendActionLog(VAULT_PATH, {
+      tool: 'auto_capture',
+      mode: 'apply',
+      targets: [relativeTarget],
+      summary: `Session-Capture: "${knowledge.title}" (${knowledge.procedures.length} Schritte, ${knowledge.errorFixes.length} Workarounds)`,
+      meta: {
+        sessionId,
+        tags: knowledge.tags,
+        client: knowledge.client,
+      },
+    })
+
     // Append to daily note
     const datum = new Date().toISOString().split('T')[0]
     const dailyPath = join(VAULT_PATH, 'Daily', `${datum}.md`)
     if (existsSync(dailyPath)) {
       appendFileSync(dailyPath, `\n- Auto-Capture: [[${folder}/${safeTitle}|${knowledge.title}]]\n`)
+      appendActionLog(VAULT_PATH, {
+        tool: 'daily_note',
+        mode: 'apply',
+        targets: [`Daily/${datum}.md`],
+        summary: `Auto-Capture-Link in Daily Note eingetragen`,
+        meta: { link: relativeTarget },
+      })
     }
 
   } catch (err) {

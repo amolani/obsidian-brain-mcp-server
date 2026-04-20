@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { tokenize, jaccard } from './text-utils.ts'
+import { appendActionLog } from './action-log.ts'
 
 export interface BrokenLink {
   source: string       // note that has the broken link
@@ -147,6 +148,17 @@ export function fixBrokenLinks(vault: Vault, dryRun: boolean = true): {
       if (e) vault.indexNote(e.path, statSync(e.path).mtimeMs)
     }
     vault.buildLinkIndex()
+    const targets = [...new Set(fixed.map(f => f.source))]
+    const first = fixed[0]
+    appendActionLog(vault.vaultPath, {
+      tool: 'fix_broken_links',
+      mode: 'apply',
+      targets,
+      summary: `${fixed.length} kaputte Link(s) in ${targets.length} Datei(en) ersetzt`,
+      before: first.oldLink,
+      after: first.newLink,
+      meta: { fixed },
+    })
   }
 
   return { fixed, skipped }

@@ -5,6 +5,7 @@ import { findDuplicates, type DuplicateMatch } from './duplicate-analyzer.ts'
 import { findBrokenLinks, type BrokenLink } from './broken-link-analyzer.ts'
 import { lintFrontmatter, type LintIssue } from './frontmatter-linter.ts'
 import { generateMocs, type MocResult } from './moc-generator.ts'
+import { appendActionLog } from './action-log.ts'
 
 export interface MaintenanceReport {
   datum: string
@@ -66,6 +67,19 @@ export function runMaintenance(vault: Vault): MaintenanceReport {
   const stat = statSync(fullPath)
   vault.indexNote(fullPath, stat.mtimeMs)
   vault.buildLinkIndex()
+
+  appendActionLog(vault.vaultPath, {
+    tool: 'run_maintenance',
+    mode: 'apply',
+    targets: [report.reportPath],
+    summary: `Maintenance-Report erstellt (${report.duplicates.total} Duplikate, ${report.brokenLinks.total} kaputte Links, ${report.lintIssues.total} Lint-Issues)`,
+    meta: {
+      duplicates: report.duplicates,
+      brokenLinks: report.brokenLinks,
+      lintIssues: report.lintIssues,
+      mocs: report.mocs,
+    },
+  })
 
   return report
 }

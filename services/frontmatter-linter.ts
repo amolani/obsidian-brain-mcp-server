@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, statSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { loadTagAliases } from '../config.ts'
+import { appendActionLog } from './action-log.ts'
 
 export interface LintIssue {
   path: string
@@ -221,6 +222,16 @@ export function fixFrontmatter(vault: Vault, dryRun: boolean = true): {
     fixed.push({ path: relPath, changes })
   }
 
-  if (!dryRun && fixed.length > 0) vault.buildLinkIndex()
+  if (!dryRun && fixed.length > 0) {
+    vault.buildLinkIndex()
+    const totalChanges = fixed.reduce((n, f) => n + f.changes.length, 0)
+    appendActionLog(vault.vaultPath, {
+      tool: 'fix_frontmatter',
+      mode: 'apply',
+      targets: fixed.map(f => f.path),
+      summary: `${totalChanges} Frontmatter-Änderung(en) in ${fixed.length} Datei(en)`,
+      meta: { fixed },
+    })
+  }
   return { fixed, skipped }
 }

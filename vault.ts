@@ -8,6 +8,7 @@ import { findBrokenLinks as findBrokenLinksService, fixBrokenLinks as fixBrokenL
 import { lintFrontmatter as lintFrontmatterService, fixFrontmatter as fixFrontmatterService, type LintIssue } from './services/frontmatter-linter.ts'
 import { generateMocs as generateMocsService, type MocResult } from './services/moc-generator.ts'
 import { runMaintenance as runMaintenanceService, type MaintenanceReport } from './services/review-queue-builder.ts'
+import { appendActionLog } from './services/action-log.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
 export type { BrokenLink, LintIssue, MocResult, MaintenanceReport, DuplicateMatch }
@@ -652,7 +653,16 @@ export class Vault {
     const stat = statSync(fullPath)
     this.indexNote(fullPath, stat.mtimeMs)
 
-    return { path: relative(this.vaultPath, fullPath) }
+    const relativePath = relative(this.vaultPath, fullPath)
+    appendActionLog(this.vaultPath, {
+      tool: 'create_note',
+      mode: 'apply',
+      targets: [relativePath],
+      summary: `Neue Notiz aus Template "${template}"`,
+      meta: { template, title },
+    })
+
+    return { path: relativePath }
   }
 
   // ── Public API: Capture ────────────────────────────────────────────
@@ -747,10 +757,20 @@ ${body}
     const stat = statSync(fullPath)
     this.indexNote(fullPath, stat.mtimeMs)
 
+    const relativePath = relative(this.vaultPath, fullPath)
+    const finalTags = autoTags.length > 0 ? autoTags : ['inbox']
+    appendActionLog(this.vaultPath, {
+      tool: 'capture',
+      mode: 'apply',
+      targets: [relativePath],
+      summary: `Capture nach ${folder}`,
+      meta: { title, folder, detectedClient, tags: finalTags, category: category ?? null },
+    })
+
     return {
-      path: relative(this.vaultPath, fullPath),
+      path: relativePath,
       title,
-      tags: autoTags.length > 0 ? autoTags : ['inbox'],
+      tags: finalTags,
       folder,
     }
   }
@@ -996,6 +1016,12 @@ ${body}
         this.removeFromIndex(relativePath)
         this.indexNote(fullPath, stat.mtimeMs)
         this.buildLinkIndex()
+        appendActionLog(this.vaultPath, {
+          tool: 'daily_note',
+          mode: 'apply',
+          targets: [relativePath],
+          summary: `Eintrag an Daily Note angehängt (${append.length} Zeichen)`,
+        })
         return { path: relativePath, created: false, content: updated }
       }
       return { path: relativePath, created: false, content: existing }
@@ -1176,8 +1202,17 @@ ${sourceLinks}
     this.indexNote(fullPath, stat.mtimeMs)
     this.buildLinkIndex()
 
+    const relativePath = relative(this.vaultPath, fullPath)
+    appendActionLog(this.vaultPath, {
+      tool: 'generate_runbook',
+      mode: 'apply',
+      targets: [relativePath],
+      summary: `Runbook aus ${sourceNotes.length} Quelle(n) erzeugt (${allSteps.length} Schritte, ${allFixes.length} Workarounds)`,
+      meta: { topic, sources: sourceNotes.map(s => s.path) },
+    })
+
     return {
-      path: relative(this.vaultPath, fullPath),
+      path: relativePath,
       sourceCount: sourceNotes.length,
       stepCount: allSteps.length,
       fixCount: allFixes.length,
@@ -1262,6 +1297,13 @@ ${sourceLinks}
 
     if (!dryRun && moved.length > 0) {
       this.buildLinkIndex() // Rebuild backlinks with new paths
+      appendActionLog(this.vaultPath, {
+        tool: 'organize_referenz',
+        mode: 'apply',
+        targets: moved.map(m => m.to),
+        summary: `${moved.length} Notiz(en) in Technik/ einsortiert`,
+        meta: { moves: moved.map(m => ({ from: m.from, to: m.to, category: m.category })) },
+      })
     }
 
     return { moved, skipped, dryRun }

@@ -10,6 +10,7 @@ import { join, basename } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { classifyNote } from '../technik-categories.ts'
 import { loadClients } from '../config.ts'
+import { appendActionLog } from '../services/action-log.ts'
 
 if (!process.env.VAULT_PATH) {
   console.log(JSON.stringify({ result: 'continue' }))
@@ -29,6 +30,12 @@ function ensureDailyNote(): string | null {
   if (!existsSync(dailyPath)) {
     mkdirSync(dailyDir, { recursive: true })
     writeFileSync(dailyPath, `---\ntags:\n  - daily\ndatum: ${datum}\n---\n\n# ${datum}\n\n## Aufgaben\n\n- [ ]\n\n## Notizen\n\n## Gelernt\n`, 'utf-8')
+    appendActionLog(VAULT_PATH, {
+      tool: 'create_daily_note',
+      mode: 'apply',
+      targets: [`Daily/${datum}.md`],
+      summary: `Daily Note ${datum} erstellt`,
+    })
     return `Daily Note ${datum} erstellt.`
   }
   return null
@@ -40,6 +47,7 @@ function autoOrganize(): number {
   if (!existsSync(referenzDir)) return 0
 
   let moved = 0
+  const moves: Array<{ from: string; to: string; category: string }> = []
   let files: string[] = []
   try { files = readdirSync(referenzDir) } catch { return 0 }
 
@@ -81,7 +89,24 @@ function autoOrganize(): number {
       mkdirSync(targetDir, { recursive: true })
       renameSync(fullPath, targetPath)
       moved++
+      moves.push({
+        from: `Referenz/${file}`,
+        to: `${categoryPath}/${file}`,
+        category: classification.subcategory
+          ? `${classification.category}/${classification.subcategory}`
+          : classification.category as string,
+      })
     } catch {}
+  }
+
+  if (moves.length > 0) {
+    appendActionLog(VAULT_PATH, {
+      tool: 'auto_organize',
+      mode: 'apply',
+      targets: moves.map(m => m.to),
+      summary: `${moves.length} Notiz(en) aus Referenz/ in Technik/ einsortiert`,
+      meta: { moves },
+    })
   }
 
   return moved
