@@ -23,7 +23,7 @@ await vault.init()
 // ── MCP Server ─────────────────────────────────────────────────────────
 
 const mcp = new Server(
-  { name: 'obsidian-brain', version: '0.1.0' },
+  { name: 'obsidian-brain', version: '0.2.0' },
   {
     capabilities: { tools: {} },
     instructions: [
