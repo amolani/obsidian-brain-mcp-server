@@ -22,6 +22,7 @@ function runHarvester(vaultPath: string, stateDir: string, input: object) {
     env: {
       ...process.env,
       VAULT_PATH: vaultPath,
+      HARVESTER_INPUT_JSON: JSON.stringify(input),
       HARVESTER_LOG: join(stateDir, 'log.txt'),
       HARVESTER_STATE_DIR: stateDir,
       HARVESTER_SUGGESTIONS_LOG: join(stateDir, 'suggestions.log'),

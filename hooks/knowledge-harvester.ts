@@ -466,7 +466,7 @@ process.stdin.on('end', () => {
   clearTimeout(timeout)
 
   try {
-    const data = JSON.parse(input)
+    const data = JSON.parse(input || process.env.HARVESTER_INPUT_JSON || '{}')
     const sessionId = data.session_id
     const transcriptPath = data.transcript_path
     const cwd = data.cwd || ''
@@ -564,3 +564,4 @@ process.stdin.on('end', () => {
   }
   process.exit(0)
 })
+process.stdin.resume()

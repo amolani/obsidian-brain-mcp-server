@@ -6,23 +6,34 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 
 **Read & Navigate**
 - `vault_search` — structured search (full-text + tags + folder + status)
+- `semantic_search` — local semantic-style search with weighted note vectors, snippets, config aliases/categories, and filters
+- `semantic_index_status` / `rebuild_semantic_index` — inspect and rebuild the local semantic vector cache
+- `build_context_pack` — compact working context for a query with semantic hits, linked notes, TODOs, citations, and next actions
 - `get_note_context` — full note context with backlinks & related notes
 - `vault_overview` — stats, tags, recent changes, orphans, stale notes
 - `todo_list` — aggregate open TODOs across the vault
 - `suggest_links` — find unlinked mentions between notes
+- `suggest_links_v2` — confidence-scored link suggestions with snippets, aliases, tag/folder proximity, and per-note caps
+- `apply_link_suggestions` — dry-run-first executor for high-confidence unlinked mentions
 - `weekly_review` — summary of the past 7 days
 - `daily_note` — create/append today's daily note
 
 **Create & Capture**
 - `create_note` — structured notes from templates (kunde, referenz, troubleshooting, learning, daily)
-- `capture` — quick capture with auto-categorization (client detection, tech term tagging)
+- `capture` — compatibility wrapper for quick capture
+- `capture_v2` — smart capture with unified client/Technik classification, tag normalization, dry-run previews, and `fast`/`strict`/`review` modes
 - `generate_runbook` — clean step-by-step guide from auto-captured sessions
+- `build_customer_context` / `build_project_dashboard` — generate customer dashboards with notes, TODOs, recent changes, runbooks, captures, tags, and issues
 
 **Maintenance (Analyzer → Recommender → Executor)**
 - `find_duplicates` — fuzzy match on title, content, tags (with confidence scores)
+- `merge_duplicates` — dry-run-first duplicate merge workflow with tag/frontmatter union, source references, archive move, and action logging
+- `score_note_quality` / `list_low_quality_notes` — read-only quality scoring for title, metadata, tags, links, TODOs, structure, content density, and freshness
+- `suggest_lifecycle_updates` / `apply_lifecycle_updates` — dry-run-first lifecycle automation for status transitions such as missing status → `aktiv` or stale notes → `archiviert`
 - `find_broken_links` / `fix_broken_links` — detect and repair renamed-file links
 - `lint_frontmatter` / `fix_frontmatter` — normalize tags, add missing status, typo detection
 - `generate_mocs` — Maps of Content with live Dataview queries per folder
+- `run_safe_maintenance` — dry-run-first batch for safe executors: frontmatter, broken links, link suggestions, lifecycle, MOCs, semantic index
 - `organize_referenz` — auto-sort flat `Referenz/` into `Technik/{category}/{sub}/`
 - `list_suggestions` / `promote_suggestion` — review and accept auto-detected new clients & subcategories
 - `run_vault_maintenance` — orchestrates all analyzers and writes a review queue
@@ -44,8 +55,9 @@ Classification is rule-based (not LLM-based), using:
 - `clients.json` — known clients and their keyword aliases
 - `technik-categories.json` — tech categories with subcategories (Linuxmuster/Linbo, Docker/Traefik, etc.)
 - `tag-aliases.json` — tag normalization map (lmn → linuxmuster, pve → proxmox, …)
+- `tech-terms.json` — auto-tag vocabulary for captures
 
-All three files are user-editable JSON.
+All four files are user-editable JSON.
 
 ## Requirements
 
@@ -215,6 +227,18 @@ Once registered, just work normally in Claude Code. Ask things like:
 
 The Knowledge Harvester runs automatically after each Claude response. If the session had substantial work (≥ 3 bash commands, ≥ 2 procedures with outcomes), it writes a capture note to the appropriate folder.
 
+## Recommended Workflow
+
+Use the vault as a dry-run-first operating loop:
+
+1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note, detects the client from your current folder when possible, and runs the same Referenz→Technik organization logic as the MCP tool.
+2. Before creating new knowledge, search first with `vault_search` or `semantic_search`. Use `build_context_pack` when you need a compact working set for a topic.
+3. Capture rough knowledge with `capture_v2` in `review` or `dry_run` mode for important notes, then apply once the suggested folder/title/tags look right. Use old `capture` only as the quick compatibility path.
+4. During work, use `daily_note` for lightweight chronological notes and TODOs. Use `todo_list` or `weekly_review` to pull open work back into focus.
+5. After substantial terminal work, let the Stop hook harvest procedures automatically. For reusable operational docs, run `generate_runbook` against the topic/client after captures exist.
+6. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
+7. Periodically run `organize_referenz` dry-run, then apply. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
+
 ## Folder conventions
 
 The server assumes (but doesn't require) this structure:
@@ -271,7 +295,7 @@ obsidian-brain-mcp-server/
 
 - **Analyzer layer**: `find_duplicates`, `find_broken_links`, `lint_frontmatter`, `generate_mocs` (dry-run), `getOverview` — pure read, no side effects.
 - **Recommender layer**: `run_vault_maintenance` orchestrates analyzers and writes a review queue to `Maintenance/{date}-review.md`.
-- **Executor layer**: `fix_broken_links`, `fix_frontmatter`, `organize_referenz`, `generate_mocs` — default to `dry_run=true` for safety.
+- **Executor layer**: `fix_broken_links`, `fix_frontmatter`, `organize_referenz`, `generate_mocs`, `apply_lifecycle_updates`, `apply_link_suggestions`, `run_safe_maintenance` — default to `dry_run=true` for safety.
 
 All mutations respect the `quelle: moc-generator` / `quelle: knowledge-harvester` frontmatter marker so user-authored notes are never overwritten.
 

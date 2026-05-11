@@ -15,11 +15,11 @@ export interface LintIssue {
 const VALID_STATUSES = new Set(['aktiv', 'planung', 'archiviert', 'entwurf', 'moc'])
 const KNOWN_FIELDS = new Set([
   'status', 'tags', 'datum', 'erstellt', 'aktualisiert', 'projekt',
-  'kunde', 'quelle', 'verknüpft', 'quellen', 'aliases',
+  'kunde', 'quelle', 'verknüpft', 'quellen', 'aliases', 'lifecycle_reviewed',
 ])
 
 // Normalize a tag: lowercase, trim, replace spaces with hyphens, apply aliases
-function normalizeTag(tag: string): string {
+export function normalizeTag(tag: string): string {
   const aliases = loadTagAliases()
   const cleaned = tag.trim().toLowerCase().replace(/\s+/g, '-')
   return aliases[cleaned] ?? cleaned

@@ -59,6 +59,18 @@ describe('ActionLog: vault writers emit entries', () => {
 
   before(async () => {
     vaultPath = createTempVault()
+    writeNote(vaultPath, {
+      path: 'Dup/A.md',
+      frontmatter: { tags: ['docker', 'setup', 'compose'] },
+      title: 'Docker Setup',
+      body: 'Docker compose setup with nginx reverse proxy.',
+    })
+    writeNote(vaultPath, {
+      path: 'Dup/B.md',
+      frontmatter: { tags: ['docker', 'setup', 'compose'] },
+      title: 'Docker Setup Guide',
+      body: 'Docker compose setup with nginx reverse proxy for production.',
+    })
     vault = new Vault(vaultPath)
     await vault.init()
   })
@@ -76,6 +88,91 @@ describe('ActionLog: vault writers emit entries', () => {
     assert.equal(entry.mode, 'apply')
     assert.equal(entry.targets.length, 1)
     assert.match(entry.targets[0], /^Kunden\/Merian\//)
+  })
+
+  test('captureV2 emits a capture_v2 entry on apply', () => {
+    const before = readLogLines(vaultPath).length
+    vault.captureV2('Docker compose setup')
+    const lines = readLogLines(vaultPath)
+    assert.equal(lines.length, before + 1)
+    const entry = lines[lines.length - 1]
+    assert.equal(entry.tool, 'capture_v2')
+    assert.equal(entry.mode, 'apply')
+    assert.match(entry.targets[0], /^Technik\/Docker\/Compose\//)
+  })
+
+  test('captureV2 dry-run emits no entry', () => {
+    const before = readLogLines(vaultPath).length
+    vault.captureV2('OPNsense VLAN dry run', { dryRun: true })
+    assert.equal(readLogLines(vaultPath).length, before)
+  })
+
+  test('buildCustomerDashboard emits an entry on apply only', () => {
+    const before = readLogLines(vaultPath).length
+    vault.buildCustomerDashboard('Merian', { dryRun: true })
+    assert.equal(readLogLines(vaultPath).length, before)
+
+    vault.buildCustomerDashboard('Merian', { dryRun: false })
+    const lines = readLogLines(vaultPath)
+    assert.equal(lines.length, before + 1)
+    const entry = lines[lines.length - 1]
+    assert.equal(entry.tool, 'build_customer_context')
+    assert.equal(entry.targets[0], 'Kunden/Merian/_dashboard.md')
+  })
+
+  test('mergeDuplicates emits a merge_duplicates entry on apply', () => {
+    const before = readLogLines(vaultPath).length
+    const result = vault.mergeDuplicates({ noteA: 'Dup/A.md', noteB: 'Dup/B.md', dryRun: false })
+    assert.equal(result.applied.length, 1)
+    const lines = readLogLines(vaultPath)
+    assert.equal(lines.length, before + 1)
+    const entry = lines[lines.length - 1]
+    assert.equal(entry.tool, 'merge_duplicates')
+    assert.equal(entry.targets.length, 2)
+    assert.match(entry.targets[1], /^Archiv\/Duplikate\//)
+  })
+
+  test('rebuildSemanticIndex emits an entry on apply only', () => {
+    const before = readLogLines(vaultPath).length
+    vault.rebuildSemanticIndex({ dryRun: true })
+    assert.equal(readLogLines(vaultPath).length, before)
+
+    vault.rebuildSemanticIndex({ dryRun: false })
+    const lines = readLogLines(vaultPath)
+    assert.equal(lines.length, before + 1)
+    const entry = lines[lines.length - 1]
+    assert.equal(entry.tool, 'rebuild_semantic_index')
+    assert.equal(entry.targets[0], '.semantic-index.json')
+  })
+
+  test('applyLinkSuggestions emits an entry on apply only', () => {
+    writeNote(vaultPath, {
+      path: 'Links/Target.md',
+      frontmatter: { status: 'aktiv', tags: ['links'], aliases: ['magic target'] },
+      title: 'Magic Target',
+      body: 'Target note.',
+    })
+    writeNote(vaultPath, {
+      path: 'Links/Source.md',
+      frontmatter: { status: 'aktiv', tags: ['links'] },
+      title: 'Source',
+      body: 'This mentions magic target plainly.',
+    })
+    vault.indexNote(join(vaultPath, 'Links/Target.md'), 1)
+    vault.indexNote(join(vaultPath, 'Links/Source.md'), 1)
+    vault.buildLinkIndex()
+
+    const before = readLogLines(vaultPath).length
+    vault.applyLinkSuggestions({ dryRun: true, sources: ['Links/Source.md'], minConfidence: 0.85 })
+    assert.equal(readLogLines(vaultPath).length, before)
+
+    const result = vault.applyLinkSuggestions({ dryRun: false, sources: ['Links/Source.md'], minConfidence: 0.85 })
+    assert.equal(result.linked.length, 1)
+    const lines = readLogLines(vaultPath)
+    assert.equal(lines.length, before + 1)
+    const entry = lines[lines.length - 1]
+    assert.equal(entry.tool, 'apply_link_suggestions')
+    assert.equal(entry.targets[0], 'Links/Source.md')
   })
 
   test('createNote emits a create_note entry', () => {

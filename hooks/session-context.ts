@@ -5,12 +5,11 @@
 // relevant knowledge from the Obsidian vault.
 // Also ensures the daily note exists.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync } from 'node:fs'
-import { join, basename } from 'node:path'
-import { parse as parseYaml } from 'yaml'
-import { classifyNote } from '../technik-categories.ts'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import { Vault } from '../vault.ts'
 
 if (!process.env.VAULT_PATH) {
   console.log(JSON.stringify({ result: 'continue' }))
@@ -41,75 +40,17 @@ function ensureDailyNote(): string | null {
   return null
 }
 
-// Auto-organize: scan Referenz/ for unsorted notes, move into Technik/{Kategorie}/
-function autoOrganize(): number {
-  const referenzDir = join(VAULT_PATH, 'Referenz')
-  if (!existsSync(referenzDir)) return 0
-
-  let moved = 0
-  const moves: Array<{ from: string; to: string; category: string }> = []
-  let files: string[] = []
-  try { files = readdirSync(referenzDir) } catch { return 0 }
-
-  for (const file of files) {
-    if (!file.endsWith('.md')) continue
-    const fullPath = join(referenzDir, file)
-
-    let stat
-    try { stat = statSync(fullPath) } catch { continue }
-    if (!stat.isFile()) continue
-
-    // Parse frontmatter for tags
-    let content = ''
-    try { content = readFileSync(fullPath, 'utf-8') } catch { continue }
-
-    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-    let tags: string[] = []
-    if (fmMatch) {
-      try {
-        const fm = parseYaml(fmMatch[1]) ?? {}
-        if (Array.isArray(fm.tags)) tags = fm.tags.map((t: any) => String(t).toLowerCase())
-      } catch {}
-    }
-
-    const title = basename(file, '.md')
-    const classification = classifyNote(title, content, tags)
-    if (!classification.category) continue
-
-    const categoryPath = classification.subcategory
-      ? join('Technik', classification.category, classification.subcategory)
-      : join('Technik', classification.category)
-    const targetDir = join(VAULT_PATH, categoryPath)
-    const targetPath = join(targetDir, file)
-
-    // Skip if target already exists
-    if (existsSync(targetPath)) continue
-
-    try {
-      mkdirSync(targetDir, { recursive: true })
-      renameSync(fullPath, targetPath)
-      moved++
-      moves.push({
-        from: `Referenz/${file}`,
-        to: `${categoryPath}/${file}`,
-        category: classification.subcategory
-          ? `${classification.category}/${classification.subcategory}`
-          : classification.category as string,
-      })
-    } catch {}
+// Auto-organize through the same Vault implementation used by the MCP tool.
+async function autoOrganize(): Promise<number> {
+  const vault = new Vault(VAULT_PATH)
+  try {
+    await vault.init()
+    return vault.organizeReferenz(false).moved.length
+  } catch {
+    return 0
+  } finally {
+    vault.shutdown()
   }
-
-  if (moves.length > 0) {
-    appendActionLog(VAULT_PATH, {
-      tool: 'auto_organize',
-      mode: 'apply',
-      targets: moves.map(m => m.to),
-      summary: `${moves.length} Notiz(en) aus Referenz/ in Technik/ einsortiert`,
-      meta: { moves },
-    })
-  }
-
-  return moved
 }
 
 // Find relevant notes for a client/project
@@ -151,7 +92,7 @@ const timeout = setTimeout(() => process.exit(0), 8000)
 
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk: string) => input += chunk)
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   clearTimeout(timeout)
 
   try {
@@ -162,7 +103,7 @@ process.stdin.on('end', () => {
     const dailyMsg = ensureDailyNote()
 
     // Auto-organize Referenz/ → Technik/{Kategorie}/
-    const organizedCount = autoOrganize()
+    const organizedCount = await autoOrganize()
     const organizeMsg = organizedCount > 0
       ? `${organizedCount} Notiz${organizedCount > 1 ? 'en' : ''} automatisch in Technik/ einsortiert.`
       : null

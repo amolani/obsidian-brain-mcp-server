@@ -6,6 +6,8 @@ import { findBrokenLinks, type BrokenLink } from './broken-link-analyzer.ts'
 import { lintFrontmatter, type LintIssue } from './frontmatter-linter.ts'
 import { generateMocs, type MocResult } from './moc-generator.ts'
 import { appendActionLog } from './action-log.ts'
+import { listLowQualityNotes, summarizeQuality, type NoteQualityScore, type QualitySummary } from './note-quality.ts'
+import { suggestLifecycleUpdates, type LifecycleSuggestion } from './lifecycle-manager.ts'
 
 export interface MaintenanceReport {
   datum: string
@@ -13,6 +15,8 @@ export interface MaintenanceReport {
   brokenLinks: { total: number; autoFixable: number }
   lintIssues: { total: number; error: number; warning: number; info: number; autoFixable: number }
   mocs: { existing: number; missing: number }
+  quality: QualitySummary
+  lifecycle: { total: number; high: number; medium: number; low: number; autoApplicable: number }
   staleNotes: number
   orphanNotes: number
   reportPath: string
@@ -27,6 +31,9 @@ export function runMaintenance(vault: Vault): MaintenanceReport {
   const lintIssues = lintFrontmatter(vault)
   const mocs = generateMocs(vault, true) // dry run
   const stats = vault.getOverview()
+  const quality = summarizeQuality(vault)
+  const lowQuality = listLowQualityNotes(vault, 49)
+  const lifecycle = suggestLifecycleUpdates(vault, { maxResults: 100 })
 
   const report: MaintenanceReport = {
     datum,
@@ -51,13 +58,21 @@ export function runMaintenance(vault: Vault): MaintenanceReport {
       existing: mocs.filter(m => m.action === 'updated' || m.action === 'skipped').length,
       missing: mocs.filter(m => m.action === 'created').length,
     },
+    quality,
+    lifecycle: {
+      total: lifecycle.length,
+      high: lifecycle.filter(s => s.confidence === 'high').length,
+      medium: lifecycle.filter(s => s.confidence === 'medium').length,
+      low: lifecycle.filter(s => s.confidence === 'low').length,
+      autoApplicable: lifecycle.filter(s => s.confidence === 'high' && s.blockedBy.length === 0 && s.currentStatus !== s.recommendedStatus).length,
+    },
     staleNotes: stats.staleNotes.length,
     orphanNotes: stats.orphanNotes.length,
     reportPath: `Maintenance/${datum}-review.md`,
   }
 
   // Write report as Obsidian note
-  const reportContent = formatReportMd(report, { duplicates, brokenLinks, lintIssues, mocs, stats })
+  const reportContent = formatReportMd(report, { duplicates, brokenLinks, lintIssues, mocs, stats, lowQuality, lifecycle })
   const fullDir = join(vault.vaultPath, 'Maintenance')
   const fullPath = join(fullDir, `${datum}-review.md`)
   mkdirSync(fullDir, { recursive: true })
@@ -78,6 +93,8 @@ export function runMaintenance(vault: Vault): MaintenanceReport {
       brokenLinks: report.brokenLinks,
       lintIssues: report.lintIssues,
       mocs: report.mocs,
+      quality: report.quality,
+      lifecycle: report.lifecycle,
     },
   })
 
@@ -90,6 +107,8 @@ export function formatReportMd(report: MaintenanceReport, details: {
   lintIssues: LintIssue[]
   mocs: MocResult[]
   stats: VaultStats
+  lowQuality: NoteQualityScore[]
+  lifecycle: LifecycleSuggestion[]
 }): string {
   const datum = report.datum
   const sections: string[] = []
@@ -117,6 +136,9 @@ quelle: vault-gardener
 | Kaputte Links | ${report.brokenLinks.total} | ${report.brokenLinks.autoFixable} |
 | Frontmatter-Issues | ${report.lintIssues.total} | ${report.lintIssues.autoFixable} |
 | Fehlende MOCs | ${report.mocs.missing} | alle |
+| Niedrige Qualität (<50) | ${details.lowQuality.length} | — |
+| Qualität Ø | ${report.quality.averageScore} | — |
+| Lifecycle-Vorschläge | ${report.lifecycle.total} | ${report.lifecycle.autoApplicable} |
 | Stale Notes (>180 Tage) | ${report.staleNotes} | — |
 | Verwaiste Notes | ${report.orphanNotes} | — |`)
 
@@ -140,6 +162,19 @@ quelle: vault-gardener
   if (details.stats.staleNotes.length > 0) {
     sections.push(`\n## 🟢 Stale Notes (${details.stats.staleNotes.length})\n\nNotizen mit \`status: aktiv\`, aber >180 Tage nicht bearbeitet.\n\n${details.stats.staleNotes.slice(0, 10).map(s =>
       `- \`${s.path}\` — ${s.daysAgo} Tage`,
+    ).join('\n')}`)
+  }
+
+  if (details.lowQuality.length > 0) {
+    sections.push(`\n## 🟡 Niedrige Notizqualität (${details.lowQuality.length})\n\n${details.lowQuality.slice(0, 10).map(q =>
+      `- \`${q.path}\` — Score ${q.score} (${q.grade})\n  ${q.issues.slice(0, 2).map(i => `${i.dimension}: ${i.message}`).join('; ')}`,
+    ).join('\n')}`)
+  }
+
+  const lifecycleHigh = details.lifecycle.filter(s => s.confidence === 'high')
+  if (lifecycleHigh.length > 0) {
+    sections.push(`\n## 🟡 Lifecycle-Vorschläge (${lifecycleHigh.length} high)\n\n${lifecycleHigh.slice(0, 10).map(s =>
+      `- \`${s.path}\`: ${s.currentStatus ?? '(kein status)'} → ${s.recommendedStatus}\n  ${s.reasons.join('; ')}`,
     ).join('\n')}`)
   }
 
@@ -167,7 +202,8 @@ quelle: vault-gardener
 2. \`fix_broken_links\` laufen lassen (auto-fix für ${report.brokenLinks.autoFixable} Links)
 3. \`fix_frontmatter\` laufen lassen (auto-fix für ${report.lintIssues.autoFixable} Issues)
 4. \`generate_mocs\` laufen lassen um fehlende MOCs anzulegen
-5. Stale Notes auf Status \`archiviert\` setzen oder aktualisieren`)
+5. Niedrige Qualitäts-Scores mit \`score_note_quality\` prüfen
+6. Lifecycle-Vorschläge mit \`suggest_lifecycle_updates\` prüfen und mit \`apply_lifecycle_updates\` als Dry-Run testen`)
 
   return sections.join('\n')
 }
