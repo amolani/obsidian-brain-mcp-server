@@ -211,6 +211,16 @@ describe('Vault: search', () => {
     assert.ok(pack.primary.length > 0)
   })
 
+  test('recall_context is manual read-only context recall', () => {
+    const before = vault.getOverview().totalNotes
+    const pack = vault.recallContext({ query: 'customer docker tls routing', maxNotes: 3 })
+
+    assert.equal(pack.query, 'customer docker tls routing')
+    assert.ok(pack.primary.length > 0)
+    assert.ok(pack.citations.includes('Technik/Docker/Traefik.md'))
+    assert.equal(vault.getOverview().totalNotes, before)
+  })
+
   test('semantic index reports drift and can be rebuilt', () => {
     const before = vault.semanticIndexStatus()
     assert.equal(before.exists, false)

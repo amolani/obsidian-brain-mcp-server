@@ -1,6 +1,24 @@
-import type { LintIssue } from '../vault.ts'
+import type { FrontmatterProfile, LintIssue } from '../vault.ts'
 import type { ToolHandlerRegistry } from './types.ts'
 import { confidence, strings } from './types.ts'
+
+const FRONTMATTER_PROFILES = new Set([
+  'Kunde',
+  'Referenz',
+  'Troubleshooting',
+  'Learning',
+  'Runbook',
+  'Daily',
+  'Maintenance-Report',
+  'Auto-Capture',
+  'MOC',
+])
+
+function frontmatterProfile(value: unknown): FrontmatterProfile | undefined {
+  return typeof value === 'string' && FRONTMATTER_PROFILES.has(value)
+    ? value as FrontmatterProfile
+    : undefined
+}
 
 export const maintenanceHandlers: ToolHandlerRegistry = {
   run_vault_maintenance(vault) {
@@ -222,8 +240,8 @@ export const maintenanceHandlers: ToolHandlerRegistry = {
     }
   },
 
-  lint_frontmatter(vault) {
-    const issues = vault.lintFrontmatter()
+  lint_frontmatter(vault, args) {
+    const issues = vault.lintFrontmatter({ profile: frontmatterProfile(args.profile) })
     if (issues.length === 0) {
       return { content: [{ type: 'text', text: 'Frontmatter ist sauber. ✓' }] }
     }
@@ -237,7 +255,7 @@ export const maintenanceHandlers: ToolHandlerRegistry = {
     const renderGroup = (label: string, icon: string, items: LintIssue[]) => {
       if (items.length === 0) return ''
       const lines = items.slice(0, 30).map(i =>
-        `- **${i.path}** [${i.field}]: ${i.issue}\n  → ${i.suggestion}${i.autoFixable ? ' *(auto-fixbar)*' : ''}`,
+        `- **${i.path}** (${i.profile ?? 'Profil?'}) [${i.field}]: ${i.issue}\n  → ${i.suggestion}${i.autoFixable ? ' *(auto-fixbar)*' : ''}`,
       )
       const extra = items.length > 30 ? `\n*...und ${items.length - 30} weitere*` : ''
       return `## ${icon} ${label} (${items.length})\n\n${lines.join('\n\n')}${extra}`
@@ -257,7 +275,7 @@ export const maintenanceHandlers: ToolHandlerRegistry = {
 
   fix_frontmatter(vault, args) {
     const dryRun = args.dry_run !== false
-    const result = vault.fixFrontmatter(dryRun)
+    const result = vault.fixFrontmatter({ dryRun, profile: frontmatterProfile(args.profile) })
 
     const fixedText = result.fixed.length > 0
       ? result.fixed.map(f => `- **${f.path}**\n  ${f.changes.join('\n  ')}`).join('\n\n')
@@ -357,6 +375,245 @@ export const maintenanceHandlers: ToolHandlerRegistry = {
           '',
           '## Übersprungen',
           skippedText,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  rename_note(vault, args) {
+    try {
+      const result = vault.renameNote({
+        path: args.path as string,
+        newTitle: typeof args.new_title === 'string' ? args.new_title : undefined,
+        targetFolder: typeof args.target_folder === 'string' ? args.target_folder : undefined,
+        dryRun: args.dry_run !== false,
+        updateTitle: args.update_title !== false,
+      })
+
+      const linkText = result.plan.changedLinks.length > 0
+        ? result.plan.changedLinks.map(change => `- \`${change.source}\`: ${change.replacements} Link(s)`).join('\n')
+        : '  (keine)'
+      const fmText = result.plan.changedFrontmatterRefs.length > 0
+        ? result.plan.changedFrontmatterRefs.map(change => `- \`${change.source}\`: ${change.replacements} Referenz(en)`).join('\n')
+        : '  (keine)'
+      const aliases = result.plan.aliasesAdded.length > 0
+        ? result.plan.aliasesAdded.map(alias => `\`${alias}\``).join(', ')
+        : '  (keine)'
+      const warnings = result.plan.warnings.length > 0
+        ? result.plan.warnings.map(w => `- ${w}`).join('\n')
+        : '  (keine)'
+
+      return {
+        content: [{
+          type: 'text',
+          text: [
+            result.dryRun ? '# Rename-Note Vorschau' : '# Rename-Note angewendet',
+            '',
+            `Dry-Run: ${result.dryRun}`,
+            `Quelle: \`${result.plan.source}\``,
+            `Ziel: \`${result.plan.target}\``,
+            `Titel: ${result.plan.oldTitle} → ${result.plan.newTitle}`,
+            '',
+            '## Wikilinks',
+            linkText,
+            '',
+            '## Frontmatter-Referenzen',
+            fmText,
+            '',
+            '## Neue Aliases',
+            aliases,
+            '',
+            '## Hinweise',
+            warnings,
+          ].join('\n'),
+        }],
+      }
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }],
+        isError: true,
+      }
+    }
+  },
+
+  triage_note(vault, args) {
+    const result = vault.triageNote({
+      path: args.path as string,
+      dryRun: args.dry_run !== false,
+      targetFolder: typeof args.target_folder === 'string' ? args.target_folder : undefined,
+      minConfidence: typeof args.min_confidence === 'number' ? args.min_confidence : undefined,
+      applyLowConfidence: args.apply_low_confidence === true,
+    })
+
+    const duplicates = result.duplicates.length > 0
+      ? result.duplicates.map(d => `- **${d.confidence} ${d.score}** \`${d.path}\`: ${d.reasons.join('; ')}`).join('\n')
+      : '  (keine)'
+    const links = result.linkSuggestions.length > 0
+      ? result.linkSuggestions.map(s => `- **${s.confidence}** \`${s.target}\` für "${s.mention}"`).join('\n')
+      : '  (keine)'
+    const changes = result.changes.length > 0
+      ? result.changes.map(change => `- ${change}`).join('\n')
+      : '  (keine)'
+
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Inbox-Triage Vorschau' : '# Inbox-Triage angewendet',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Entscheidung: ${result.decision}`,
+          `Quelle: \`${result.path}\``,
+          `Ziel: \`${result.targetPath}\``,
+          `Zielordner: \`${result.targetFolder}\``,
+          `Tags: ${result.tags.map(tag => `\`${tag}\``).join(', ')}`,
+          `Kunde: ${result.detectedClient ?? '(keiner)'}`,
+          `Klassifikation: ${result.classification.category ?? '(keine)'} / ${result.classification.subcategory ?? '-'} (${result.classification.confidence})`,
+          `Gründe: ${result.reasons.join('; ') || '(keine)'}`,
+          '',
+          '## Duplikate',
+          duplicates,
+          '',
+          '## Link-Vorschläge',
+          links,
+          '',
+          '## Änderungen',
+          changes,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  triage_inbox(vault, args) {
+    const result = vault.triageInbox({
+      folder: typeof args.folder === 'string' ? args.folder : undefined,
+      dryRun: args.dry_run !== false,
+      maxNotes: typeof args.max_notes === 'number' ? args.max_notes : undefined,
+      minConfidence: typeof args.min_confidence === 'number' ? args.min_confidence : undefined,
+      applyLowConfidence: args.apply_low_confidence === true,
+    })
+
+    const lines = result.results.length > 0
+      ? result.results.map(item =>
+        `- \`${item.path}\` → \`${item.targetPath}\` (${item.decision}, ${item.classification.category ?? 'unclassified'}:${item.classification.confidence})`,
+      ).join('\n')
+      : '  (keine Inbox-Notizen gefunden)'
+
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Inbox-Triage Batch Vorschau' : '# Inbox-Triage Batch angewendet',
+          '',
+          `Folder: \`${result.folder}\``,
+          `Dry-Run: ${result.dryRun}`,
+          `Total: ${result.total}`,
+          `Applied: ${result.applied}`,
+          `Review: ${result.reviewed}`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  accept_review_item(vault, args) {
+    const result = vault.acceptReviewItem({
+      itemId: args.item_id as string,
+      reason: typeof args.reason === 'string' ? args.reason : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Review Item akzeptieren Vorschau' : '# Review Item akzeptiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Item: \`${result.entry.itemId}\``,
+          `Status: ${result.entry.status}`,
+          `State: \`${result.statePath}\``,
+          result.entry.reason ? `Grund: ${result.entry.reason}` : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  reject_review_item(vault, args) {
+    const result = vault.rejectReviewItem({
+      itemId: args.item_id as string,
+      reason: typeof args.reason === 'string' ? args.reason : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Review Item ablehnen Vorschau' : '# Review Item abgelehnt',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Item: \`${result.entry.itemId}\``,
+          `Status: ${result.entry.status}`,
+          `State: \`${result.statePath}\``,
+          result.entry.reason ? `Grund: ${result.entry.reason}` : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  snooze_review_item(vault, args) {
+    const result = vault.snoozeReviewItem({
+      itemId: args.item_id as string,
+      reason: typeof args.reason === 'string' ? args.reason : undefined,
+      snoozedUntil: typeof args.until === 'string' ? args.until : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Review Item snoozen Vorschau' : '# Review Item gesnoozed',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Item: \`${result.entry.itemId}\``,
+          `Status: ${result.entry.status}`,
+          `Bis: ${result.entry.snoozedUntil ?? '(nicht gesetzt)'}`,
+          `State: \`${result.statePath}\``,
+          result.entry.reason ? `Grund: ${result.entry.reason}` : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  apply_all_safe_fixes(vault, args) {
+    const allowedSteps = new Set(['frontmatter', 'broken_links', 'link_suggestions', 'lifecycle', 'mocs', 'semantic_index'])
+    const steps = Array.isArray(args.steps)
+      ? args.steps.filter((s): s is 'frontmatter' | 'broken_links' | 'link_suggestions' | 'lifecycle' | 'mocs' | 'semantic_index' =>
+        typeof s === 'string' && allowedSteps.has(s),
+      )
+      : undefined
+    const result = vault.applyAllSafeFixes({
+      dryRun: args.dry_run !== false,
+      steps,
+      minLinkConfidence: typeof args.min_link_confidence === 'number' ? args.min_link_confidence : undefined,
+      minLifecycleConfidence: confidence(args.min_lifecycle_confidence),
+      mocMinNotes: typeof args.moc_min_notes === 'number' ? args.moc_min_notes : undefined,
+    })
+    const lines = result.steps.map(step =>
+      `- \`${step.step}\`: ${step.changed} Änderung(en), ${step.skipped} übersprungen — ${step.summary}`,
+    ).join('\n')
+
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Alle sicheren Fixes Vorschau' : '# Alle sicheren Fixes angewendet',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Total changed: ${result.totalChanged}`,
+          `Total skipped: ${result.totalSkipped}`,
+          '',
+          lines,
         ].join('\n'),
       }],
     }

@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync, watch, unlinkSync } from 'node:fs'
 import { join, relative, extname } from 'node:path'
 import { findDuplicates as findDuplicatesService, type DuplicateMatch } from './services/duplicate-analyzer.ts'
 import { findBrokenLinks as findBrokenLinksService, fixBrokenLinks as fixBrokenLinksService, type BrokenLink } from './services/broken-link-analyzer.ts'
-import { lintFrontmatter as lintFrontmatterService, fixFrontmatter as fixFrontmatterService, type LintIssue } from './services/frontmatter-linter.ts'
+import { lintFrontmatter as lintFrontmatterService, fixFrontmatter as fixFrontmatterService, type FrontmatterFixOptions, type FrontmatterLintOptions, type FrontmatterProfile, type LintIssue } from './services/frontmatter-linter.ts'
 import { generateMocs as generateMocsService, type MocResult } from './services/moc-generator.ts'
 import { runMaintenance as runMaintenanceService, type MaintenanceReport } from './services/review-queue-builder.ts'
 import { captureV2 as captureV2Service, type CaptureMode, type CaptureV2Options, type CaptureV2Result } from './services/capture-service.ts'
@@ -26,9 +26,13 @@ import { suggestLegacyLinks, type LegacyLinkSuggestion } from './services/legacy
 import { dailyNote as dailyNoteService, type DailyNoteResult } from './services/daily-note.ts'
 import { generateRunbook as generateRunbookService, type GenerateRunbookResult } from './services/runbook-generator.ts'
 import { organizeReferenz as organizeReferenzService, type OrganizeReferenzResult } from './services/referenz-organizer.ts'
+import { renameNote as renameNoteService, type RenameNoteOptions, type RenameNoteResult } from './services/note-renamer.ts'
+import { triageInbox as triageInboxService, triageNote as triageNoteService, type TriageInboxOptions, type TriageInboxResult, type TriageNoteOptions, type TriageNoteResult } from './services/inbox-triage.ts'
+import { acceptReviewItem as acceptReviewItemService, applyAllSafeFixes as applyAllSafeFixesService, rejectReviewItem as rejectReviewItemService, snoozeReviewItem as snoozeReviewItemService, type ApplyAllSafeFixesOptions, type ReviewQueueActionOptions, type ReviewQueueActionResult } from './services/review-queue-actions.ts'
+import { extractTroubleshootingPattern as extractTroubleshootingPatternService, generatePostmortem as generatePostmortemService, promoteCaptureToRunbook as promoteCaptureToRunbookService, type ExtractTroubleshootingPatternResult, type GeneratePostmortemOptions, type GeneratePostmortemResult, type PromoteCaptureToRunbookOptions, type PromoteCaptureToRunbookResult } from './services/incident-extractor.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
-export type { BrokenLink, LintIssue, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult }
+export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -157,6 +161,10 @@ export class Vault {
     this.notes.delete(relativePath)
   }
 
+  removeNoteFromIndex(relativePath: string): void {
+    this.removeFromIndex(relativePath)
+  }
+
   // ── Link Resolution ────────────────────────────────────────────────
 
   resolveLink(link: string): string | null {
@@ -213,6 +221,10 @@ export class Vault {
 
   buildContextPack(options: ContextPackOptions): ContextPack {
     return buildContextPackService(this, options)
+  }
+
+  recallContext(options: ContextPackOptions): ContextPack {
+    return this.buildContextPack(options)
   }
 
   // ── Public API: Note Context ───────────────────────────────────────
@@ -321,6 +333,18 @@ export class Vault {
     }, topic, outputFolder)
   }
 
+  extractTroubleshootingPattern(path: string): ExtractTroubleshootingPatternResult {
+    return extractTroubleshootingPatternService(this, path)
+  }
+
+  promoteCaptureToRunbook(options: PromoteCaptureToRunbookOptions): PromoteCaptureToRunbookResult {
+    return promoteCaptureToRunbookService(this, options)
+  }
+
+  generatePostmortem(options: GeneratePostmortemOptions): GeneratePostmortemResult {
+    return generatePostmortemService(this, options)
+  }
+
   // ── Public API: Organize Referenz into Technik ─────────────────────
 
   organizeReferenz(dryRun: boolean = false): OrganizeReferenzResult {
@@ -342,6 +366,34 @@ export class Vault {
     return mergeDuplicatesService(this, options)
   }
 
+  renameNote(options: RenameNoteOptions): RenameNoteResult {
+    return renameNoteService(this, options)
+  }
+
+  triageNote(options: TriageNoteOptions): TriageNoteResult {
+    return triageNoteService(this, options)
+  }
+
+  triageInbox(options: TriageInboxOptions = {}): TriageInboxResult {
+    return triageInboxService(this, options)
+  }
+
+  acceptReviewItem(options: ReviewQueueActionOptions): ReviewQueueActionResult {
+    return acceptReviewItemService(this, options)
+  }
+
+  rejectReviewItem(options: ReviewQueueActionOptions): ReviewQueueActionResult {
+    return rejectReviewItemService(this, options)
+  }
+
+  snoozeReviewItem(options: ReviewQueueActionOptions): ReviewQueueActionResult {
+    return snoozeReviewItemService(this, options)
+  }
+
+  applyAllSafeFixes(options: ApplyAllSafeFixesOptions = {}): RunSafeMaintenanceResult {
+    return applyAllSafeFixesService(this, options)
+  }
+
   // ── Public API: Find & Fix Broken Links ────────────────────────────
 
   findBrokenLinks(): BrokenLink[] {
@@ -354,12 +406,12 @@ export class Vault {
 
   // ── Public API: Lint & Fix Frontmatter ─────────────────────────────
 
-  lintFrontmatter(): LintIssue[] {
-    return lintFrontmatterService(this)
+  lintFrontmatter(options: FrontmatterLintOptions = {}): LintIssue[] {
+    return lintFrontmatterService(this, options)
   }
 
-  fixFrontmatter(dryRun: boolean = true) {
-    return fixFrontmatterService(this, dryRun)
+  fixFrontmatter(dryRunOrOptions: boolean | FrontmatterFixOptions = true) {
+    return fixFrontmatterService(this, dryRunOrOptions)
   }
 
   // ── Public API: Note Quality ───────────────────────────────────────

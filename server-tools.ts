@@ -225,6 +225,38 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'recall_context',
+      description:
+        'Manual, read-only working memory recall. Builds an on-demand context pack for a query from semantic hits, linked notes, snippets, open TODOs, and citations. It does not write, store, or inject anything automatically.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Topic, task, or question to recall context for.',
+          },
+          max_notes: {
+            type: 'number',
+            description: 'Maximum notes to recall. Default 5, max 12.',
+          },
+          include_linked: {
+            type: 'boolean',
+            description: 'Include directly linked/backlink notes in addition to primary semantic hits. Default true.',
+          },
+          folder: {
+            type: 'string',
+            description: 'Optional folder prefix filter for primary semantic hits.',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional tag filter for primary semantic hits. All tags must match.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+    {
       name: 'todo_list',
       description:
         'Get all open TODO items (- [ ]) across the vault, grouped by file. Optionally filter by folder.',
@@ -343,6 +375,67 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'extract_troubleshooting_pattern',
+      description:
+        'Extract a troubleshooting pattern from one note: symptoms/errors, fixes/workarounds, and relevant commands. Pure analyzer — makes no changes.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Relative path, note title, or basename of the source note.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'promote_capture_to_runbook',
+      description:
+        'Dry-run-first promotion of one capture/session/troubleshooting note into a reusable Runbook markdown note.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Relative path, note title, or basename of the source capture note.',
+          },
+          folder: {
+            type: 'string',
+            description: 'Optional output folder. Default Runbooks.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to write the runbook.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'generate_postmortem',
+      description:
+        'Dry-run-first generation of a postmortem draft from an incident/troubleshooting note. Creates a structured draft with symptoms, fixes, timeline and follow-ups.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Relative path, note title, or basename of the source incident note.',
+          },
+          folder: {
+            type: 'string',
+            description: 'Optional output folder. Default Postmortems.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to write the postmortem draft.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
       name: 'build_customer_context',
       description:
         'Build or preview a customer dashboard under Kunden/{Client}/_dashboard.md. Aggregates relevant notes, open TODOs, recent changes, runbooks, auto-captures, frequent tags, and known issues. Dry-run by default.',
@@ -443,6 +536,98 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'rename_note',
+      description:
+        'Dry-run-first note rename/move refactor. Renames a note, optionally moves it to another folder, updates H1/title metadata, preserves old names as aliases, rewrites wikilinks and frontmatter path references, and logs apply mode.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Existing relative path, note title, or basename to rename.',
+          },
+          new_title: {
+            type: 'string',
+            description: 'New note title and filename stem. If omitted, only target_folder is used.',
+          },
+          target_folder: {
+            type: 'string',
+            description: 'Optional destination folder inside the vault, e.g. "Technik/Docker".',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to apply the rename/move and link rewrites.',
+          },
+          update_title: {
+            type: 'boolean',
+            description: 'Default true. Updates the first H1 and frontmatter title when present.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'triage_note',
+      description:
+        'Dry-run-first triage for one existing note. Classifies the note, normalizes tags, suggests or applies a target folder, reports duplicate candidates and link suggestions, and avoids applying high-risk duplicate cases.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Existing relative path, note title, or basename to triage.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to normalize frontmatter and move safe notes.',
+          },
+          target_folder: {
+            type: 'string',
+            description: 'Optional explicit destination folder inside the vault.',
+          },
+          min_confidence: {
+            type: 'number',
+            description: 'Minimum classification confidence before automatic routing. Default 5.',
+          },
+          apply_low_confidence: {
+            type: 'boolean',
+            description: 'Default false. If true, applies even when classification confidence is below threshold.',
+          },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'triage_inbox',
+      description:
+        'Dry-run-first batch triage for Inbox notes. Runs triage_note over notes in Inbox/ (or another folder), classifies, normalizes tags, previews/applies safe moves, and leaves duplicate/low-confidence cases for review.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          folder: {
+            type: 'string',
+            description: 'Folder to triage. Default "Inbox".',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to apply safe triage changes.',
+          },
+          max_notes: {
+            type: 'number',
+            description: 'Maximum notes to process. Default 25.',
+          },
+          min_confidence: {
+            type: 'number',
+            description: 'Minimum classification confidence before automatic routing. Default 5.',
+          },
+          apply_low_confidence: {
+            type: 'boolean',
+            description: 'Default false. If true, applies even when classification confidence is below threshold.',
+          },
+        },
+      },
+    },
+    {
       name: 'find_broken_links',
       description:
         'Scan vault for broken [[wiki-links]] that don\'t resolve to any note. Returns each broken link with auto-fix candidates (high/medium/low confidence). Pure analyzer — makes no changes.',
@@ -515,6 +700,75 @@ export const TOOL_DEFINITIONS = [
             type: 'number',
             description: 'Minimum notes per folder for MOC generation. Default 2.',
           },
+        },
+      },
+    },
+    {
+      name: 'accept_review_item',
+      description:
+        'Dry-run-first review queue action. Marks a Maintenance report item_id as accepted in .review-queue-actions.json for later workflow tracking.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_id: { type: 'string', description: 'Stable item id from a Maintenance review report.' },
+          reason: { type: 'string', description: 'Optional review note.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write review state.' },
+        },
+        required: ['item_id'],
+      },
+    },
+    {
+      name: 'reject_review_item',
+      description:
+        'Dry-run-first review queue action. Marks a Maintenance report item_id as rejected in .review-queue-actions.json.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_id: { type: 'string', description: 'Stable item id from a Maintenance review report.' },
+          reason: { type: 'string', description: 'Optional review note.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write review state.' },
+        },
+        required: ['item_id'],
+      },
+    },
+    {
+      name: 'snooze_review_item',
+      description:
+        'Dry-run-first review queue action. Marks a Maintenance report item_id as snoozed until a date in .review-queue-actions.json.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_id: { type: 'string', description: 'Stable item id from a Maintenance review report.' },
+          until: { type: 'string', description: 'Optional ISO date, e.g. 2026-05-20.' },
+          reason: { type: 'string', description: 'Optional review note.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write review state.' },
+        },
+        required: ['item_id'],
+      },
+    },
+    {
+      name: 'apply_all_safe_fixes',
+      description:
+        'Dry-run-first executor for the safe review queue fixes. Uses the same controlled pipeline as run_safe_maintenance for frontmatter, broken links, link suggestions, lifecycle, MOCs, and semantic index.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to apply.' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['frontmatter', 'broken_links', 'link_suggestions', 'lifecycle', 'mocs', 'semantic_index'],
+            },
+            description: 'Optional subset of safe steps to run.',
+          },
+          min_link_confidence: { type: 'number', description: 'Minimum confidence for link suggestions. Default 0.9.' },
+          min_lifecycle_confidence: {
+            type: 'string',
+            enum: ['high', 'medium', 'low'],
+            description: 'Minimum lifecycle confidence. Default high.',
+          },
+          moc_min_notes: { type: 'number', description: 'Minimum notes per folder for MOCs. Default 2.' },
         },
       },
     },
@@ -620,17 +874,31 @@ export const TOOL_DEFINITIONS = [
     {
       name: 'lint_frontmatter',
       description:
-        'Scan all notes for frontmatter issues: missing/invalid status, non-ISO dates, tag inconsistencies, typo field names. Returns issue list with severity (error/warning/info) and auto-fix suggestions. Pure analyzer.',
-      inputSchema: { type: 'object' as const, properties: {} },
+        'Scan all notes for frontmatter issues using conservative schema profiles (Kunde, Referenz, Troubleshooting, Learning, Runbook, Daily, Maintenance-Report, Auto-Capture, MOC). Returns issue list with severity and auto-fix suggestions. Pure analyzer.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          profile: {
+            type: 'string',
+            enum: ['Kunde', 'Referenz', 'Troubleshooting', 'Learning', 'Runbook', 'Daily', 'Maintenance-Report', 'Auto-Capture', 'MOC'],
+            description: 'Optional explicit profile override. If omitted, profile is inferred conservatively per note.',
+          },
+        },
+      },
     },
     {
       name: 'fix_frontmatter',
       description:
-        'Apply safe auto-fixes to frontmatter: normalize tags (via aliases), dedupe, lowercase field names, add missing status. Use dry_run=true (default) first. Never changes note body.',
+        'Apply safe auto-fixes to frontmatter using schema profiles: normalize tags, dedupe, lowercase field names, add missing status/tags/date/source/customer where safely inferable. Use dry_run=true (default) first. Never changes note body.',
       inputSchema: {
         type: 'object' as const,
         properties: {
           dry_run: { type: 'boolean', description: 'Default true. Set false to apply.' },
+          profile: {
+            type: 'string',
+            enum: ['Kunde', 'Referenz', 'Troubleshooting', 'Learning', 'Runbook', 'Daily', 'Maintenance-Report', 'Auto-Capture', 'MOC'],
+            description: 'Optional explicit profile override. If omitted, profile is inferred conservatively per note.',
+          },
         },
       },
     },

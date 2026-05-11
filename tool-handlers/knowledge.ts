@@ -115,6 +115,64 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     }
   },
 
+  extract_troubleshooting_pattern(vault, args) {
+    const result = vault.extractTroubleshootingPattern(args.path as string)
+    return {
+      content: [{
+        type: 'text',
+        text: result.patternMarkdown,
+      }],
+    }
+  },
+
+  promote_capture_to_runbook(vault, args) {
+    const result = vault.promoteCaptureToRunbook({
+      path: args.path as string,
+      outputFolder: typeof args.folder === 'string' ? args.folder : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Runbook Promotion Vorschau' : '# Runbook Promotion angewendet',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Quelle: \`${result.source}\``,
+          `Ziel: \`${result.path}\``,
+          `Schritte: ${result.stepCount}`,
+          `Fixes: ${result.fixCount}`,
+          '',
+          result.dryRun ? '## Vorschau' : '',
+          result.dryRun ? result.content : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  generate_postmortem(vault, args) {
+    const result = vault.generatePostmortem({
+      path: args.path as string,
+      outputFolder: typeof args.folder === 'string' ? args.folder : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Postmortem Vorschau' : '# Postmortem erstellt',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Quelle: \`${result.source}\``,
+          `Ziel: \`${result.path}\``,
+          '',
+          result.dryRun ? '## Vorschau' : '',
+          result.dryRun ? result.content : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
   build_customer_context(vault, args) {
     return renderCustomerDashboard(vault, args.client as string, args)
   },

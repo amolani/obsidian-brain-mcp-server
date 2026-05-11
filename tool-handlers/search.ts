@@ -161,6 +161,53 @@ export const searchHandlers: ToolHandlerRegistry = {
     }
   },
 
+  recall_context(vault, args) {
+    const pack = vault.recallContext({
+      query: args.query as string,
+      maxNotes: typeof args.max_notes === 'number' ? args.max_notes : undefined,
+      includeLinked: typeof args.include_linked === 'boolean' ? args.include_linked : undefined,
+      folder: typeof args.folder === 'string' ? args.folder : undefined,
+      tags: strings(args.tags),
+    })
+
+    const renderNote = (note: typeof pack.primary[number]) => [
+      `- **${note.title}** — \`${note.path}\` (${note.role}, Score ${note.score})`,
+      `  Warum erinnert: ${note.reason}`,
+      `  Snippet: ${note.snippet}`,
+      note.openTodos.length > 0 ? `  Offene TODOs: ${note.openTodos.map(t => `Z${t.line}: ${t.text}`).join(' | ')}` : '',
+    ].filter(Boolean).join('\n')
+
+    const primary = pack.primary.length > 0 ? pack.primary.map(renderNote).join('\n\n') : '  (keine)'
+    const linked = pack.linked.length > 0 ? pack.linked.map(renderNote).join('\n\n') : '  (keine)'
+    const todos = pack.openTodos.length > 0
+      ? pack.openTodos.map(t => `- \`${t.path}\` Z${t.line}: ${t.text}`).join('\n')
+      : '  (keine)'
+
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          `# Recall Context: ${pack.query}`,
+          '',
+          'Modus: manuell, read-only, nicht gespeichert.',
+          `Citations: ${pack.citations.map(c => `\`${c}\``).join(', ') || '(keine)'}`,
+          '',
+          '## Erinnerte Notizen',
+          primary,
+          '',
+          '## Angrenzender Kontext',
+          linked,
+          '',
+          '## Offene TODOs',
+          todos,
+          '',
+          '## Nächste Schritte',
+          pack.suggestedNextActions.map(action => `- ${action}`).join('\n'),
+        ].join('\n'),
+      }],
+    }
+  },
+
   get_note_context(vault, args) {
     const path = args.path as string
     const ctx = vault.getNoteContext(path)

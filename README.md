@@ -9,6 +9,7 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 - `semantic_search` — local semantic-style search with weighted note vectors, snippets, config aliases/categories, and filters
 - `semantic_index_status` / `rebuild_semantic_index` — inspect and rebuild the local semantic vector cache
 - `build_context_pack` — compact working context for a query with semantic hits, linked notes, TODOs, citations, and next actions
+- `recall_context` — manual, read-only working-memory recall; nothing is stored or injected automatically
 - `get_note_context` — full note context with backlinks & related notes
 - `vault_overview` — stats, tags, recent changes, orphans, stale notes
 - `todo_list` — aggregate open TODOs across the vault
@@ -23,15 +24,19 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 - `capture` — compatibility wrapper for quick capture
 - `capture_v2` — smart capture with unified client/Technik classification, tag normalization, dry-run previews, and `fast`/`strict`/`review` modes
 - `generate_runbook` — clean step-by-step guide from auto-captured sessions
+- `extract_troubleshooting_pattern` / `promote_capture_to_runbook` / `generate_postmortem` — dry-run-first incident extraction from captures and troubleshooting notes
 - `build_customer_context` / `build_project_dashboard` — generate customer dashboards with notes, TODOs, recent changes, runbooks, captures, tags, and issues
 
 **Maintenance (Analyzer → Recommender → Executor)**
 - `find_duplicates` — fuzzy match on title, content, tags (with confidence scores)
 - `merge_duplicates` — dry-run-first duplicate merge workflow with tag/frontmatter union, source references, archive move, and action logging
+- `rename_note` — dry-run-first rename/move refactor that updates H1/title metadata, aliases, wikilinks, frontmatter path refs, and action log
+- `triage_note` / `triage_inbox` — dry-run-first inbox triage with classification, tag normalization, target folders, duplicate review, and link suggestions
+- `accept_review_item` / `reject_review_item` / `snooze_review_item` / `apply_all_safe_fixes` — review-queue workflow actions with dry-run-first safe executors
 - `score_note_quality` / `list_low_quality_notes` — read-only quality scoring for title, metadata, tags, links, TODOs, structure, content density, and freshness
 - `suggest_lifecycle_updates` / `apply_lifecycle_updates` — dry-run-first lifecycle automation for status transitions such as missing status → `aktiv` or stale notes → `archiviert`
 - `find_broken_links` / `fix_broken_links` — detect and repair renamed-file links
-- `lint_frontmatter` / `fix_frontmatter` — normalize tags, add missing status, typo detection
+- `lint_frontmatter` / `fix_frontmatter` — profile-aware schemas for Kunde, Referenz, Troubleshooting, Learning, Runbook, Daily, Maintenance, Auto-Capture, and MOC notes
 - `generate_mocs` — Maps of Content with live Dataview queries per folder
 - `run_safe_maintenance` — dry-run-first batch for safe executors: frontmatter, broken links, link suggestions, lifecycle, MOCs, semantic index
 - `organize_referenz` — auto-sort flat `Referenz/` into `Technik/{category}/{sub}/`
@@ -232,7 +237,7 @@ The Knowledge Harvester runs automatically after each Claude response. If the se
 Use the vault as a dry-run-first operating loop:
 
 1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note, detects the client from your current folder when possible, and runs the same Referenz→Technik organization logic as the MCP tool.
-2. Before creating new knowledge, search first with `vault_search` or `semantic_search`. Use `build_context_pack` when you need a compact working set for a topic.
+2. Before creating new knowledge, search first with `vault_search` or `semantic_search`. Use `recall_context` when you explicitly want manual working-memory recall for a topic.
 3. Capture rough knowledge with `capture_v2` in `review` or `dry_run` mode for important notes, then apply once the suggested folder/title/tags look right. Use old `capture` only as the quick compatibility path.
 4. During work, use `daily_note` for lightweight chronological notes and TODOs. Use `todo_list` or `weekly_review` to pull open work back into focus.
 5. After substantial terminal work, let the Stop hook harvest procedures automatically. For reusable operational docs, run `generate_runbook` against the topic/client after captures exist.

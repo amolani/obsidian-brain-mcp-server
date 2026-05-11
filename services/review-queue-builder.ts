@@ -22,6 +22,11 @@ export interface MaintenanceReport {
   reportPath: string
 }
 
+function reviewItemId(type: string, ...parts: string[]): string {
+  const clean = (value: string) => value.replace(/[^a-zA-Z0-9._/-]+/g, '_').replace(/^_+|_+$/g, '')
+  return [type, ...parts.map(clean)].join(':')
+}
+
 export function runMaintenance(vault: Vault): MaintenanceReport {
   const datum = new Date().toISOString().split('T')[0]
 
@@ -146,7 +151,7 @@ quelle: vault-gardener
   const highDups = details.duplicates.filter(d => d.confidence === 'high')
   if (highDups.length > 0) {
     sections.push(`\n## 🔴 High-Confidence Duplikate\n\n${highDups.slice(0, 10).map(d =>
-      `- **${d.titleA}** ↔ **${d.titleB}** (Score ${d.score})\n  \`${d.noteA}\` vs \`${d.noteB}\`\n  → ${d.suggestion}`,
+      `- \`${reviewItemId('duplicate', d.noteA, d.noteB)}\` **${d.titleA}** ↔ **${d.titleB}** (Score ${d.score})\n  \`${d.noteA}\` vs \`${d.noteB}\`\n  → ${d.suggestion}`,
     ).join('\n\n')}`)
   }
 
@@ -154,27 +159,27 @@ quelle: vault-gardener
   const fixableLinks = details.brokenLinks.filter(b => b.candidates.length === 1 && b.candidates[0].confidence === 'high')
   if (fixableLinks.length > 0) {
     sections.push(`\n## 🟡 Auto-fixbare kaputte Links (${fixableLinks.length})\n\n${fixableLinks.slice(0, 10).map(b =>
-      `- \`${b.source}\`: [[${b.target}]] → [[${b.candidates[0].path.replace(/\.md$/, '')}]]`,
+      `- \`${reviewItemId('broken_link', b.source, b.target)}\` \`${b.source}\`: [[${b.target}]] → [[${b.candidates[0].path.replace(/\.md$/, '')}]]`,
     ).join('\n')}`)
   }
 
   // Stale notes
   if (details.stats.staleNotes.length > 0) {
     sections.push(`\n## 🟢 Stale Notes (${details.stats.staleNotes.length})\n\nNotizen mit \`status: aktiv\`, aber >180 Tage nicht bearbeitet.\n\n${details.stats.staleNotes.slice(0, 10).map(s =>
-      `- \`${s.path}\` — ${s.daysAgo} Tage`,
+      `- \`${reviewItemId('stale_note', s.path)}\` \`${s.path}\` — ${s.daysAgo} Tage`,
     ).join('\n')}`)
   }
 
   if (details.lowQuality.length > 0) {
     sections.push(`\n## 🟡 Niedrige Notizqualität (${details.lowQuality.length})\n\n${details.lowQuality.slice(0, 10).map(q =>
-      `- \`${q.path}\` — Score ${q.score} (${q.grade})\n  ${q.issues.slice(0, 2).map(i => `${i.dimension}: ${i.message}`).join('; ')}`,
+      `- \`${reviewItemId('quality', q.path)}\` \`${q.path}\` — Score ${q.score} (${q.grade})\n  ${q.issues.slice(0, 2).map(i => `${i.dimension}: ${i.message}`).join('; ')}`,
     ).join('\n')}`)
   }
 
   const lifecycleHigh = details.lifecycle.filter(s => s.confidence === 'high')
   if (lifecycleHigh.length > 0) {
     sections.push(`\n## 🟡 Lifecycle-Vorschläge (${lifecycleHigh.length} high)\n\n${lifecycleHigh.slice(0, 10).map(s =>
-      `- \`${s.path}\`: ${s.currentStatus ?? '(kein status)'} → ${s.recommendedStatus}\n  ${s.reasons.join('; ')}`,
+      `- \`${reviewItemId('lifecycle', s.path, s.recommendedStatus)}\` \`${s.path}\`: ${s.currentStatus ?? '(kein status)'} → ${s.recommendedStatus}\n  ${s.reasons.join('; ')}`,
     ).join('\n')}`)
   }
 
@@ -182,7 +187,7 @@ quelle: vault-gardener
   const missingMocs = details.mocs.filter(m => m.action === 'created')
   if (missingMocs.length > 0) {
     sections.push(`\n## 🟢 Fehlende MOCs (${missingMocs.length})\n\n${missingMocs.slice(0, 15).map(m =>
-      `- \`${m.path}\` (${m.noteCount} Notizen)`,
+      `- \`${reviewItemId('moc', m.path)}\` \`${m.path}\` (${m.noteCount} Notizen)`,
     ).join('\n')}`)
   }
 
@@ -191,7 +196,7 @@ quelle: vault-gardener
     const warningsOnly = details.lintIssues.filter(i => i.severity === 'warning').slice(0, 10)
     if (warningsOnly.length > 0) {
       sections.push(`\n## 🟢 Frontmatter-Warnings (${warningsOnly.length})\n\n${warningsOnly.map(i =>
-        `- \`${i.path}\` [${i.field}]: ${i.issue}`,
+        `- \`${reviewItemId('frontmatter', i.path, i.field)}\` \`${i.path}\` [${i.field}]: ${i.issue}`,
       ).join('\n')}`)
     }
   }
@@ -203,7 +208,9 @@ quelle: vault-gardener
 3. \`fix_frontmatter\` laufen lassen (auto-fix für ${report.lintIssues.autoFixable} Issues)
 4. \`generate_mocs\` laufen lassen um fehlende MOCs anzulegen
 5. Niedrige Qualitäts-Scores mit \`score_note_quality\` prüfen
-6. Lifecycle-Vorschläge mit \`suggest_lifecycle_updates\` prüfen und mit \`apply_lifecycle_updates\` als Dry-Run testen`)
+6. Lifecycle-Vorschläge mit \`suggest_lifecycle_updates\` prüfen und mit \`apply_lifecycle_updates\` als Dry-Run testen
+7. Einzelne IDs mit \`accept_review_item\`, \`reject_review_item\` oder \`snooze_review_item\` nachverfolgen
+8. Sichere Sammelfixes mit \`apply_all_safe_fixes\` zuerst als Dry-Run prüfen`)
 
   return sections.join('\n')
 }
