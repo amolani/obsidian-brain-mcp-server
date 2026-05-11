@@ -6,7 +6,8 @@
   "bin": "./server.ts",
   "scripts": {
     "start": "node server.ts",
-    "test": "node --test --test-reporter=spec tests/*.test.ts"
+    "test": "node --test --test-reporter=spec tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "mcp",
@@ -27,5 +28,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "typescript": "^6.0.3"
   }
 }

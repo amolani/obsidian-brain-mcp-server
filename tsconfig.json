@@ -1,14 +1,21 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "outDir": "./dist",
     "rootDir": ".",
-    "types": ["bun-types"]
+    "types": ["node"]
   },
-  "include": ["*.ts"]
+  "include": [
+    "*.ts",
+    "hooks/**/*.ts",
+    "services/**/*.ts",
+    "tests/**/*.ts",
+    "tool-handlers/**/*.ts"
+  ]
 }
