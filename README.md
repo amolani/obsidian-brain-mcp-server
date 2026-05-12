@@ -31,11 +31,22 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 
 **Manual Brain Layer**
 - `brain_review` / `brain_apply_review_item` — read-only brain review plus dry-run-first executor for one action-backed item
+- `build_brain_dashboard` — dry-run-first Obsidian dashboard at `Knowledge/_brain.md`
 - `recall_context` / `build_context_pack` — explicit read-only recall; no automatic injection
 - `update_hot_cache` / `read_hot_cache` — optional manual working-memory cache in `Knowledge/hot.md`
 - `build_knowledge_index` — dry-run-first overview note at `Knowledge/index.md`
+- `update_evidence` / `evidence_report` — confidence, source, checked/recheck/expiry, confirmed-by and contradicted-by metadata for durable knowledge
+- `extract_claims` — source-to-claim extraction into `Knowledge/Claims/` with confidence and contradiction candidates
 - `flag_knowledge_gap` / `flag_contradiction` / `list_open_questions` / `resolve_gap` — track unresolved questions and contradictory claims until they are clarified
 - `create_research_plan` — local-context research plan under `Knowledge/Research/` for explicit investigations
+- `record_brain_feedback` / `brain_feedback_summary` — feedback loop for accepted/rejected/snoozed review suggestions and auto-build learning
+- `build_memory_timeline` — customer/project timeline under `Kunden/{Client}/_timeline.md`
+- `build_customer_snapshot` — current customer/project state under `Kunden/{Client}/_snapshot.md`
+- `brain_schedule` — read-only propose-only scheduler for rechecks, open questions, and missing brain surfaces
+- `brain_auto_build` — policy-controlled auto-build pass for captures: promotes insights/answers/gaps, extracts claims, updates evidence, dashboard, index, hot cache, and customer timeline; gates adapt to feedback
+- `archive_auto_build_run` — dry-run-first archive tool for artifacts created by one auto-build source run; archived artifacts become negative learning feedback
+- `brain_checkpoint` — long-session checkpoint note with optional auto-build trigger
+- `brain_metrics` — read-only health metrics for captures, promotions, claims, evidence, questions, feedback, and auto-build processing
 
 **Maintenance (Analyzer → Recommender → Executor)**
 - `find_duplicates` — fuzzy match on title, content, tags (with confidence scores)
@@ -55,6 +66,7 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 
 **Automated background workflow** (via Claude Code hooks)
 - **SessionStart** — ensures daily note exists, detects client from CWD, auto-organizes
+- **PostToolUse/long-session hook** — records lightweight session state and writes debounced checkpoints during long work
 - **Stop** — Knowledge Harvester reads the session transcript, extracts procedures and error→fix cycles, writes a structured note automatically
 
 ## How it works
@@ -144,6 +156,17 @@ Add to `~/.claude/settings.json`:
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /absolute/path/to/obsidian-brain-mcp-server/hooks/session-checkpoint.ts",
+            "timeout": 12
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -228,6 +251,8 @@ Left side = alternate spelling. Right side = canonical form.
 | `HARVESTER_LOG` | Knowledge Harvester log file. | `/tmp/knowledge-harvester.log` |
 | `HARVESTER_STATE_DIR` | Per-session state dir (prevents re-processing). | `/tmp/knowledge-harvester-state` |
 | `HARVESTER_SUGGESTIONS_LOG` | Log for client/subcategory suggestions. | `/tmp/knowledge-harvester-suggestions.log` |
+| `SESSION_CHECKPOINT_LOG` | Long-session checkpoint hook log file. | `/tmp/obsidian-brain-session-checkpoint.log` |
+| `SESSION_CHECKPOINT_STATE_DIR` | Long-session state dir for debounce/command counts. | `/tmp/obsidian-brain-session-state` |
 | `TECHNIK_SUGGESTIONS_LOG` | Log for category suggestions. | `/tmp/technik-suggestions.log` |
 
 ## Usage
@@ -242,12 +267,32 @@ Once registered, just work normally in Claude Code. Ask things like:
 
 The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a capture note to the appropriate folder.
 
+When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately after a successful session capture:
+
+- promotes the capture into durable `save_insight` / `save_answer` / gap notes when clear signals exist
+- runs a quality gate before promotion: skips banal/short items and similar existing knowledge
+- records processed source hashes in `.brain-auto-build-manifest.json` to prevent repeated promotion of the same capture
+- enforces policy limits for maximum new notes, claim count, and runtime
+- creates an Auto-Build report under `Maintenance/Auto-Build/`
+- promotes runbook candidates only when enough procedural signals exist
+- learns from archived auto-build artifacts and repeated rejected feedback, making noisy promotion categories stricter over time
+- extracts claims into `Knowledge/Claims/`
+- updates evidence metadata on the capture
+- refreshes `Knowledge/_brain.md`, `Knowledge/index.md`, `Knowledge/hot.md`
+- refreshes `Kunden/{Client}/_timeline.md` and `Kunden/{Client}/_snapshot.md` when a client was detected
+
+Risky operations such as duplicate merges, note renames, folder reorganization, broken-link rewrites, and link suggestion application stay out of automatic apply.
+
 ## Brain Policy
 
 `brain-policy.json` is the local safety contract for hooks, protected paths, and manual memory behavior.
 
 - Working memory is `manual_only`: `recall_context` runs only when explicitly called, and no context is injected automatically.
 - `update_hot_cache` is also manual-only; it writes `Knowledge/hot.md` only when explicitly applied.
+- Evidence, dashboard, timeline, feedback, and claim extraction tools are explicit/dry-run-first; `brain_schedule` only proposes work.
+- `automation.mode=auto_build` allows safe after-session writes that create derived knowledge and refresh generated surfaces.
+- `automation.duringSession.autoCheckpoint=true` enables debounced long-session checkpoints; `minMinutesBetweenCheckpoints`, `minCommandsBetweenCheckpoints`, and `maxCheckpointsPerSession` limit write frequency.
+- `automation.neverAutoApply` blocks risky refactors from automatic execution.
 - Hook auto-organization is disabled by default: `hooks.autoOrganize=false`.
 - Auto-capture and daily-note creation are policy-controlled.
 - Protected folders such as `.obsidian/`, `.trash/`, `System/`, and `Templates/` are blocked for guarded writers.
@@ -265,10 +310,15 @@ Use the vault as a dry-run-first operating loop:
 5. When a question remains open or two notes disagree, use `flag_knowledge_gap` or `flag_contradiction`. Resolve it later with `resolve_gap`, so the vault keeps uncertainty visible instead of silently mixing weak facts with confirmed knowledge.
 6. After substantial terminal work, let the Stop hook harvest procedures automatically when policy allows it. For reusable operational docs, run `generate_runbook` against the topic/client after captures exist.
 7. For bigger investigations, create a `create_research_plan` first. It pulls local context and gives you a checklist for source ingest, final answer/decision capture, and contradiction handling.
-8. Run `brain_review` as the central operating view. It proposes items across maintenance, open questions, contradictions, quality, links, lifecycle, and index/cache drift. Apply one item at a time with `brain_apply_review_item`, first as dry-run.
-9. Periodically refresh `Knowledge/hot.md` with `update_hot_cache` and `Knowledge/index.md` with `build_knowledge_index`. Both are dry-run-first and manual.
-10. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
-11. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
+8. Ingest durable sources with `ingest_source`, then use `extract_claims` to turn source text into explicit claims. Use `update_evidence` to set confidence, sources, recheck dates, and contradiction references.
+9. Run `brain_review` as the central operating view. It proposes items across maintenance, evidence, open questions, contradictions, quality, links, lifecycle, and index/cache drift. Apply one item at a time with `brain_apply_review_item`, first as dry-run. Record preference signals with `record_brain_feedback`.
+10. Periodically refresh `Knowledge/_brain.md`, `Knowledge/hot.md`, `Knowledge/index.md`, and customer timelines with `build_brain_dashboard`, `update_hot_cache`, `build_knowledge_index`, and `build_memory_timeline`.
+11. Let `brain_auto_build` run automatically after captures through the Stop hook. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/` and run an incremental auto-build when command/time thresholds are reached; you can still call `brain_checkpoint` or `brain_auto_build` explicitly.
+12. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
+13. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
+14. Use `brain_schedule` for propose-only upkeep: due evidence rechecks, open contradictions, missing dashboards, and explicit next tools.
+15. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
+16. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
 
 ## Folder conventions
 
@@ -285,7 +335,7 @@ YourVault/
 │   ├── Docker/
 │   └── Proxmox/
 ├── Daily/                 # Daily notes (auto-created)
-├── Knowledge/             # Manual memory, hot cache, index, gaps, contradictions
+├── Knowledge/             # Manual memory, claims, evidence, dashboard, hot cache, index, gaps, contradictions
 ├── Maintenance/           # Review queues (auto-generated)
 ├── .raw/                  # Immutable source documents and ingest manifest
 ├── Inbox/                 # Unsorted captures
@@ -316,6 +366,7 @@ obsidian-brain-mcp-server/
 ├── tag-aliases.json               # Tag normalization (editable)
 ├── hooks/
 │   ├── session-context.ts         # SessionStart hook
+│   ├── session-checkpoint.ts      # Long-session checkpoint hook
 │   ├── knowledge-harvester.ts     # Stop hook (captures knowledge)
 │   └── daily-note-hook.ts         # Simple daily note creator
 └── tests/

@@ -37,9 +37,20 @@ import { buildKnowledgeIndex as buildKnowledgeIndexService, type BuildKnowledgeI
 import { flagContradiction as flagContradictionService, flagKnowledgeGap as flagKnowledgeGapService, listOpenQuestions as listOpenQuestionsService, resolveGap as resolveGapService, type FlagContradictionOptions, type FlagKnowledgeGapOptions, type KnowledgeGapResult, type OpenQuestion, type ResolveGapOptions } from './services/knowledge-gaps.ts'
 import { createResearchPlan as createResearchPlanService, type CreateResearchPlanOptions, type ResearchPlanResult } from './services/research-plan.ts'
 import { brainApplyReviewItem as brainApplyReviewItemService, brainReview as brainReviewService, type BrainApplyReviewItemOptions, type BrainApplyReviewItemResult, type BrainReviewItem, type BrainReviewOptions, type BrainReviewResult } from './services/brain-review.ts'
+import { updateEvidence as updateEvidenceService, evidenceReport as evidenceReportService, listEvidenceIssues as listEvidenceIssuesService, type EvidenceConfidence, type EvidenceIssue, type EvidenceUpdateResult, type UpdateEvidenceOptions } from './services/evidence.ts'
+import { extractClaims as extractClaimsService, type ExtractClaimsOptions, type ExtractClaimsResult, type ExtractedClaim } from './services/claim-extractor.ts'
+import { buildBrainDashboard as buildBrainDashboardService, type BrainDashboardResult, type BuildBrainDashboardOptions } from './services/brain-dashboard.ts'
+import { brainFeedbackSummary as brainFeedbackSummaryService, recordBrainFeedback as recordBrainFeedbackService, type BrainFeedbackResult, type BrainFeedbackSummary, type RecordBrainFeedbackOptions } from './services/brain-feedback.ts'
+import { buildMemoryTimeline as buildMemoryTimelineService, type BuildMemoryTimelineOptions, type MemoryTimelineEvent, type MemoryTimelineResult } from './services/memory-timeline.ts'
+import { proposeBrainSchedule as proposeBrainScheduleService, type BrainScheduleItem, type BrainScheduleOptions, type BrainScheduleResult } from './services/brain-scheduler.ts'
+import { brainAutoBuild as brainAutoBuildService, type BrainAutoBuildOptions, type BrainAutoBuildResult, type BrainAutoBuildStep } from './services/brain-auto-build.ts'
+import { archiveAutoBuildRun as archiveAutoBuildRunService, type ArchiveAutoBuildRunOptions, type ArchiveAutoBuildRunResult } from './services/brain-auto-build-archive.ts'
+import { buildCustomerSnapshot as buildCustomerSnapshotService, type BuildCustomerSnapshotOptions, type CustomerSnapshotResult } from './services/customer-snapshot.ts'
+import { brainMetrics as brainMetricsService, type BrainMetrics } from './services/brain-metrics.ts'
+import { brainCheckpoint as brainCheckpointService, type BrainCheckpointOptions, type BrainCheckpointResult } from './services/brain-checkpoint.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
-export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult }
+export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -329,6 +340,62 @@ export class Vault {
 
   brainApplyReviewItem(options: BrainApplyReviewItemOptions): BrainApplyReviewItemResult {
     return brainApplyReviewItemService(this, options)
+  }
+
+  updateEvidence(options: UpdateEvidenceOptions): EvidenceUpdateResult {
+    return updateEvidenceService(this, options)
+  }
+
+  listEvidenceIssues(): EvidenceIssue[] {
+    return listEvidenceIssuesService(this)
+  }
+
+  evidenceReport() {
+    return evidenceReportService(this)
+  }
+
+  extractClaims(options: ExtractClaimsOptions): ExtractClaimsResult {
+    return extractClaimsService(this, options)
+  }
+
+  buildBrainDashboard(options: BuildBrainDashboardOptions = {}): BrainDashboardResult {
+    return buildBrainDashboardService(this, options)
+  }
+
+  recordBrainFeedback(options: RecordBrainFeedbackOptions): BrainFeedbackResult {
+    return recordBrainFeedbackService(this, options)
+  }
+
+  brainFeedbackSummary(): BrainFeedbackSummary {
+    return brainFeedbackSummaryService(this)
+  }
+
+  buildMemoryTimeline(options: BuildMemoryTimelineOptions): MemoryTimelineResult {
+    return buildMemoryTimelineService(this, options)
+  }
+
+  proposeBrainSchedule(options: BrainScheduleOptions = {}): BrainScheduleResult {
+    return proposeBrainScheduleService(this, options)
+  }
+
+  brainAutoBuild(options: BrainAutoBuildOptions = {}): BrainAutoBuildResult {
+    return brainAutoBuildService(this, options)
+  }
+
+  archiveAutoBuildRun(options: ArchiveAutoBuildRunOptions): ArchiveAutoBuildRunResult {
+    return archiveAutoBuildRunService(this, options)
+  }
+
+  buildCustomerSnapshot(options: BuildCustomerSnapshotOptions): CustomerSnapshotResult {
+    return buildCustomerSnapshotService(this, options)
+  }
+
+  brainMetrics(): BrainMetrics {
+    return brainMetricsService(this)
+  }
+
+  brainCheckpoint(options: BrainCheckpointOptions): BrainCheckpointResult {
+    return brainCheckpointService(this, options)
   }
 
   // ── Public API: Vault Overview ─────────────────────────────────────

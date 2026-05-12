@@ -166,6 +166,12 @@ export const TOOL_DEFINITIONS = [
           content: { type: 'string', description: 'Insight content to store.' },
           context: { type: 'string', description: 'Optional surrounding context.' },
           source: { type: 'string', description: 'Optional source note, URL, or conversation reference.' },
+          confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Optional evidence confidence.' },
+          checked_at: { type: 'string', description: 'Optional evidence check date YYYY-MM-DD.' },
+          recheck_at: { type: 'string', description: 'Optional future recheck date YYYY-MM-DD.' },
+          expires_at: { type: 'string', description: 'Optional expiration date YYYY-MM-DD.' },
+          confirmed_by: { type: 'array', items: { type: 'string' }, description: 'Optional confirming notes/sources.' },
+          contradicted_by: { type: 'array', items: { type: 'string' }, description: 'Optional contradicting notes/sources.' },
           tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
           folder: { type: 'string', description: 'Optional output folder. Default Knowledge/Insights.' },
           dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
@@ -184,6 +190,12 @@ export const TOOL_DEFINITIONS = [
           content: { type: 'string', description: 'Decision and rationale.' },
           context: { type: 'string', description: 'Optional alternatives, constraints, or tradeoffs.' },
           source: { type: 'string', description: 'Optional source note, URL, or conversation reference.' },
+          confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Optional evidence confidence.' },
+          checked_at: { type: 'string', description: 'Optional evidence check date YYYY-MM-DD.' },
+          recheck_at: { type: 'string', description: 'Optional future recheck date YYYY-MM-DD.' },
+          expires_at: { type: 'string', description: 'Optional expiration date YYYY-MM-DD.' },
+          confirmed_by: { type: 'array', items: { type: 'string' }, description: 'Optional confirming notes/sources.' },
+          contradicted_by: { type: 'array', items: { type: 'string' }, description: 'Optional contradicting notes/sources.' },
           tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
           folder: { type: 'string', description: 'Optional output folder. Default Knowledge/Decisions.' },
           dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
@@ -202,11 +214,60 @@ export const TOOL_DEFINITIONS = [
           content: { type: 'string', description: 'Reusable answer content.' },
           context: { type: 'string', description: 'Optional applicability notes.' },
           source: { type: 'string', description: 'Optional source note, URL, or conversation reference.' },
+          confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Optional evidence confidence.' },
+          checked_at: { type: 'string', description: 'Optional evidence check date YYYY-MM-DD.' },
+          recheck_at: { type: 'string', description: 'Optional future recheck date YYYY-MM-DD.' },
+          expires_at: { type: 'string', description: 'Optional expiration date YYYY-MM-DD.' },
+          confirmed_by: { type: 'array', items: { type: 'string' }, description: 'Optional confirming notes/sources.' },
+          contradicted_by: { type: 'array', items: { type: 'string' }, description: 'Optional contradicting notes/sources.' },
           tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
           folder: { type: 'string', description: 'Optional output folder. Default Knowledge/Answers.' },
           dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
         },
         required: ['title', 'content'],
+      },
+    },
+    {
+      name: 'update_evidence',
+      description:
+        'Dry-run-first evidence/confidence update for a note. Adds or updates source, confidence, checked/recheck/expiry dates, confirming links, and contradicting links.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: { type: 'string', description: 'Vault-relative path or exact title.' },
+          confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Evidence confidence.' },
+          source: { type: 'string', description: 'Source note, URL, or provenance.' },
+          checked_at: { type: 'string', description: 'Check date YYYY-MM-DD. Defaults to today when applying evidence.' },
+          recheck_at: { type: 'string', description: 'Future recheck date YYYY-MM-DD.' },
+          expires_at: { type: 'string', description: 'Expiration date YYYY-MM-DD.' },
+          confirmed_by: { type: 'array', items: { type: 'string' }, description: 'Confirming note paths or source refs.' },
+          contradicted_by: { type: 'array', items: { type: 'string' }, description: 'Contradicting note paths or source refs.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'evidence_report',
+      description:
+        'Read-only report for knowledge notes missing confidence/source, due for recheck, expired, or explicitly contradicted.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'extract_claims',
+      description:
+        'Dry-run-first extraction of atomic claims from a source note or .raw file. Writes Knowledge/Claims notes with source, confidence, and potential contradiction references.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: { type: 'string', description: 'Vault-relative source note path or raw file path.' },
+          max_claims: { type: 'number', description: 'Maximum claims to extract. Default 8, max 20.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/Claims notes.' },
+        },
+        required: ['path'],
       },
     },
     {
@@ -310,6 +371,132 @@ export const TOOL_DEFINITIONS = [
           dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/Research/{topic}.md.' },
         },
         required: ['topic'],
+      },
+    },
+    {
+      name: 'build_brain_dashboard',
+      description:
+        'Dry-run-first Markdown dashboard for the brain layer. Writes Knowledge/_brain.md with review items, open questions, evidence issues, research plans, captures, hot cache and index links.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/_brain.md.' },
+        },
+      },
+    },
+    {
+      name: 'record_brain_feedback',
+      description:
+        'Dry-run-first feedback loop for review and auto-build items. Records accepted/rejected/snoozed outcomes in .brain-feedback.json so future tuning and auto-build gates can use your preferences.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_id: { type: 'string', description: 'Review item id.' },
+          outcome: { type: 'string', enum: ['accepted', 'rejected', 'snoozed'], description: 'Feedback outcome.' },
+          category: { type: 'string', description: 'Optional item category.' },
+          reason: { type: 'string', description: 'Optional reason.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write feedback state.' },
+        },
+        required: ['item_id', 'outcome'],
+      },
+    },
+    {
+      name: 'brain_feedback_summary',
+      description:
+        'Read-only summary of recorded review feedback outcomes by category.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'build_memory_timeline',
+      description:
+        'Dry-run-first customer/project memory timeline. Writes Kunden/{Client}/_timeline.md with decisions, incidents, captures, runbooks, claims, and open points.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          client: { type: 'string', description: 'Client/project folder name under Kunden/.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write the timeline.' },
+        },
+        required: ['client'],
+      },
+    },
+    {
+      name: 'brain_schedule',
+      description:
+        'Read-only propose-only scheduler. Lists due evidence rechecks, expiring knowledge, open questions, contradictions, and missing dashboard/index tasks without writing.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          horizon_days: { type: 'number', description: 'Planning horizon. Default 30, max 365.' },
+        },
+      },
+    },
+    {
+      name: 'brain_auto_build',
+      description:
+        'Policy-controlled auto-build pass. Promotes an auto-capture into durable memory, extracts claims, gates runbook promotion, updates evidence, refreshes generated brain/customer surfaces, records a manifest, learns from feedback, and writes an Auto-Build report. Intended for after-session automation and optional long-session manual trigger.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          source_path: { type: 'string', description: 'Optional source capture/source note path to promote.' },
+          client: { type: 'string', description: 'Optional client/project name for hot cache and timeline.' },
+          max_claims: { type: 'number', description: 'Maximum claims to extract from source. Default 6.' },
+          dry_run: { type: 'boolean', description: 'Override policy mode. If omitted, auto_build policy applies; review_only previews.' },
+        },
+      },
+    },
+    {
+      name: 'archive_auto_build_run',
+      description:
+        'Dry-run-first safety tool for auto-build output. Reads the auto-build manifest for a source capture, moves generated artifacts/reports into Archiv/Auto-Build without touching the original capture, and records negative learning feedback for archived artifact categories.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          source_path: { type: 'string', description: 'Source capture path that was processed by brain_auto_build.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to archive generated artifacts.' },
+        },
+        required: ['source_path'],
+      },
+    },
+    {
+      name: 'build_customer_snapshot',
+      description:
+        'Dry-run-first current-state snapshot for a customer/project. Writes Kunden/{Client}/_snapshot.md with systems, TODOs, decisions, risks, runbooks, questions, and relevant notes.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          client: { type: 'string', description: 'Client/project folder name under Kunden/.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write the snapshot.' },
+        },
+        required: ['client'],
+      },
+    },
+    {
+      name: 'brain_metrics',
+      description:
+        'Read-only metrics for auto-build health: captures, promoted notes, claims, evidence issues, open questions, feedback outcomes, processed/archived auto-build sources, and learned usefulness score.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'brain_checkpoint',
+      description:
+        'Dry-run-first long-session checkpoint. Writes Knowledge/Checkpoints note and can optionally run brain_auto_build for the checkpoint/source.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          title: { type: 'string', description: 'Optional checkpoint title.' },
+          summary: { type: 'string', description: 'Current session state or interim summary.' },
+          client: { type: 'string', description: 'Optional client/project name.' },
+          source_path: { type: 'string', description: 'Optional source note to feed into auto-build.' },
+          run_auto_build: { type: 'boolean', description: 'If true, run brain_auto_build after/with the checkpoint.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write checkpoint and apply auto-build if requested.' },
+        },
+        required: ['summary'],
       },
     },
     {

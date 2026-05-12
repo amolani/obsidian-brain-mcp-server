@@ -3,6 +3,41 @@
     "mode": "manual_only",
     "allowAutomaticRecall": false
   },
+  "automation": {
+    "mode": "auto_build",
+    "afterSession": {
+      "promoteCaptures": true,
+      "extractClaims": true,
+      "updateEvidence": true,
+      "buildDashboard": true,
+      "buildKnowledgeIndex": true,
+      "updateHotCache": true,
+      "buildCustomerTimeline": true,
+      "buildCustomerSnapshot": true,
+      "promoteRunbooks": true
+    },
+    "limits": {
+      "maxNewNotesPerRun": 12,
+      "maxClaimsPerRun": 6,
+      "maxRuntimeMs": 10000
+    },
+    "duringSession": {
+      "allowManualAutoBuildTool": true,
+      "autoCheckpoint": true,
+      "runAutoBuildOnCheckpoint": true,
+      "minMinutesBetweenCheckpoints": 30,
+      "minCommandsBetweenCheckpoints": 12,
+      "maxCheckpointsPerSession": 6
+    },
+    "neverAutoApply": [
+      "merge_duplicates",
+      "rename_note",
+      "organize_referenz",
+      "fix_broken_links",
+      "apply_link_suggestions",
+      "resolve_gap"
+    ]
+  },
   "hooks": {
     "createDailyNote": true,
     "autoCapture": true,
@@ -21,6 +56,8 @@
     "build_context_pack": { "write": false, "risk": "low" },
     "brain_review": { "write": false, "risk": "low" },
     "brain_apply_review_item": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "brain_auto_build": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
+    "archive_auto_build_run": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
     "vault_search": { "write": false, "risk": "low" },
     "semantic_search": { "write": false, "risk": "low" },
 
@@ -31,6 +68,9 @@
     "save_insight": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "save_decision": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "save_answer": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "update_evidence": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "evidence_report": { "write": false, "risk": "low" },
+    "extract_claims": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
     "update_hot_cache": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "read_hot_cache": { "write": false, "risk": "low" },
     "build_knowledge_index": { "write": true, "risk": "low", "requiresDryRunDefault": true },
@@ -39,6 +79,14 @@
     "list_open_questions": { "write": false, "risk": "low" },
     "resolve_gap": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "create_research_plan": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "build_brain_dashboard": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "record_brain_feedback": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "brain_feedback_summary": { "write": false, "risk": "low" },
+    "build_memory_timeline": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "brain_schedule": { "write": false, "risk": "low" },
+    "build_customer_snapshot": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "brain_metrics": { "write": false, "risk": "low" },
+    "brain_checkpoint": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "auto_capture": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
     "daily_note": { "write": true, "risk": "low", "requiresDryRunDefault": false },
     "create_daily_note": { "write": true, "risk": "low", "requiresDryRunDefault": false },

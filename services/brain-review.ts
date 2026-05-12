@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import type { SafeMaintenanceStep, Vault } from '../vault.ts'
 import { findBrokenLinks } from './broken-link-analyzer.ts'
 import { findDuplicates } from './duplicate-analyzer.ts'
+import { evidenceReport } from './evidence.ts'
 import { lintFrontmatter } from './frontmatter-linter.ts'
 import { listLowQualityNotes } from './note-quality.ts'
 import { assertCanWriteTool } from './policy.ts'
@@ -207,6 +208,19 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
     })
   }
 
+  for (const issue of evidenceReport(vault).issues.slice(0, 20)) {
+    items.push({
+      id: itemId('evidence', issue.path, issue.issue),
+      severity: issue.severity,
+      category: 'evidence',
+      title: `${issue.title}: ${issue.issue}`,
+      detail: issue.suggestion,
+      targets: [issue.path],
+      confidence: 'high',
+      action: { kind: 'none', tool: 'update_evidence', args: { path: issue.path } },
+    })
+  }
+
   const semantic = vault.semanticIndexStatus()
   if (!semantic.exists || semantic.missingNotes.length > 0 || semantic.staleNotes.length > 0 || semantic.extraNotes.length > 0) {
     items.push({
@@ -244,6 +258,19 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
       targets: ['Knowledge/hot.md'],
       confidence: 'high',
       action: { kind: 'update_hot_cache', tool: 'update_hot_cache' },
+    })
+  }
+
+  if (!existsSync(vaultJoin(vault.vaultPath, 'Knowledge/_brain.md'))) {
+    items.push({
+      id: itemId('brain_dashboard', 'build'),
+      severity: 'low',
+      category: 'dashboard',
+      title: 'Brain Dashboard anlegen',
+      detail: 'Knowledge/_brain.md existiert noch nicht.',
+      targets: ['Knowledge/_brain.md'],
+      confidence: 'high',
+      action: { kind: 'none', tool: 'build_brain_dashboard' },
     })
   }
 

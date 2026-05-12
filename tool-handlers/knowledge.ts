@@ -2,6 +2,10 @@ import { listSuggestions, promoteClientSuggestion, promoteTechnikSuggestion } fr
 import type { SaveKnowledgeResult } from '../vault.ts'
 import { strings, type ToolHandlerRegistry } from './types.ts'
 
+function evidenceConfidence(value: unknown): 'low' | 'medium' | 'high' | undefined {
+  return ['low', 'medium', 'high'].includes(String(value)) ? value as 'low' | 'medium' | 'high' : undefined
+}
+
 function renderKnowledgeSave(result: SaveKnowledgeResult) {
   return {
     content: [{
@@ -148,6 +152,12 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
       source: typeof args.source === 'string' ? args.source : undefined,
       tags: strings(args.tags),
       folder: typeof args.folder === 'string' ? args.folder : undefined,
+      confidence: evidenceConfidence(args.confidence),
+      checkedAt: typeof args.checked_at === 'string' ? args.checked_at : undefined,
+      recheckAt: typeof args.recheck_at === 'string' ? args.recheck_at : undefined,
+      expiresAt: typeof args.expires_at === 'string' ? args.expires_at : undefined,
+      confirmedBy: strings(args.confirmed_by),
+      contradictedBy: strings(args.contradicted_by),
       dryRun: args.dry_run !== false,
     }))
   },
@@ -160,6 +170,12 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
       source: typeof args.source === 'string' ? args.source : undefined,
       tags: strings(args.tags),
       folder: typeof args.folder === 'string' ? args.folder : undefined,
+      confidence: evidenceConfidence(args.confidence),
+      checkedAt: typeof args.checked_at === 'string' ? args.checked_at : undefined,
+      recheckAt: typeof args.recheck_at === 'string' ? args.recheck_at : undefined,
+      expiresAt: typeof args.expires_at === 'string' ? args.expires_at : undefined,
+      confirmedBy: strings(args.confirmed_by),
+      contradictedBy: strings(args.contradicted_by),
       dryRun: args.dry_run !== false,
     }))
   },
@@ -172,8 +188,93 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
       source: typeof args.source === 'string' ? args.source : undefined,
       tags: strings(args.tags),
       folder: typeof args.folder === 'string' ? args.folder : undefined,
+      confidence: evidenceConfidence(args.confidence),
+      checkedAt: typeof args.checked_at === 'string' ? args.checked_at : undefined,
+      recheckAt: typeof args.recheck_at === 'string' ? args.recheck_at : undefined,
+      expiresAt: typeof args.expires_at === 'string' ? args.expires_at : undefined,
+      confirmedBy: strings(args.confirmed_by),
+      contradictedBy: strings(args.contradicted_by),
       dryRun: args.dry_run !== false,
     }))
+  },
+
+  update_evidence(vault, args) {
+    const result = vault.updateEvidence({
+      path: args.path as string,
+      confidence: evidenceConfidence(args.confidence),
+      source: typeof args.source === 'string' ? args.source : undefined,
+      checkedAt: typeof args.checked_at === 'string' ? args.checked_at : undefined,
+      recheckAt: typeof args.recheck_at === 'string' ? args.recheck_at : undefined,
+      expiresAt: typeof args.expires_at === 'string' ? args.expires_at : undefined,
+      confirmedBy: strings(args.confirmed_by),
+      contradictedBy: strings(args.contradicted_by),
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Evidence Update Vorschau' : '# Evidence aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Felder: ${result.changedFields.join(', ') || '(keine Änderung)'}`,
+          '',
+          result.dryRun ? result.content : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  evidence_report(vault) {
+    const result = vault.evidenceReport()
+    const lines = result.issues.slice(0, 40).map(issue =>
+      `- **${issue.severity}** \`${issue.path}\`: ${issue.issue} → ${issue.suggestion}`,
+    ).join('\n') || 'Keine Evidence-Issues.'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Evidence Report',
+          '',
+          `Candidates: ${result.totalCandidates}`,
+          `Missing confidence: ${result.missingConfidence}`,
+          `Missing source: ${result.missingSource}`,
+          `Due rechecks: ${result.dueRechecks}`,
+          `Contradicted: ${result.contradicted}`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  extract_claims(vault, args) {
+    const result = vault.extractClaims({
+      path: args.path as string,
+      maxClaims: typeof args.max_claims === 'number' ? args.max_claims : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    const lines = result.claims.map(claim => [
+      `- ${claim.claim}`,
+      `  Confidence: ${claim.confidence}`,
+      claim.contradictionCandidates.length > 0 ? `  Widersprüche: ${claim.contradictionCandidates.join(', ')}` : '',
+    ].filter(Boolean).join('\n')).join('\n') || 'Keine Claims erkannt.'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Claim Extraction Vorschau' : '# Claims extrahiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Quelle: \`${result.source}\``,
+          `Claims: ${result.claims.length}`,
+          `Geschrieben: ${result.written.length}`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
   },
 
   update_hot_cache(vault, args) {
@@ -317,6 +418,254 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           '',
           result.content,
         ].join('\n'),
+      }],
+    }
+  },
+
+  build_brain_dashboard(vault, args) {
+    const result = vault.buildBrainDashboard({ dryRun: args.dry_run !== false })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Brain Dashboard Vorschau' : '# Brain Dashboard aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Review Items: ${result.reviewCount}`,
+          `Offene Fragen: ${result.openQuestionCount}`,
+          `Evidence Issues: ${result.evidenceIssueCount}`,
+          `Research-Pläne: ${result.researchPlanCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  record_brain_feedback(vault, args) {
+    const outcome = ['accepted', 'rejected', 'snoozed'].includes(String(args.outcome))
+      ? args.outcome as 'accepted' | 'rejected' | 'snoozed'
+      : 'snoozed'
+    const result = vault.recordBrainFeedback({
+      itemId: args.item_id as string,
+      outcome,
+      category: typeof args.category === 'string' ? args.category : undefined,
+      reason: typeof args.reason === 'string' ? args.reason : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Brain Feedback Vorschau' : '# Brain Feedback gespeichert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Item: \`${result.entry.itemId}\``,
+          `Outcome: ${result.entry.outcome}`,
+          `Summary: accepted ${result.summary.accepted}, rejected ${result.summary.rejected}, snoozed ${result.summary.snoozed}`,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_feedback_summary(vault) {
+    const result = vault.brainFeedbackSummary()
+    const categories = Object.entries(result.byCategory)
+      .map(([category, counts]) => `- ${category}: accepted ${counts.accepted}, rejected ${counts.rejected}, snoozed ${counts.snoozed}`)
+      .join('\n') || '- Keine Kategorien'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Feedback Summary',
+          '',
+          `Total: ${result.total}`,
+          `Accepted: ${result.accepted}`,
+          `Rejected: ${result.rejected}`,
+          `Snoozed: ${result.snoozed}`,
+          '',
+          categories,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  build_memory_timeline(vault, args) {
+    const result = vault.buildMemoryTimeline({
+      client: args.client as string,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Memory Timeline Vorschau' : '# Memory Timeline aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Client: ${result.client}`,
+          `Pfad: \`${result.path}\``,
+          `Events: ${result.eventCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_schedule(vault, args) {
+    const result = vault.proposeBrainSchedule({
+      horizonDays: typeof args.horizon_days === 'number' ? args.horizon_days : undefined,
+    })
+    const lines = result.items.map(item => [
+      `- **${item.priority}** \`${item.id}\` (${item.due})`,
+      `  ${item.title}`,
+      `  Grund: ${item.reason}`,
+      `  Tool: ${item.suggestedTool}`,
+    ].join('\n')).join('\n\n') || 'Keine geplanten Vorschläge.'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Schedule',
+          '',
+          `Generated: ${result.generatedAt}`,
+          `Horizon: ${result.horizonDays} Tage`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_auto_build(vault, args) {
+    const result = vault.brainAutoBuild({
+      sourcePath: typeof args.source_path === 'string' ? args.source_path : undefined,
+      client: typeof args.client === 'string' ? args.client : undefined,
+      maxClaims: typeof args.max_claims === 'number' ? args.max_claims : undefined,
+      dryRun: typeof args.dry_run === 'boolean' ? args.dry_run : undefined,
+    })
+    const lines = result.steps.map(step =>
+      `- \`${step.step}\`: ${step.skipped ? 'skipped' : step.applied ? 'applied' : 'preview'} - ${step.summary}`,
+    ).join('\n') || '- Keine Schritte'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Brain Auto-Build Vorschau' : '# Brain Auto-Build ausgeführt',
+          '',
+          `Mode: ${result.mode}`,
+          `Dry-Run: ${result.dryRun}`,
+          `Quelle: ${result.sourcePath ?? '(keine)'}`,
+          `Client: ${result.client ?? '(keiner)'}`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  archive_auto_build_run(vault, args) {
+    const result = vault.archiveAutoBuildRun({
+      sourcePath: args.source_path as string,
+      dryRun: args.dry_run !== false,
+    })
+    const archived = result.archived.map(item => `- \`${item.from}\` -> \`${item.to}\``).join('\n') || '- Keine Artefakte'
+    const skipped = result.skipped.map(item => `- \`${item.path}\`: ${item.reason}`).join('\n') || '- Keine Skips'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Auto-Build Archiv Vorschau' : '# Auto-Build Artefakte archiviert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Quelle: \`${result.sourcePath}\``,
+          `Archiv: \`${result.archiveFolder}\``,
+          '',
+          '## Archiviert',
+          archived,
+          '',
+          '## Übersprungen',
+          skipped,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  build_customer_snapshot(vault, args) {
+    const result = vault.buildCustomerSnapshot({
+      client: args.client as string,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Customer Snapshot Vorschau' : '# Customer Snapshot aktualisiert',
+          '',
+          `Client: ${result.client}`,
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Notizen: ${result.noteCount}`,
+          `TODOs: ${result.todoCount}`,
+          `Entscheidungen: ${result.decisionCount}`,
+          `Risiken: ${result.riskCount}`,
+          `Runbooks: ${result.runbookCount}`,
+          `Offene Fragen: ${result.questionCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_metrics(vault) {
+    const metrics = vault.brainMetrics()
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Metrics',
+          '',
+          `Notes: ${metrics.notes}`,
+          `Auto-Captures: ${metrics.autoCaptures}`,
+          `Auto-promoted: ${metrics.autoPromoted}`,
+          `Claims: ${metrics.claims}`,
+          `Evidence candidates: ${metrics.evidenceCandidates}`,
+          `Evidence issues: ${metrics.evidenceIssues}`,
+          `Open questions: ${metrics.openQuestions}`,
+          `Contradictions: ${metrics.contradictions}`,
+          `Feedback: accepted ${metrics.feedback.accepted}, rejected ${metrics.feedback.rejected}, snoozed ${metrics.feedback.snoozed}`,
+          `Auto-build processed sources: ${metrics.autoBuild.processedSources}`,
+          `Auto-build archived sources: ${metrics.autoBuild.archivedSources}`,
+          `Auto-build usefulness score: ${metrics.autoBuild.usefulnessScore.toFixed(2)}`,
+          `Auto-build learned categories: ${metrics.autoBuild.learnedCategories}`,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_checkpoint(vault, args) {
+    const result = vault.brainCheckpoint({
+      title: typeof args.title === 'string' ? args.title : undefined,
+      summary: args.summary as string,
+      client: typeof args.client === 'string' ? args.client : undefined,
+      sourcePath: typeof args.source_path === 'string' ? args.source_path : undefined,
+      runAutoBuild: args.run_auto_build === true,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Brain Checkpoint Vorschau' : '# Brain Checkpoint gespeichert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          result.autoBuild ? `Auto-Build: ${JSON.stringify(result.autoBuild, null, 2)}` : '',
+          '',
+          result.content,
+        ].filter(Boolean).join('\n'),
       }],
     }
   },

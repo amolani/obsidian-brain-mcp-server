@@ -14,6 +14,7 @@ import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
+import { Vault } from '../vault.ts'
 
 if (!process.env.VAULT_PATH) {
   process.stderr.write('knowledge-harvester: VAULT_PATH environment variable required\n')
@@ -463,7 +464,7 @@ const timeout = setTimeout(() => process.exit(0), 12000)
 
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk: string) => input += chunk)
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   clearTimeout(timeout)
 
   try {
@@ -566,6 +567,23 @@ process.stdin.on('end', () => {
         summary: `Auto-Capture-Link in Daily Note eingetragen`,
         meta: { link: relativeTarget },
       })
+    }
+
+    if (policy.automation.mode === 'auto_build') {
+      const vault = new Vault(VAULT_PATH)
+      try {
+        await vault.init()
+        const result = vault.brainAutoBuild({
+          sourcePath: relativeTarget,
+          client: knowledge.client ?? undefined,
+          dryRun: false,
+        })
+        const applied = result.steps.filter(step => step.applied).length
+        const skipped = result.steps.filter(step => step.skipped).length
+        log(`Auto-build: ${applied} applied, ${skipped} skipped for ${relativeTarget}`)
+      } finally {
+        vault.shutdown()
+      }
     }
 
   } catch (err) {

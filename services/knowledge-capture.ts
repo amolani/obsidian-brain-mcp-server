@@ -15,6 +15,12 @@ export interface SaveKnowledgeOptions {
   source?: string
   tags?: string[]
   folder?: string
+  confidence?: 'low' | 'medium' | 'high'
+  checkedAt?: string
+  recheckAt?: string
+  expiresAt?: string
+  confirmedBy?: string[]
+  contradictedBy?: string[]
   dryRun?: boolean
 }
 
@@ -48,6 +54,12 @@ function renderKnowledgeNote(options: SaveKnowledgeOptions, tags: string[]): str
     datum: today(),
   }
   if (options.source?.trim()) meta.quelle = options.source.trim()
+  if (options.confidence) meta.confidence = options.confidence
+  if (options.checkedAt) meta.checked_at = options.checkedAt
+  if (options.recheckAt) meta.recheck_at = options.recheckAt
+  if (options.expiresAt) meta.expires_at = options.expiresAt
+  if (options.confirmedBy?.length) meta.confirmed_by = options.confirmedBy
+  if (options.contradictedBy?.length) meta.contradicted_by = options.contradictedBy
 
   const contextBlock = options.context?.trim()
     ? `\n## Kontext\n\n${options.context.trim()}\n`

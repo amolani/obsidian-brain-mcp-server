@@ -17,6 +17,34 @@ export interface BrainPolicy {
     mode: WorkingMemoryMode
     allowAutomaticRecall: boolean
   }
+  automation: {
+    mode: 'auto_build' | 'review_only' | 'off'
+    afterSession: {
+      promoteCaptures: boolean
+      extractClaims: boolean
+      updateEvidence: boolean
+      buildDashboard: boolean
+      buildKnowledgeIndex: boolean
+      updateHotCache: boolean
+      buildCustomerTimeline: boolean
+      buildCustomerSnapshot: boolean
+      promoteRunbooks: boolean
+    }
+    limits: {
+      maxNewNotesPerRun: number
+      maxClaimsPerRun: number
+      maxRuntimeMs: number
+    }
+    duringSession: {
+      allowManualAutoBuildTool: boolean
+      autoCheckpoint: boolean
+      runAutoBuildOnCheckpoint: boolean
+      minMinutesBetweenCheckpoints: number
+      minCommandsBetweenCheckpoints: number
+      maxCheckpointsPerSession: number
+    }
+    neverAutoApply: string[]
+  }
   hooks: {
     createDailyNote: boolean
     autoCapture: boolean
@@ -41,6 +69,41 @@ const DEFAULT_POLICY: BrainPolicy = {
     mode: 'manual_only',
     allowAutomaticRecall: false,
   },
+  automation: {
+    mode: 'auto_build',
+    afterSession: {
+      promoteCaptures: true,
+      extractClaims: true,
+      updateEvidence: true,
+      buildDashboard: true,
+      buildKnowledgeIndex: true,
+      updateHotCache: true,
+      buildCustomerTimeline: true,
+      buildCustomerSnapshot: true,
+      promoteRunbooks: true,
+    },
+    limits: {
+      maxNewNotesPerRun: 12,
+      maxClaimsPerRun: 6,
+      maxRuntimeMs: 10000,
+    },
+    duringSession: {
+      allowManualAutoBuildTool: true,
+      autoCheckpoint: true,
+      runAutoBuildOnCheckpoint: true,
+      minMinutesBetweenCheckpoints: 30,
+      minCommandsBetweenCheckpoints: 12,
+      maxCheckpointsPerSession: 6,
+    },
+    neverAutoApply: [
+      'merge_duplicates',
+      'rename_note',
+      'organize_referenz',
+      'fix_broken_links',
+      'apply_link_suggestions',
+      'resolve_gap',
+    ],
+  },
   hooks: {
     createDailyNote: true,
     autoCapture: true,
@@ -53,11 +116,16 @@ const DEFAULT_POLICY: BrainPolicy = {
     build_context_pack: { write: false, risk: 'low' },
     brain_review: { write: false, risk: 'low' },
     brain_apply_review_item: { write: true, risk: 'medium', requiresDryRunDefault: true },
+    brain_auto_build: { write: true, risk: 'medium', requiresDryRunDefault: false },
+    archive_auto_build_run: { write: true, risk: 'medium', requiresDryRunDefault: true },
     auto_capture: { write: true, risk: 'medium' },
     ingest_source: { write: true, risk: 'medium', requiresDryRunDefault: true },
     save_insight: { write: true, risk: 'low', requiresDryRunDefault: true },
     save_decision: { write: true, risk: 'low', requiresDryRunDefault: true },
     save_answer: { write: true, risk: 'low', requiresDryRunDefault: true },
+    update_evidence: { write: true, risk: 'low', requiresDryRunDefault: true },
+    evidence_report: { write: false, risk: 'low' },
+    extract_claims: { write: true, risk: 'medium', requiresDryRunDefault: true },
     update_hot_cache: { write: true, risk: 'low', requiresDryRunDefault: true },
     read_hot_cache: { write: false, risk: 'low' },
     build_knowledge_index: { write: true, risk: 'low', requiresDryRunDefault: true },
@@ -66,6 +134,14 @@ const DEFAULT_POLICY: BrainPolicy = {
     list_open_questions: { write: false, risk: 'low' },
     resolve_gap: { write: true, risk: 'low', requiresDryRunDefault: true },
     create_research_plan: { write: true, risk: 'low', requiresDryRunDefault: true },
+    build_brain_dashboard: { write: true, risk: 'low', requiresDryRunDefault: true },
+    record_brain_feedback: { write: true, risk: 'low', requiresDryRunDefault: true },
+    brain_feedback_summary: { write: false, risk: 'low' },
+    build_memory_timeline: { write: true, risk: 'low', requiresDryRunDefault: true },
+    brain_schedule: { write: false, risk: 'low' },
+    build_customer_snapshot: { write: true, risk: 'low', requiresDryRunDefault: true },
+    brain_metrics: { write: false, risk: 'low' },
+    brain_checkpoint: { write: true, risk: 'low', requiresDryRunDefault: true },
     create_daily_note: { write: true, risk: 'low' },
     daily_note: { write: true, risk: 'low' },
     organize_referenz: { write: true, risk: 'medium', requiresDryRunDefault: true },
@@ -90,6 +166,58 @@ function mergePolicy(raw: Partial<BrainPolicy>): BrainPolicy {
       ...(raw.workingMemory ?? {}),
       mode: raw.workingMemory?.mode === 'disabled' ? 'disabled' : 'manual_only',
       allowAutomaticRecall: asBoolean(raw.workingMemory?.allowAutomaticRecall, DEFAULT_POLICY.workingMemory.allowAutomaticRecall),
+    },
+    automation: {
+      ...DEFAULT_POLICY.automation,
+      ...(raw.automation ?? {}),
+      mode: ['auto_build', 'review_only', 'off'].includes(String(raw.automation?.mode))
+        ? raw.automation!.mode as BrainPolicy['automation']['mode']
+        : DEFAULT_POLICY.automation.mode,
+      afterSession: {
+        ...DEFAULT_POLICY.automation.afterSession,
+        ...(raw.automation?.afterSession ?? {}),
+        promoteCaptures: asBoolean(raw.automation?.afterSession?.promoteCaptures, DEFAULT_POLICY.automation.afterSession.promoteCaptures),
+        extractClaims: asBoolean(raw.automation?.afterSession?.extractClaims, DEFAULT_POLICY.automation.afterSession.extractClaims),
+        updateEvidence: asBoolean(raw.automation?.afterSession?.updateEvidence, DEFAULT_POLICY.automation.afterSession.updateEvidence),
+        buildDashboard: asBoolean(raw.automation?.afterSession?.buildDashboard, DEFAULT_POLICY.automation.afterSession.buildDashboard),
+        buildKnowledgeIndex: asBoolean(raw.automation?.afterSession?.buildKnowledgeIndex, DEFAULT_POLICY.automation.afterSession.buildKnowledgeIndex),
+        updateHotCache: asBoolean(raw.automation?.afterSession?.updateHotCache, DEFAULT_POLICY.automation.afterSession.updateHotCache),
+        buildCustomerTimeline: asBoolean(raw.automation?.afterSession?.buildCustomerTimeline, DEFAULT_POLICY.automation.afterSession.buildCustomerTimeline),
+        buildCustomerSnapshot: asBoolean(raw.automation?.afterSession?.buildCustomerSnapshot, DEFAULT_POLICY.automation.afterSession.buildCustomerSnapshot),
+        promoteRunbooks: asBoolean(raw.automation?.afterSession?.promoteRunbooks, DEFAULT_POLICY.automation.afterSession.promoteRunbooks),
+      },
+      limits: {
+        ...DEFAULT_POLICY.automation.limits,
+        ...(raw.automation?.limits ?? {}),
+        maxNewNotesPerRun: typeof raw.automation?.limits?.maxNewNotesPerRun === 'number'
+          ? Math.max(1, Math.min(raw.automation.limits.maxNewNotesPerRun, 50))
+          : DEFAULT_POLICY.automation.limits.maxNewNotesPerRun,
+        maxClaimsPerRun: typeof raw.automation?.limits?.maxClaimsPerRun === 'number'
+          ? Math.max(0, Math.min(raw.automation.limits.maxClaimsPerRun, 50))
+          : DEFAULT_POLICY.automation.limits.maxClaimsPerRun,
+        maxRuntimeMs: typeof raw.automation?.limits?.maxRuntimeMs === 'number'
+          ? Math.max(1000, Math.min(raw.automation.limits.maxRuntimeMs, 60000))
+          : DEFAULT_POLICY.automation.limits.maxRuntimeMs,
+      },
+      duringSession: {
+        ...DEFAULT_POLICY.automation.duringSession,
+        ...(raw.automation?.duringSession ?? {}),
+        allowManualAutoBuildTool: asBoolean(raw.automation?.duringSession?.allowManualAutoBuildTool, DEFAULT_POLICY.automation.duringSession.allowManualAutoBuildTool),
+        autoCheckpoint: asBoolean(raw.automation?.duringSession?.autoCheckpoint, DEFAULT_POLICY.automation.duringSession.autoCheckpoint),
+        runAutoBuildOnCheckpoint: asBoolean(raw.automation?.duringSession?.runAutoBuildOnCheckpoint, DEFAULT_POLICY.automation.duringSession.runAutoBuildOnCheckpoint),
+        minMinutesBetweenCheckpoints: typeof raw.automation?.duringSession?.minMinutesBetweenCheckpoints === 'number'
+          ? Math.max(5, Math.min(raw.automation.duringSession.minMinutesBetweenCheckpoints, 240))
+          : DEFAULT_POLICY.automation.duringSession.minMinutesBetweenCheckpoints,
+        minCommandsBetweenCheckpoints: typeof raw.automation?.duringSession?.minCommandsBetweenCheckpoints === 'number'
+          ? Math.max(3, Math.min(raw.automation.duringSession.minCommandsBetweenCheckpoints, 100))
+          : DEFAULT_POLICY.automation.duringSession.minCommandsBetweenCheckpoints,
+        maxCheckpointsPerSession: typeof raw.automation?.duringSession?.maxCheckpointsPerSession === 'number'
+          ? Math.max(1, Math.min(raw.automation.duringSession.maxCheckpointsPerSession, 24))
+          : DEFAULT_POLICY.automation.duringSession.maxCheckpointsPerSession,
+      },
+      neverAutoApply: Array.isArray(raw.automation?.neverAutoApply)
+        ? raw.automation!.neverAutoApply.map(String)
+        : DEFAULT_POLICY.automation.neverAutoApply,
     },
     hooks: {
       ...DEFAULT_POLICY.hooks,
