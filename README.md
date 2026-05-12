@@ -13,7 +13,7 @@ Local-first MCP server for consultants, sysadmins, and technical operators who w
 [![Obsidian](https://img.shields.io/badge/Obsidian-vault%20native-7C3AED?logo=obsidian&logoColor=white)](README.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**[Quick Start](#quick-start)** · **[Session Flow](#brain-workflow)** · **[What You Get](#what-lands-in-obsidian)** · **[Tools](#tool-surface)** · **[Safety](#safety-model)**
+**[Quick Start](#quick-start)** · **[Session Flow](#brain-workflow)** · **[What You Get](#what-lands-in-obsidian)** · **[Tools](#tool-surface)** · **[Safety](#safety-model)** · **[V1 Definition](docs/v1-product-definition.md)**
 
 <img src="./assets/obsidian-brain-hero-v2.png" alt="Obsidian Brain MCP hero banner showing a terminal session flowing into a guarded local vault, evidence cards, runbooks, dashboards, and an Obsidian knowledge graph" width="100%">
 
@@ -525,7 +525,7 @@ YourVault/
 
 ## Roadmap
 
-Current focus is operational reliability first, then a smoother plugin experience.
+Current focus is the fixed [v1 product definition](docs/v1-product-definition.md), then a smoother plugin experience.
 
 | Area | Direction |
 |---|---|
