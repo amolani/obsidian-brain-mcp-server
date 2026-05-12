@@ -48,7 +48,7 @@ export function buildBrainDashboard(vault: Vault, options: BuildBrainDashboardOp
   const questionLines = questions.slice(0, 15).map(item => `- [${item.type}] [[${item.path}|${item.title}]]`).join('\n') || '- Keine offenen Fragen'
   const evidenceLines = evidence.issues.slice(0, 15).map(issue => `- **${issue.severity}** [[${issue.path}|${issue.title}]] - ${issue.issue}`).join('\n') || '- Keine Evidence-Issues'
 
-  const content = `---\nstatus: aktiv\ntags:\n  - brain-dashboard\naktualisiert: ${today()}\nquelle: brain-dashboard\n---\n\n# Brain Dashboard\n\n## Operating Review\n\n${reviewLines}\n\n## Offene Fragen und Widersprüche\n\n${questionLines}\n\n## Evidence / Confidence\n\n${evidenceLines}\n\n## Research-Pläne\n\n${noteLinks(researchPlans)}\n\n## Letzte Auto-Captures\n\n${noteLinks(recentCaptures)}\n\n## Manuelle Arbeitsflächen\n\n- [[Knowledge/hot|Hot Cache]]\n- [[Knowledge/index|Knowledge Index]]\n`
+  const content = `---\nstatus: aktiv\ntags:\n  - brain-dashboard\naktualisiert: ${today()}\nquelle: brain-dashboard\n---\n\n# Brain Dashboard\n\n## Operating Review\n\n${reviewLines}\n\n## Offene Fragen und Widersprüche\n\n${questionLines}\n\n## Evidence / Confidence\n\n${evidenceLines}\n\n## Research-Pläne\n\n${noteLinks(researchPlans)}\n\n## Letzte Auto-Captures\n\n${noteLinks(recentCaptures)}\n\n## Manuelle Arbeitsflächen\n\n- [[Knowledge/hot|Hot Cache]]\n- [[Knowledge/index|Knowledge Index]]\n- [[Knowledge/evidence|Evidence Dashboard]]\n- [[Maintenance/Capture Review|Capture Review]]\n`
 
   if (!dryRun) {
     assertCanWriteTool('build_brain_dashboard', [DASHBOARD_PATH])

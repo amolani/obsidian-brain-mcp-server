@@ -1,0 +1,44 @@
+{
+  "env": {
+    "VAULT_PATH": "/path/to/your/obsidian/vault"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/obsidian-brain-mcp-server/hooks/session-context.ts\"",
+            "timeout": 8,
+            "statusMessage": "Loading Obsidian context..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/obsidian-brain-mcp-server/hooks/session-checkpoint.ts\"",
+            "timeout": 12,
+            "statusMessage": "Checking long-session checkpoint..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/obsidian-brain-mcp-server/hooks/knowledge-harvester.ts\"",
+            "timeout": 15,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

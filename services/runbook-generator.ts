@@ -3,12 +3,20 @@ import { join, relative } from 'node:path'
 import type { NoteEntry } from '../vault.ts'
 import { loadClients } from '../config.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface GenerateRunbookResult {
+  dryRun: boolean
   path: string
   sourceCount: number
   stepCount: number
   fixCount: number
+  content: string
+}
+
+export interface GenerateRunbookOptions {
+  outputFolder?: string
+  dryRun?: boolean
 }
 
 export interface RunbookGeneratorContext {
@@ -71,10 +79,12 @@ function extractRunbookParts(sourceNotes: RunbookSource[]): {
   steps: string[]
   fixes: string[]
   summaries: string[]
+  validations: string[]
 } {
   const steps: string[] = []
   const fixes: string[] = []
   const summaries: string[] = []
+  const validations: string[] = []
   const seenSteps = new Set<string>()
 
   for (const note of sourceNotes) {
@@ -96,6 +106,9 @@ function extractRunbookParts(sourceNotes: RunbookSource[]): {
 
     const summarySection = note.content.match(/## Zusammenfassung\n\n([\s\S]*?)(?=\n## |$)/i)
     if (summarySection) summaries.push(summarySection[1].trim())
+
+    const validationSection = note.content.match(/## Validierung\n\n([\s\S]*?)(?=\n## |$)/i)
+    if (validationSection) validations.push(validationSection[1].trim())
   }
 
   for (const note of sourceNotes) {
@@ -111,14 +124,17 @@ function extractRunbookParts(sourceNotes: RunbookSource[]): {
     }
   }
 
-  return { steps, fixes, summaries }
+  return { steps, fixes, summaries, validations }
 }
 
-function renderRunbook(topic: string, sourceNotes: RunbookSource[], steps: string[], fixes: string[], summaries: string[]): string {
+function renderRunbook(topic: string, sourceNotes: RunbookSource[], steps: string[], fixes: string[], summaries: string[], validations: string[]): string {
   const datum = today()
   const topicLower = topic.toLowerCase()
   const tagBlock = ['runbook', topicLower.replace(/\s+/g, '-')].map(tag => `  - ${tag}`).join('\n')
   const sourceLinks = sourceNotes.map(source => `- [[${source.path}|${source.title}]]`).join('\n')
+  const validationText = validations.length > 0
+    ? validations.join('\n\n')
+    : '- Ergebnis gegen betroffene Systeme pruefen.\n- Logs nach Fehlern durchsuchen.\n- Relevante Kunden-/Projekt-Notiz aktualisieren.'
 
   let content = `---
 status: aktiv
@@ -126,6 +142,7 @@ tags:
 ${tagBlock}
 datum: ${datum}
 quellen: ${sourceNotes.length}
+quelle: runbook-generator
 ---
 
 # Runbook: ${topic}
@@ -143,9 +160,15 @@ ${sourceLinks}
     content += `\n## Übersicht\n\n${summaries.slice(-2).join('\n\n')}\n`
   }
 
+  content += `\n## Voraussetzungen\n\n- Zugriff auf die betroffenen Systeme ist vorhanden.\n- Relevante Quell-Notizen wurden geprueft.\n- Aenderungen werden erst nach Review angewendet.\n`
+
   if (steps.length > 0) {
     content += `\n## Schritte\n\n${steps.map((step, i) => `${i + 1}. ${step}`).join('\n')}\n`
   }
+
+  content += `\n## Validierung\n\n${validationText}\n`
+
+  content += `\n## Rollback\n\n- Letzte funktionierende Konfiguration wiederherstellen.\n- Geaenderte Dienste kontrolliert neu starten.\n- Abweichungen als Knowledge Gap oder Incident erfassen.\n`
 
   if (fixes.length > 0) {
     content += '\n## Bekannte Probleme und Workarounds\n\n'
@@ -168,20 +191,35 @@ function outputFolderForTopic(topicLower: string, outputFolder?: string): string
   return folder
 }
 
-export function generateRunbook(ctx: RunbookGeneratorContext, topic: string, outputFolder?: string): GenerateRunbookResult {
+export function generateRunbook(ctx: RunbookGeneratorContext, topic: string, options: GenerateRunbookOptions | string = {}): GenerateRunbookResult {
+  const outputFolder = typeof options === 'string' ? options : options.outputFolder
+  const dryRun = typeof options === 'string' ? false : options.dryRun ?? false
   const topicLower = topic.toLowerCase()
   const sourceNotes = collectSources(ctx.notes, topicLower)
   if (sourceNotes.length === 0) {
     throw new Error(`Keine Quell-Notizen für "${topic}" gefunden. Arbeite zuerst am Projekt — der Knowledge Harvester erstellt automatisch Captures.`)
   }
 
-  const { steps, fixes, summaries } = extractRunbookParts(sourceNotes)
-  const content = renderRunbook(topic, sourceNotes, steps, fixes, summaries)
+  const { steps, fixes, summaries, validations } = extractRunbookParts(sourceNotes)
+  const content = renderRunbook(topic, sourceNotes, steps, fixes, summaries, validations)
   const folder = outputFolderForTopic(topicLower, outputFolder)
   const safeTitle = `Runbook ${topic}`.replace(/[/\\:*?"<>|]/g, '-').slice(0, 100)
   const fullDir = join(ctx.vaultPath, folder)
   const fullPath = join(fullDir, `${safeTitle}.md`)
+  const relativePath = relative(ctx.vaultPath, fullPath)
 
+  if (dryRun) {
+    return {
+      dryRun,
+      path: relativePath,
+      sourceCount: sourceNotes.length,
+      stepCount: steps.length,
+      fixCount: fixes.length,
+      content,
+    }
+  }
+
+  assertCanWriteTool('generate_runbook', [relativePath])
   mkdirSync(fullDir, { recursive: true })
   writeFileSync(fullPath, content, 'utf-8')
 
@@ -189,7 +227,6 @@ export function generateRunbook(ctx: RunbookGeneratorContext, topic: string, out
   ctx.indexNote(fullPath, stat.mtimeMs)
   ctx.buildLinkIndex()
 
-  const relativePath = relative(ctx.vaultPath, fullPath)
   appendActionLog(ctx.vaultPath, {
     tool: 'generate_runbook',
     mode: 'apply',
@@ -199,9 +236,11 @@ export function generateRunbook(ctx: RunbookGeneratorContext, topic: string, out
   })
 
   return {
+    dryRun,
     path: relativePath,
     sourceCount: sourceNotes.length,
     stepCount: steps.length,
     fixCount: fixes.length,
+    content,
   }
 }

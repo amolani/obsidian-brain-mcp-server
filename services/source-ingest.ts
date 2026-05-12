@@ -24,6 +24,7 @@ export interface IngestSourceOptions {
   outputFolder?: string
   dryRun?: boolean
   force?: boolean
+  profile?: SourceIngestProfile
 }
 
 export interface IngestSourceResult {
@@ -37,9 +38,11 @@ export interface IngestSourceResult {
   headings: string[]
   keyPoints: string[]
   links: string[]
+  profile: SourceIngestProfile
 }
 
 const MANIFEST_PATH = '.raw/.manifest.json'
+export type SourceIngestProfile = 'markdown' | 'ticket' | 'incident_log' | 'web_export'
 
 function today(): string {
   return new Date().toISOString().split('T')[0]
@@ -104,6 +107,25 @@ function extractLinks(content: string): string[] {
   return [...new Set([...markdown, ...plain])].slice(0, 20)
 }
 
+function normalizeProfile(value: unknown): SourceIngestProfile {
+  return ['markdown', 'ticket', 'incident_log', 'web_export'].includes(String(value))
+    ? value as SourceIngestProfile
+    : 'markdown'
+}
+
+function profileSection(profile: SourceIngestProfile): string {
+  if (profile === 'ticket') {
+    return '## Ticket Kontext\n\n- [ ] Betroffene Systeme klaeren\n- [ ] Kunden-/Projektbezug pruefen\n- [ ] Ergebnis als Entscheidung, Claim oder Runbook speichern\n'
+  }
+  if (profile === 'incident_log') {
+    return '## Incident Kontext\n\n- [ ] Symptome extrahieren\n- [ ] Timeline pruefen\n- [ ] Fix, Validierung und Follow-ups dokumentieren\n'
+  }
+  if (profile === 'web_export') {
+    return '## Web Export Kontext\n\n- [ ] Primaerquelle und Aktualitaet pruefen\n- [ ] Claims extrahieren\n- [ ] Recheck-Datum setzen\n'
+  }
+  return ''
+}
+
 function renderSourceNote(result: Omit<IngestSourceResult, 'dryRun' | 'skipped' | 'reason'>): string {
   const headingLines = result.headings.length > 0
     ? result.headings.map(heading => `- ${heading}`).join('\n')
@@ -120,9 +142,11 @@ status: aktiv
 tags:
   - source
   - ingest
+  - ${result.profile}
 datum: ${today()}
 quelle: ${result.sourcePath}
 source_hash: ${result.hash}
+profile: ${result.profile}
 ---
 
 # Source: ${result.title}
@@ -141,6 +165,7 @@ ${headingLines}
 
 ${keyPointLines}
 
+${profileSection(result.profile)}
 ## Externe Links
 
 ${linkLines}
@@ -158,6 +183,7 @@ export function ingestSource(vault: Vault, options: IngestSourceOptions): Ingest
   const manifest = readManifest(vault.vaultPath)
   const existing = manifest.sources[sourcePath]
   const title = titleFromSource(sourcePath, content, options.title)
+  const profile = normalizeProfile(options.profile)
   const outputFolder = options.outputFolder ?? 'Referenz/Quellen'
   const outputPath = existing?.outputPath ?? (
     dryRun
@@ -172,6 +198,7 @@ export function ingestSource(vault: Vault, options: IngestSourceOptions): Ingest
     headings: extractHeadings(content),
     keyPoints: extractKeyPoints(content),
     links: extractLinks(content),
+    profile,
   }
 
   if (existing && existing.hash === hash && !options.force) {

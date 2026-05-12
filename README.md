@@ -73,6 +73,16 @@ npm install
 export VAULT_PATH=/path/to/your/obsidian/vault
 ```
 
+Run the local setup doctor:
+
+```bash
+node cli.ts doctor --vault "$VAULT_PATH"
+node cli.ts install-hooks --vault "$VAULT_PATH"
+node cli.ts install-hooks --vault "$VAULT_PATH" --apply
+```
+
+The first `install-hooks` command is a dry-run and prints the planned `~/.claude/settings.json` changes. The `--apply` run creates a backup before writing.
+
 Register the MCP server globally for Claude Code:
 
 Node 22+ can run the TypeScript entrypoint directly:
@@ -96,6 +106,13 @@ brain_health_check
 ```
 
 If the health check is clean, just work normally. Captures, dashboards, evidence, timelines, and maintenance views are built around your actual Obsidian files.
+
+Want to see the value before touching your vault?
+
+```bash
+node cli.ts demo --out /tmp/obsidian-brain-demo --force
+node cli.ts doctor --vault /tmp/obsidian-brain-demo --skip-hooks
+```
 
 ## Session Experience
 
@@ -190,7 +207,8 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `archive_auto_build_run` | Archive one auto-build run's artifacts and record negative learning feedback |
 | `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
 | `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
-| `build_brain_dashboard`, `build_knowledge_index`, `update_hot_cache` | Obsidian-visible operating surfaces |
+| `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
+| `build_knowledge_index`, `update_hot_cache` | Knowledge map and manual hot context cache |
 | `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
 
 </details>
@@ -505,11 +523,11 @@ Current focus is operational reliability first, then a smoother plugin experienc
 
 | Area | Direction |
 |---|---|
-| Plugin packaging | Claude Code plugin bundle with fewer manual setup steps |
-| First-run setup | Guided health check, vault validation, and hook registration hints |
-| Visual surfaces | Better dashboard previews, runbook lists, evidence status, and customer snapshots |
-| Feedback loop | Easier archive/reject/retry workflow for noisy auto-build output |
-| Import paths | Safer source ingestion profiles for PDFs, web exports, tickets, and incident logs |
+| Plugin packaging | Claude Code plugin template is scaffolded; CLI remains the Public Beta install path |
+| First-run setup | `obsidian-brain doctor`, `install-hooks`, `init`, `demo`, and `release-check` |
+| Visual surfaces | Brain dashboard, capture review, evidence dashboard, runbook lists, and customer snapshots |
+| Feedback loop | Easier archive/reject/retry guidance for noisy auto-build output |
+| Import paths | Source ingest profiles for markdown, tickets, web exports, and incident logs |
 | Collaboration | Shareable policy presets while keeping vault data local |
 
 ## Development

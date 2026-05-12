@@ -3,11 +3,15 @@
   "version": "0.2.0",
   "description": "Second Brain MCP server for Obsidian vaults — filesystem-native, with automatic knowledge capture from Claude Code sessions.",
   "type": "module",
-  "bin": "./server.ts",
+  "bin": {
+    "obsidian-brain": "./cli.ts",
+    "obsidian-brain-mcp": "./server.ts"
+  },
   "scripts": {
     "start": "node server.ts",
     "test": "node --test --test-reporter=spec tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release-check": "node cli.ts release-check"
   },
   "keywords": [
     "mcp",

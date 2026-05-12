@@ -1,0 +1,20 @@
+{
+  "name": "obsidian-brain",
+  "displayName": "Obsidian Brain MCP",
+  "version": "0.2.0",
+  "description": "Local-first Claude Code MCP server for building an Obsidian technical second brain.",
+  "mcp": {
+    "server": "obsidian-brain",
+    "command": "node",
+    "args": [
+      "/absolute/path/to/obsidian-brain-mcp-server/server.ts"
+    ],
+    "env": {
+      "VAULT_PATH": "/path/to/your/obsidian/vault"
+    }
+  },
+  "hooks": {
+    "settingsTemplate": "./settings.template.json"
+  },
+  "instructions": "./CLAUDE.template.md"
+}

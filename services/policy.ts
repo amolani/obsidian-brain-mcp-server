@@ -135,6 +135,8 @@ const DEFAULT_POLICY: BrainPolicy = {
     resolve_gap: { write: true, risk: 'low', requiresDryRunDefault: true },
     create_research_plan: { write: true, risk: 'low', requiresDryRunDefault: true },
     build_brain_dashboard: { write: true, risk: 'low', requiresDryRunDefault: true },
+    build_capture_review: { write: true, risk: 'low', requiresDryRunDefault: true },
+    build_evidence_dashboard: { write: true, risk: 'low', requiresDryRunDefault: true },
     record_brain_feedback: { write: true, risk: 'low', requiresDryRunDefault: true },
     brain_feedback_summary: { write: false, risk: 'low' },
     build_memory_timeline: { write: true, risk: 'low', requiresDryRunDefault: true },
@@ -151,6 +153,7 @@ const DEFAULT_POLICY: BrainPolicy = {
     triage_note: { write: true, risk: 'medium', requiresDryRunDefault: true },
     fix_frontmatter: { write: true, risk: 'medium', requiresDryRunDefault: true },
     fix_broken_links: { write: true, risk: 'medium', requiresDryRunDefault: true },
+    generate_runbook: { write: true, risk: 'medium', requiresDryRunDefault: true },
   },
 }
 

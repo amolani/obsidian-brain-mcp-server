@@ -143,6 +143,11 @@ export const TOOL_DEFINITIONS = [
             type: 'string',
             description: 'Optional output folder. Default Referenz/Quellen.',
           },
+          profile: {
+            type: 'string',
+            enum: ['markdown', 'ticket', 'incident_log', 'web_export'],
+            description: 'Optional source profile. Default markdown; ticket/incident_log/web_export add review prompts.',
+          },
           dry_run: {
             type: 'boolean',
             description: 'Default true. Set false to write the source note and manifest entry.',
@@ -381,6 +386,28 @@ export const TOOL_DEFINITIONS = [
         type: 'object' as const,
         properties: {
           dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/_brain.md.' },
+        },
+      },
+    },
+    {
+      name: 'build_capture_review',
+      description:
+        'Dry-run-first Markdown surface for reviewing harvested session captures, runbook promotion candidates, noisy auto-build output, and recommended next actions. Writes Maintenance/Capture Review.md.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Maintenance/Capture Review.md.' },
+        },
+      },
+    },
+    {
+      name: 'build_evidence_dashboard',
+      description:
+        'Dry-run-first evidence dashboard. Writes Knowledge/evidence.md with missing confidence/source, due rechecks, contradictions, and high-risk evidence issues.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/evidence.md.' },
         },
       },
     },
@@ -755,6 +782,10 @@ export const TOOL_DEFINITIONS = [
           folder: {
             type: 'string',
             description: 'Optional override for output folder (auto-detected from topic if omitted)',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to write the runbook.',
           },
         },
         required: ['topic'],

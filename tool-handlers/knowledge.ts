@@ -111,6 +111,7 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
       outputFolder: typeof args.output_folder === 'string' ? args.output_folder : undefined,
       dryRun: args.dry_run !== false,
       force: args.force === true,
+      profile: typeof args.profile === 'string' ? args.profile as any : undefined,
     })
 
     const headings = result.headings.length > 0
@@ -132,6 +133,7 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           `Quelle: \`${result.sourcePath}\``,
           `Ziel: \`${result.outputPath}\``,
           `Titel: ${result.title}`,
+          `Profil: ${result.profile}`,
           `Hash: \`${result.hash.slice(0, 12)}...\``,
           '',
           '## Erkannte Headings',
@@ -443,6 +445,46 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     }
   },
 
+  build_capture_review(vault, args) {
+    const result = vault.buildCaptureReview({ dryRun: args.dry_run !== false })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Capture Review Vorschau' : '# Capture Review aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Captures: ${result.captureCount}`,
+          `Promotionskandidaten: ${result.promotionCandidateCount}`,
+          `Noisy Auto-Build: ${result.noisyAutoBuildCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  build_evidence_dashboard(vault, args) {
+    const result = vault.buildEvidenceDashboard({ dryRun: args.dry_run !== false })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Evidence Dashboard Vorschau' : '# Evidence Dashboard aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Candidates: ${result.totalCandidates}`,
+          `Issues: ${result.issueCount}`,
+          `High Risk: ${result.highRiskCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
   record_brain_feedback(vault, args) {
     const outcome = ['accepted', 'rejected', 'snoozed'].includes(String(args.outcome))
       ? args.outcome as 'accepted' | 'rejected' | 'snoozed'
@@ -715,21 +757,26 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
   },
 
   generate_runbook(vault, args) {
-    const result = vault.generateRunbook(
-      args.topic as string,
-      args.folder as string | undefined,
-    )
+    const result = vault.generateRunbook(args.topic as string, {
+      outputFolder: args.folder as string | undefined,
+      dryRun: args.dry_run !== false,
+    })
 
     return {
       content: [
         {
           type: 'text',
           text: [
-            `Runbook erstellt: **${result.path}**`,
+            result.dryRun ? '# Runbook Vorschau' : '# Runbook erstellt',
+            '',
+            `Pfad: **${result.path}**`,
+            `Dry-Run: ${result.dryRun}`,
             `Quellen: ${result.sourceCount} Notizen`,
             `Schritte: ${result.stepCount}`,
             `Bekannte Probleme: ${result.fixCount}`,
-          ].join('\n'),
+            '',
+            result.dryRun ? result.content : '',
+          ].filter(Boolean).join('\n'),
         },
       ],
     }

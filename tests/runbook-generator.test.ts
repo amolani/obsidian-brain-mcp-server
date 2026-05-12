@@ -67,6 +67,7 @@ Setup summary.
     }, 'Acme', 'Output')
 
     assert.equal(result.path, 'Output/Runbook Acme.md')
+    assert.equal(result.dryRun, false)
     assert.equal(result.sourceCount, 1)
     assert.equal(result.stepCount, 2)
     assert.equal(result.fixCount, 1)
@@ -76,7 +77,39 @@ Setup summary.
     const content = readFileSync(join(vaultPath, result.path), 'utf-8')
     assert.match(content, /# Runbook: Acme/)
     assert.match(content, /apt install nginx/)
+    assert.match(content, /## Voraussetzungen/)
+    assert.match(content, /## Rollback/)
     assert.match(content, /Bekannte Probleme/)
+  })
+
+  test('previews runbook without writing when dryRun is true', () => {
+    vaultPath = createTempVault()
+    const notes = new Map<string, NoteEntry>([
+      ['Kunden/Acme/Session.md', note('Kunden/Acme/Session.md', {
+        title: 'Acme Session',
+        tags: ['auto-capture', 'prozedur'],
+        content: `## Durchgeführte Befehle
+
+1. \`apt install nginx\`
+2. \`systemctl enable nginx\``,
+      })],
+    ])
+
+    const result = generateRunbook({
+      vaultPath,
+      notes,
+      indexNote() {
+        throw new Error('should not index during dry-run')
+      },
+      buildLinkIndex() {
+        throw new Error('should not rebuild during dry-run')
+      },
+    }, 'Acme', { outputFolder: 'Output', dryRun: true })
+
+    assert.equal(result.dryRun, true)
+    assert.equal(result.path, 'Output/Runbook Acme.md')
+    assert.ok(!existsSync(join(vaultPath, result.path)))
+    assert.match(result.content, /## Validierung/)
   })
 
   test('throws when no source notes match', () => {

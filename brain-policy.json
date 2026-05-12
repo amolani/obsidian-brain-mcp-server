@@ -80,6 +80,8 @@
     "resolve_gap": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "create_research_plan": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "build_brain_dashboard": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "build_capture_review": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "build_evidence_dashboard": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "record_brain_feedback": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "brain_feedback_summary": { "write": false, "risk": "low" },
     "build_memory_timeline": { "write": true, "risk": "low", "requiresDryRunDefault": true },
@@ -106,7 +108,7 @@
     "run_safe_maintenance": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
 
     "generate_mocs": { "write": true, "risk": "low", "requiresDryRunDefault": true },
-    "generate_runbook": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
+    "generate_runbook": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
     "promote_capture_to_runbook": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
     "generate_postmortem": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
     "build_customer_context": { "write": true, "risk": "medium", "requiresDryRunDefault": true },

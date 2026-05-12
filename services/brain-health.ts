@@ -98,7 +98,7 @@ export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {})
   add('checkpoint_policy', 'Long-session policy', policy.automation.duringSession.autoCheckpoint ? 'ok' : 'warn', `autoCheckpoint=${policy.automation.duringSession.autoCheckpoint}, minCommands=${policy.automation.duringSession.minCommandsBetweenCheckpoints}, minMinutes=${policy.automation.duringSession.minMinutesBetweenCheckpoints}`)
   add('risky_auto_apply', 'Risky auto-apply block', policy.automation.neverAutoApply.includes('merge_duplicates') && policy.automation.neverAutoApply.includes('rename_note') ? 'ok' : 'warn', `neverAutoApply=${policy.automation.neverAutoApply.join(', ')}`)
 
-  const requiredTools = ['brain_auto_build', 'archive_auto_build_run', 'brain_checkpoint', 'brain_metrics', 'record_brain_feedback']
+  const requiredTools = ['brain_auto_build', 'archive_auto_build_run', 'brain_checkpoint', 'brain_metrics', 'record_brain_feedback', 'build_capture_review', 'build_evidence_dashboard']
   for (const tool of requiredTools) {
     add(`tool_policy_${tool}`, `Tool policy ${tool}`, policy.tools[tool] ? 'ok' : 'fail', policy.tools[tool] ? `risk=${policy.tools[tool].risk}, write=${policy.tools[tool].write}` : 'Tool fehlt in brain-policy.json')
   }
@@ -120,9 +120,12 @@ export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {})
     if (!settings) {
       add('claude_settings', 'Claude settings', 'warn', '~/.claude/settings.json nicht lesbar oder nicht vorhanden')
     } else {
+      const settingsObj = settings && typeof settings === 'object' ? settings as Record<string, any> : {}
+      const settingsVaultPath = settingsObj.env?.VAULT_PATH
       const sessionContext = `node ${join(PROJECT_ROOT, 'hooks', 'session-context.ts')}`
       const harvester = `node ${join(PROJECT_ROOT, 'hooks', 'knowledge-harvester.ts')}`
       const checkpoint = `node ${join(PROJECT_ROOT, 'hooks', 'session-checkpoint.ts')}`
+      add('hook_vault_path', 'Hook VAULT_PATH', settingsVaultPath === vault.vaultPath ? 'ok' : 'warn', settingsVaultPath ? `VAULT_PATH=${settingsVaultPath}` : 'VAULT_PATH fehlt in ~/.claude/settings.json env')
       add('hook_session_start', 'SessionStart hook', containsCommand(settings, sessionContext) || containsCommand(settings, 'hooks/session-context.ts') ? 'ok' : 'warn', 'session-context.ts')
       add('hook_stop', 'Stop hook', containsCommand(settings, harvester) || containsCommand(settings, 'hooks/knowledge-harvester.ts') ? 'ok' : 'warn', 'knowledge-harvester.ts')
       add('hook_post_tool_use', 'PostToolUse hook', containsCommand(settings, checkpoint) || containsCommand(settings, 'hooks/session-checkpoint.ts') ? 'ok' : 'warn', 'session-checkpoint.ts')

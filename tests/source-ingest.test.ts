@@ -40,6 +40,7 @@ describe('source ingest', () => {
     assert.equal(result.dryRun, true)
     assert.equal(result.skipped, false)
     assert.equal(result.title, 'Vendor DHCP Notes')
+    assert.equal(result.profile, 'markdown')
     assert.equal(result.outputPath, 'Referenz/Quellen/Vendor DHCP Notes.md')
     assert.ok(result.headings.includes('Scope'))
     assert.ok(result.keyPoints.some(point => point.includes('DHCP must run')))
@@ -86,6 +87,19 @@ describe('source ingest', () => {
       force: true,
     })
     assert.equal(forced.skipped, false)
+  })
+
+  test('source profiles add review prompts to generated notes', () => {
+    const result = vault.ingestSource({
+      sourcePath: '.raw/articles/vendor-doc.md',
+      profile: 'ticket',
+      dryRun: false,
+    })
+
+    const note = readFileSync(join(vaultPath, result.outputPath), 'utf-8')
+    assert.equal(result.profile, 'ticket')
+    assert.match(note, /profile: ticket/)
+    assert.match(note, /Ticket Kontext/)
   })
 
   test('rejects sources outside .raw', () => {

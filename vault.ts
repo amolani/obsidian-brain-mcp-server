@@ -24,7 +24,7 @@ import { buildTodoList, type TodoItem } from './services/todo-list.ts'
 import { buildWeeklyReview, type WeeklyReview } from './services/weekly-review.ts'
 import { suggestLegacyLinks, type LegacyLinkSuggestion } from './services/legacy-link-suggester.ts'
 import { dailyNote as dailyNoteService, type DailyNoteResult } from './services/daily-note.ts'
-import { generateRunbook as generateRunbookService, type GenerateRunbookResult } from './services/runbook-generator.ts'
+import { generateRunbook as generateRunbookService, type GenerateRunbookOptions, type GenerateRunbookResult } from './services/runbook-generator.ts'
 import { organizeReferenz as organizeReferenzService, type OrganizeReferenzResult } from './services/referenz-organizer.ts'
 import { renameNote as renameNoteService, type RenameNoteOptions, type RenameNoteResult } from './services/note-renamer.ts'
 import { triageInbox as triageInboxService, triageNote as triageNoteService, type TriageInboxOptions, type TriageInboxResult, type TriageNoteOptions, type TriageNoteResult } from './services/inbox-triage.ts'
@@ -49,9 +49,11 @@ import { buildCustomerSnapshot as buildCustomerSnapshotService, type BuildCustom
 import { brainMetrics as brainMetricsService, type BrainMetrics } from './services/brain-metrics.ts'
 import { brainCheckpoint as brainCheckpointService, type BrainCheckpointOptions, type BrainCheckpointResult } from './services/brain-checkpoint.ts'
 import { brainHealthCheck as brainHealthCheckService, type BrainHealthOptions, type BrainHealthResult } from './services/brain-health.ts'
+import { buildCaptureReview as buildCaptureReviewService, type BuildCaptureReviewOptions, type CaptureReviewResult } from './services/capture-review.ts'
+import { buildEvidenceDashboard as buildEvidenceDashboardService, type BuildEvidenceDashboardOptions, type EvidenceDashboardResult } from './services/evidence-dashboard.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
-export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult, BrainHealthOptions, BrainHealthResult }
+export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookOptions, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, BuildCaptureReviewOptions, CaptureReviewResult, BuildEvidenceDashboardOptions, EvidenceDashboardResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult, BrainHealthOptions, BrainHealthResult }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -363,6 +365,14 @@ export class Vault {
     return buildBrainDashboardService(this, options)
   }
 
+  buildCaptureReview(options: BuildCaptureReviewOptions = {}): CaptureReviewResult {
+    return buildCaptureReviewService(this, options)
+  }
+
+  buildEvidenceDashboard(options: BuildEvidenceDashboardOptions = {}): EvidenceDashboardResult {
+    return buildEvidenceDashboardService(this, options)
+  }
+
   recordBrainFeedback(options: RecordBrainFeedbackOptions): BrainFeedbackResult {
     return recordBrainFeedbackService(this, options)
   }
@@ -462,14 +472,14 @@ export class Vault {
 
   generateRunbook(
     topic: string,
-    outputFolder?: string
+    outputFolderOrOptions?: string | GenerateRunbookOptions
   ): GenerateRunbookResult {
     return generateRunbookService({
       vaultPath: this.vaultPath,
       notes: this.notes,
       indexNote: (fullPath, mtimeMs) => this.indexNote(fullPath, mtimeMs),
       buildLinkIndex: () => this.buildLinkIndex(),
-    }, topic, outputFolder)
+    }, topic, outputFolderOrOptions)
   }
 
   extractTroubleshootingPattern(path: string): ExtractTroubleshootingPatternResult {

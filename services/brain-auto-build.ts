@@ -445,7 +445,7 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
     plan.push(item)
     pushLimitedStep(steps, 'generate_runbook', budget, item.quality === 'pass' ? 1 : 0, () => item.quality === 'skip'
       ? { skipped: true, reason: item.reason }
-      : vault.generateRunbook(runbookTopic(vault, sourcePath, client), client ? `Kunden/${client}` : undefined), dryRun)
+      : vault.generateRunbook(runbookTopic(vault, sourcePath, client), { outputFolder: client ? `Kunden/${client}` : undefined, dryRun }), dryRun)
   }
 
   if (after.buildDashboard) {
