@@ -44,6 +44,8 @@ export VAULT_PATH=/path/to/your/obsidian/vault
 
 Register the MCP server globally for Claude Code:
 
+Node 22+ can run the TypeScript entrypoint directly:
+
 ```bash
 claude mcp add-json -s user obsidian-brain '{
   "command": "node",
@@ -53,6 +55,8 @@ claude mcp add-json -s user obsidian-brain '{
   }
 }'
 ```
+
+For Node 18-21, use the `tsx` variant in [Full Installation](#full-installation).
 
 Then open a fresh Claude Code session and run:
 
