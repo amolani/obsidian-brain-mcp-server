@@ -1,98 +1,204 @@
-# Obsidian Brain MCP Server
+<div align="center">
 
-A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem — no Obsidian process required. Built for technicians and sysadmins who want their knowledge to accumulate automatically as they work.
+# Obsidian Brain MCP
 
-## Features
+**A filesystem-native second brain for Claude Code and Obsidian.**
 
-**Read & Navigate**
-- `vault_search` — structured search (full-text + tags + folder + status)
-- `semantic_search` — local semantic-style search with weighted note vectors, snippets, config aliases/categories, and filters
-- `semantic_index_status` / `rebuild_semantic_index` — inspect and rebuild the local semantic vector cache
-- `build_context_pack` — compact working context for a query with semantic hits, linked notes, TODOs, citations, and next actions
-- `recall_context` — manual, read-only working-memory recall; nothing is stored or injected automatically
-- `get_note_context` — full note context with backlinks & related notes
-- `vault_overview` — stats, tags, recent changes, orphans, stale notes
-- `todo_list` — aggregate open TODOs across the vault
-- `suggest_links` — find unlinked mentions between notes
-- `suggest_links_v2` — confidence-scored link suggestions with snippets, aliases, tag/folder proximity, and per-note caps
-- `apply_link_suggestions` — dry-run-first executor for high-confidence unlinked mentions
-- `weekly_review` — summary of the past 7 days
-- `daily_note` — create/append today's daily note
+Build a living technical knowledge base while you work: capture sessions, promote durable knowledge, track evidence, generate runbooks, maintain customer memory, and keep risky refactors dry-run-first.
 
-**Create & Capture**
-- `create_note` — structured notes from templates (kunde, referenz, troubleshooting, learning, daily)
-- `capture` — compatibility wrapper for quick capture
-- `capture_v2` — smart capture with unified client/Technik classification, tag normalization, dry-run previews, and `fast`/`strict`/`review` modes
-- `ingest_source` — dry-run-first ingest for immutable `.raw/` source files with hash manifest and structured source notes
-- `save_insight` / `save_decision` / `save_answer` — manual, dry-run-first durable memory saves under `Knowledge/`
-- `generate_runbook` — clean step-by-step guide from auto-captured sessions
-- `extract_troubleshooting_pattern` / `promote_capture_to_runbook` / `generate_postmortem` — dry-run-first incident extraction from captures and troubleshooting notes
-- `build_customer_context` / `build_project_dashboard` — generate customer dashboards with notes, TODOs, recent changes, runbooks, captures, tags, and issues
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/typescript-ESM-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+[![MCP](https://img.shields.io/badge/MCP-server-111827)](server.ts)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-hooks%20%2B%20tools-6B46C1)](hooks/)
+[![Obsidian](https://img.shields.io/badge/Obsidian-vault%20native-7C3AED?logo=obsidian&logoColor=white)](README.md)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Manual Brain Layer**
-- `brain_review` / `brain_apply_review_item` — read-only brain review plus dry-run-first executor for one action-backed item
-- `build_brain_dashboard` — dry-run-first Obsidian dashboard at `Knowledge/_brain.md`
-- `recall_context` / `build_context_pack` — explicit read-only recall; no automatic injection
-- `update_hot_cache` / `read_hot_cache` — optional manual working-memory cache in `Knowledge/hot.md`
-- `build_knowledge_index` — dry-run-first overview note at `Knowledge/index.md`
-- `update_evidence` / `evidence_report` — confidence, source, checked/recheck/expiry, confirmed-by and contradicted-by metadata for durable knowledge
-- `extract_claims` — source-to-claim extraction into `Knowledge/Claims/` with confidence and contradiction candidates
-- `flag_knowledge_gap` / `flag_contradiction` / `list_open_questions` / `resolve_gap` — track unresolved questions and contradictory claims until they are clarified
-- `create_research_plan` — local-context research plan under `Knowledge/Research/` for explicit investigations
-- `record_brain_feedback` / `brain_feedback_summary` — feedback loop for accepted/rejected/snoozed review suggestions and auto-build learning
-- `build_memory_timeline` — customer/project timeline under `Kunden/{Client}/_timeline.md`
-- `build_customer_snapshot` — current customer/project state under `Kunden/{Client}/_snapshot.md`
-- `brain_schedule` — read-only propose-only scheduler for rechecks, open questions, and missing brain surfaces
-- `brain_auto_build` — policy-controlled auto-build pass for captures: promotes insights/answers/gaps, extracts claims, updates evidence, dashboard, index, hot cache, and customer timeline; gates adapt to feedback
-- `archive_auto_build_run` — dry-run-first archive tool for artifacts created by one auto-build source run; archived artifacts become negative learning feedback
-- `brain_checkpoint` — long-session checkpoint note with optional auto-build trigger
-- `brain_metrics` — read-only health metrics for captures, promotions, claims, evidence, questions, feedback, and auto-build processing
-- `brain_health_check` — read-only readiness check for policy, hooks, generated surfaces, manifest, and action log
+**[Quick Start](#quick-start)** · **[What It Does](#what-it-does)** · **[Brain Workflow](#brain-workflow)** · **[Tool Surface](#tool-surface)** · **[Safety Model](#safety-model)**
 
-**Maintenance (Analyzer → Recommender → Executor)**
-- `find_duplicates` — fuzzy match on title, content, tags (with confidence scores)
-- `merge_duplicates` — dry-run-first duplicate merge workflow with tag/frontmatter union, source references, archive move, and action logging
-- `rename_note` — dry-run-first rename/move refactor that updates H1/title metadata, aliases, wikilinks, frontmatter path refs, and action log
-- `triage_note` / `triage_inbox` — dry-run-first inbox triage with classification, tag normalization, target folders, duplicate review, and link suggestions
-- `accept_review_item` / `reject_review_item` / `snooze_review_item` / `apply_all_safe_fixes` — review-queue workflow actions with dry-run-first safe executors
-- `score_note_quality` / `list_low_quality_notes` — read-only quality scoring for title, metadata, tags, links, TODOs, structure, content density, and freshness
-- `suggest_lifecycle_updates` / `apply_lifecycle_updates` — dry-run-first lifecycle automation for status transitions such as missing status → `aktiv` or stale notes → `archiviert`
-- `find_broken_links` / `fix_broken_links` — detect and repair renamed-file links
-- `lint_frontmatter` / `fix_frontmatter` — profile-aware schemas for Kunde, Referenz, Troubleshooting, Learning, Runbook, Daily, Maintenance, Auto-Capture, and MOC notes
-- `generate_mocs` — Maps of Content with live Dataview queries per folder
-- `run_safe_maintenance` — dry-run-first batch for safe executors: frontmatter, broken links, link suggestions, lifecycle, MOCs, semantic index
-- `organize_referenz` — auto-sort flat `Referenz/` into `Technik/{category}/{sub}/`
-- `list_suggestions` / `promote_suggestion` — review and accept auto-detected new clients & subcategories
-- `run_vault_maintenance` — orchestrates all analyzers and writes a review queue
+</div>
 
-**Automated background workflow** (via Claude Code hooks)
-- **SessionStart** — ensures daily note exists, detects client from CWD, auto-organizes
-- **PostToolUse/long-session hook** — records lightweight session state and writes debounced checkpoints during long work
-- **Stop** — Knowledge Harvester reads the session transcript, extracts procedures and error→fix cycles, writes a structured note automatically
+---
 
-## How it works
+## What It Does
 
-The server indexes your vault on start and keeps an in-memory index of:
-- Notes (with parsed frontmatter, links, TODOs, tags)
-- Tag index (tag → notes)
-- Backlink index (note → notes that link to it)
+Obsidian Brain MCP turns Claude Code into a local-first knowledge worker for sysadmins, consultants, and technical operators. It indexes your Obsidian vault directly on disk, captures meaningful Claude Code sessions, and gradually turns operational work into reusable memory.
 
-It watches the vault directory for changes and incrementally updates the index.
+| Layer | What happens | Output |
+|---|---|---|
+| **Observe** | Claude Code hooks detect project context, commands, errors, and outcomes | Daily notes, session captures |
+| **Promote** | Auto-build gates convert strong captures into durable knowledge | Insights, answers, gaps, claims, runbooks |
+| **Verify** | Evidence metadata tracks confidence, sources, rechecks, and contradictions | Claims, evidence reports, schedules |
+| **Maintain** | Review tools propose cleanup while executors stay dry-run-first | Dashboards, MOCs, link fixes, lifecycle updates |
+| **Learn** | Archived auto-build artifacts become feedback for stricter future gates | Usefulness score, adaptive promotion behavior |
 
-Classification is rule-based (not LLM-based), using:
-- `clients.json` — known clients and their keyword aliases
-- `technik-categories.json` — tech categories with subcategories (Linuxmuster/Linbo, Docker/Traefik, etc.)
-- `tag-aliases.json` — tag normalization map (lmn → linuxmuster, pve → proxmox, …)
+## Quick Start
+
+```bash
+git clone https://github.com/amolani/obsidian-brain-mcp-server.git
+cd obsidian-brain-mcp-server
+npm install
+export VAULT_PATH=/path/to/your/obsidian/vault
+```
+
+Register the MCP server globally for Claude Code:
+
+```bash
+claude mcp add-json -s user obsidian-brain '{
+  "command": "node",
+  "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
+  "env": {
+    "VAULT_PATH": "/path/to/your/obsidian/vault"
+  }
+}'
+```
+
+Then open a fresh Claude Code session and run:
+
+```text
+brain_health_check
+```
+
+If the health check is clean, just work normally. Captures, dashboards, evidence, timelines, and maintenance views are built around your actual Obsidian files.
+
+## Session Experience
+
+```text
+> brain_health_check
+Status: ok
+Checks: policy ok, hooks ok, auto-build manifest ok, action log ok
+
+> Work normally in Claude Code
+Stop hook -> Knowledge Harvester -> Auto-Capture -> Auto-Build Report
+
+> brain_metrics
+Auto-Captures: 18
+Auto-promoted: 42
+Auto-build usefulness score: 0.86
+```
+
+## Brain Workflow
+
+```mermaid
+flowchart LR
+  A[Claude Code Session] --> B[SessionStart Hook]
+  B --> C[Daily Note + Client Context]
+  A --> D[PostToolUse Hook]
+  D --> E[Long-Session Checkpoint]
+  A --> F[Stop Hook]
+  F --> G[Knowledge Harvester]
+  G --> H[Auto-Capture Note]
+  H --> I[Policy-Controlled Auto-Build]
+  I --> J[Insights / Answers / Gaps]
+  I --> K[Claims + Evidence]
+  I --> L[Runbooks + Customer Timeline]
+  I --> M[Brain Dashboard + Index + Hot Cache]
+  M --> N[Brain Review]
+  N --> O[Dry-Run Executors]
+  O --> P[Action Log + Feedback Learning]
+  P --> I
+```
+
+## Why It Feels Different
+
+Most note systems wait for you to organize after the work is done. This one watches the work itself.
+
+- **Claude Code-native**: MCP tools plus SessionStart, PostToolUse, and Stop hooks.
+- **Obsidian-native**: plain Markdown, local folders, backlinks, frontmatter, no database lock-in.
+- **Sysadmin-friendly**: customer folders, runbooks, commands, incidents, TODOs, evidence, lifecycle state.
+- **Safe automation**: auto-build can write derived knowledge; risky operations stay out of automatic apply.
+- **Adaptive**: archiving noisy auto-build output teaches the next run to be stricter.
+
+## Tool Surface
+
+<details open>
+<summary><strong>Read & Navigate</strong></summary>
+
+| Tool | Purpose |
+|---|---|
+| `vault_search` | Structured search across title, tags, folders, status, and content |
+| `semantic_search` | Local semantic-style search with weighted note vectors and snippets |
+| `get_note_context` | Full note context with frontmatter, backlinks, outgoing links, TODOs, related notes |
+| `build_context_pack` / `recall_context` | Explicit read-only recall; never auto-injected into working memory |
+| `vault_overview`, `todo_list`, `weekly_review`, `daily_note` | Operating views for the vault and daily work |
+
+</details>
+
+<details open>
+<summary><strong>Create, Capture & Promote</strong></summary>
+
+| Tool | Purpose |
+|---|---|
+| `capture_v2` | Smart capture with client/Technik routing, normalized tags, and dry-run previews |
+| `save_insight` / `save_decision` / `save_answer` | Durable manual memory under `Knowledge/` |
+| `ingest_source` / `extract_claims` | Source ingestion and claim extraction with evidence fields |
+| `generate_runbook` | Runbook generation from captured operational sessions |
+| `extract_troubleshooting_pattern`, `promote_capture_to_runbook`, `generate_postmortem` | Incident and troubleshooting workflows |
+
+</details>
+
+<details open>
+<summary><strong>Brain Layer</strong></summary>
+
+| Tool | Purpose |
+|---|---|
+| `brain_health_check` | Readiness check for policy, hooks, generated surfaces, manifest, and action log |
+| `brain_review` / `brain_apply_review_item` | Central review queue plus one-action dry-run-first executor |
+| `brain_auto_build` | Policy-controlled promotion of captures into durable memory and generated surfaces |
+| `archive_auto_build_run` | Archive one auto-build run's artifacts and record negative learning feedback |
+| `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
+| `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
+| `build_brain_dashboard`, `build_knowledge_index`, `update_hot_cache` | Obsidian-visible operating surfaces |
+| `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
+
+</details>
+
+<details>
+<summary><strong>Maintenance</strong></summary>
+
+| Tool | Purpose |
+|---|---|
+| `find_duplicates` / `merge_duplicates` | Duplicate analysis and dry-run-first merge workflow |
+| `rename_note` | Rename/move refactor with wikilink and frontmatter updates |
+| `triage_note` / `triage_inbox` | Inbox classification, target folders, duplicate checks, link suggestions |
+| `score_note_quality` / `list_low_quality_notes` | Quality scoring for title, metadata, tags, links, TODOs, structure, and freshness |
+| `find_broken_links` / `fix_broken_links` | Broken link detection and repair |
+| `lint_frontmatter` / `fix_frontmatter` | Profile-aware frontmatter schemas |
+| `generate_mocs`, `run_safe_maintenance`, `run_vault_maintenance` | Generated structure and safe batch maintenance |
+
+</details>
+
+## Safety Model
+
+`brain-policy.json` is the local safety contract.
+
+| Rule | Behavior |
+|---|---|
+| Working memory is manual | `recall_context` only runs when you ask for it |
+| Safe auto-build is allowed | Captures can become derived knowledge, reports, dashboards, timelines |
+| Risky refactors are blocked from auto-apply | Duplicate merges, renames, folder organization, broken-link rewrites, link application |
+| Every write is observable | Mutating tools append to `.action-log.jsonl` |
+| Dry-run-first remains the default for risky operations | Apply modes are explicit and policy guarded |
+| Feedback changes future behavior | Archived auto-build artifacts make noisy categories stricter |
+
+## How It Works
+
+The server indexes your vault on start and keeps an in-memory index of notes, tags, backlinks, TODOs, frontmatter, and links. It watches the vault directory and updates incrementally as Markdown files change.
+
+Classification is local and rule-based:
+
+- `clients.json` — known clients and keyword aliases
+- `technik-categories.json` — technical categories and subcategories
+- `tag-aliases.json` — tag normalization map
 - `tech-terms.json` — auto-tag vocabulary for captures
 
-All four files are user-editable JSON.
+All files are editable JSON and live in the repo by default.
 
 ## Requirements
 
 - Node.js ≥ 22 (native TypeScript support) or Node ≥ 18 with `tsx`
 - An Obsidian vault (structure doesn't matter — the server adapts)
 
-## Installation
+## Full Installation
 
 ### 1. Clone and install
 
@@ -353,7 +459,7 @@ YourVault/
 npm test
 ```
 
-70+ tests cover vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, and the Knowledge Harvester end-to-end.
+The test suite covers vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, brain auto-build, health checks, and the Knowledge Harvester end-to-end.
 
 ### Project structure
 
