@@ -15,6 +15,8 @@ Build a living technical knowledge base while you work: capture sessions, promot
 
 **[Quick Start](#quick-start)** · **[What It Does](#what-it-does)** · **[Brain Workflow](#brain-workflow)** · **[Tool Surface](#tool-surface)** · **[Safety Model](#safety-model)**
 
+<img src="./assets/obsidian-brain-hero.svg" alt="Obsidian Brain MCP hero banner showing Claude Code connected to an Obsidian knowledge graph" width="100%">
+
 </div>
 
 ---
