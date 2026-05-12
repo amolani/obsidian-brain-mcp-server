@@ -13,6 +13,7 @@ import { join, basename } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import { resolveClientContext, type ClientMatch } from '../services/client-resolver.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { Vault } from '../vault.ts'
 
@@ -121,12 +122,8 @@ function parseTranscript(path: string): TranscriptEntry[] {
 
 // ── Client Detection from CWD ──────────────────────────────────────
 
-function detectClient(cwd: string): string | null {
-  const cwdLower = cwd.toLowerCase()
-  for (const [key, name] of Object.entries(loadClients())) {
-    if (cwdLower.includes(key)) return name
-  }
-  return null
+function detectClient(cwd: string, content = ''): ClientMatch {
+  return resolveClientContext(cwd, content)
 }
 
 function suggestClientFromCwd(cwd: string): string | null {
@@ -145,11 +142,12 @@ function suggestClientFromCwd(cwd: string): string | null {
   return null
 }
 
-function logSuggestion(candidate: string, cwd: string): void {
+function logSuggestion(candidate: string, cwd: string, client?: string | null): void {
   try {
+    const target = client?.trim() || `${candidate.charAt(0).toUpperCase() + candidate.slice(1)}`
     const msg = `${new Date().toISOString()} VORSCHLAG: "${candidate}" als Kunde registrieren? (Pfad: ${cwd})\n` +
                 `  → Zeile in ${configPaths().clients} hinzufügen:\n` +
-                `    "${candidate.charAt(0).toUpperCase() + candidate.slice(1)}": ["${candidate}"],\n\n`
+                `    "${target}": ["${candidate}"],\n\n`
     appendFileSync(SUGGESTIONS_LOG, msg)
   } catch {}
 }
@@ -173,7 +171,8 @@ function detectTags(entries: TranscriptEntry[]): string[] {
 // ── Smart Title Generation ─────────────────────────────────────────
 
 function generateTitle(entries: TranscriptEntry[], cwd: string, tags: string[]): string {
-  const client = detectClient(cwd)
+  const text = entries.filter(entry => entry.type === 'text').map(entry => entry.content).join('\n')
+  const client = detectClient(cwd, text).client
   const datum = new Date().toISOString().split('T')[0]
 
   // Collect substantive user messages to detect the topic
@@ -229,6 +228,7 @@ interface Phase {
 interface ExtractedKnowledge {
   title: string
   client: string | null
+  clientMatch: ClientMatch
   tags: string[]
   procedures: string[]
   errorFixes: string[]
@@ -348,7 +348,12 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
   }
 
   const tags = detectTags(entries)
-  const client = detectClient(cwd)
+  const resolverText = entries
+    .filter(entry => entry.type === 'text')
+    .map(entry => entry.content)
+    .join('\n')
+  const clientMatch = detectClient(cwd, resolverText)
+  const client = clientMatch.client
 
   // Need minimum substance
   if (procedures.length < 2) return null
@@ -358,7 +363,7 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
   const title = generateTitle(entries, cwd, tags)
   const phases = extractPhases(entries)
 
-  return { title, client, tags, procedures, errorFixes, summaries, phases }
+  return { title, client, clientMatch, tags, procedures, errorFixes, summaries, phases }
 }
 
 function stripSsh(cmd: string): string {
@@ -390,6 +395,11 @@ tags:
 ${tagBlock}
 datum: ${datum}
 quelle: knowledge-harvester
+knowledge_type: capture
+source_stage: stop_capture
+client_match_method: ${k.clientMatch.method}
+client_match_confidence: ${k.clientMatch.confidence}
+${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\n` : ''}${k.clientMatch.matched ? `client_match_alias: ${k.clientMatch.matched}\n` : ''}${k.client ? `kunde: ${k.client}\n` : ''}
 ---
 
 # ${k.title}
@@ -502,6 +512,9 @@ process.stdin.on('end', async () => {
         logSuggestion(suggestion, cwd)
         log(`Session ${sessionId.slice(0, 8)}: Unbekannter Pfad — Vorschlag "${suggestion}" geloggt`)
       }
+    } else if (knowledge.clientMatch.method === 'fuzzy_cwd' && knowledge.clientMatch.candidate) {
+      logSuggestion(knowledge.clientMatch.candidate, cwd, knowledge.client)
+      log(`Session ${sessionId.slice(0, 8)}: Fuzzy-Kunde ${knowledge.client} über "${knowledge.clientMatch.candidate}" erkannt`)
     }
 
     log(`Session ${sessionId.slice(0, 8)}: "${knowledge.title}" — ${knowledge.procedures.length} steps, ${knowledge.errorFixes.length} fixes, tags: [${knowledge.tags.join(',')}]`)
@@ -551,6 +564,7 @@ process.stdin.on('end', async () => {
         sessionId,
         tags: knowledge.tags,
         client: knowledge.client,
+        clientMatch: knowledge.clientMatch,
       },
     })
 

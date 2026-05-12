@@ -37,6 +37,8 @@ node cli.ts install-hooks --vault "$VAULT_PATH" --apply
 - Hook installation preserves unrelated Claude settings.
 - Capture Review and Evidence Dashboard are dry-run-first surfaces.
 - Runbook generation through the MCP tool previews by default.
+- Checkpoint and capture-derived claims are marked provisional until reviewed.
+- Fuzzy or content-based customer matches are surfaced in Capture Review.
 
 ## Good First Commands
 

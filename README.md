@@ -42,7 +42,7 @@ Obsidian Brain MCP turns Claude Code into a local-first knowledge worker. It ind
 | Layer | What happens | Output |
 |---|---|---|
 | **Observe** | Claude Code hooks detect project context, commands, errors, and outcomes | Daily notes, session captures |
-| **Promote** | Auto-build gates convert strong captures into durable knowledge | Insights, answers, gaps, claims, runbooks |
+| **Promote** | Auto-build classifies captures by source and status, then promotes reviewable candidates | Insights, answers, gaps, provisional/confirmed claims, runbooks |
 | **Verify** | Evidence metadata tracks confidence, sources, rechecks, and contradictions | Claims, evidence reports, schedules |
 | **Maintain** | Review tools propose cleanup while executors stay dry-run-first | Dashboards, MOCs, link fixes, lifecycle updates |
 | **Learn** | Archived auto-build artifacts become feedback for stricter future gates | Usefulness score, adaptive promotion behavior |
@@ -125,8 +125,8 @@ Checks: policy ok, hooks ok, auto-build manifest ok, action log ok
 
 > Work normally in Claude Code: debug, inspect, edit, verify
 SessionStart -> client context and daily note
-PostToolUse -> debounced long-session checkpoint
-Stop -> Knowledge Harvester -> Auto-Capture -> Auto-Build Report
+PostToolUse -> debounced long-session checkpoint -> provisional review candidates
+Stop -> Knowledge Harvester -> typed Auto-Capture -> Auto-Build Report
 
 > brain_metrics
 Auto-Captures: 18
@@ -146,10 +146,12 @@ flowchart LR
   D --> E[Long-Session Checkpoint]
   A --> F[Stop Hook]
   F --> G[Knowledge Harvester]
-  G --> H[Auto-Capture Note]
+  G --> H[Typed Auto-Capture Note]
   H --> I[Policy-Controlled Auto-Build]
+  E --> Q[Provisional Claims / Review Candidates]
+  Q --> I
   I --> J[Insights / Answers / Gaps]
-  I --> K[Claims + Evidence]
+  I --> K[Claims + Evidence Status]
   I --> L[Runbooks + Customer Timeline]
   I --> M[Brain Dashboard + Index + Hot Cache]
   M --> N[Brain Review]
@@ -438,7 +440,7 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Generate a runbook for the linuxmuster installation."
 - "Run vault maintenance."
 
-The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a capture note to the appropriate folder.
+The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a typed capture note to the appropriate folder. Captures include `knowledge_type`, `source_stage`, and client-match metadata so fuzzy folder typos and content-based customer matches are visible in Capture Review.
 
 When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately after a successful session capture:
 
@@ -447,9 +449,9 @@ When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately 
 - records processed source hashes in `.brain-auto-build-manifest.json` to prevent repeated promotion of the same capture
 - enforces policy limits for maximum new notes, claim count, and runtime
 - creates an Auto-Build report under `Maintenance/Auto-Build/`
-- promotes runbook candidates only when enough procedural signals exist
+- promotes runbook candidates only from implemented procedural captures, not from checkpoints or research-only reads
 - learns from archived auto-build artifacts and repeated rejected feedback, making noisy promotion categories stricter over time
-- extracts claims into `Knowledge/Claims/`
+- extracts claims into `Knowledge/Claims/`; checkpoint and capture-derived claims start as `claim_status: provisional`
 - updates evidence metadata on the capture
 - refreshes `Knowledge/_brain.md`, `Knowledge/index.md`, `Knowledge/hot.md`
 - refreshes `Kunden/{Client}/_timeline.md` and `Kunden/{Client}/_snapshot.md` when a client was detected
@@ -486,7 +488,7 @@ Use the vault as a dry-run-first operating loop:
 8. Ingest durable sources with `ingest_source`, then use `extract_claims` to turn source text into explicit claims. Use `update_evidence` to set confidence, sources, recheck dates, and contradiction references.
 9. Run `brain_review` as the central operating view. It proposes items across maintenance, evidence, open questions, contradictions, quality, links, lifecycle, and index/cache drift. Apply one item at a time with `brain_apply_review_item`, first as dry-run. Record preference signals with `record_brain_feedback`.
 10. Periodically refresh `Knowledge/_brain.md`, `Knowledge/hot.md`, `Knowledge/index.md`, and customer timelines with `build_brain_dashboard`, `update_hot_cache`, `build_knowledge_index`, and `build_memory_timeline`.
-11. Let `brain_auto_build` run automatically after captures through the Stop hook. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/` and run an incremental auto-build when command/time thresholds are reached; you can still call `brain_checkpoint` or `brain_auto_build` explicitly.
+11. Let `brain_auto_build` run automatically after captures through the Stop hook. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/` and run an incremental auto-build when command/time thresholds are reached; checkpoint-derived claims stay provisional and runbooks remain review candidates until a real implemented procedure exists.
 12. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
 13. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
 14. In a fresh Claude session, run `brain_health_check` first. It reports whether policy, hooks, generated surfaces, manifest, and action log are ready.

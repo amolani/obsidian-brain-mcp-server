@@ -457,6 +457,7 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           `Pfad: \`${result.path}\``,
           `Captures: ${result.captureCount}`,
           `Promotionskandidaten: ${result.promotionCandidateCount}`,
+          `Kundenzuordnung prüfen: ${result.uncertainClientCount}`,
           `Noisy Auto-Build: ${result.noisyAutoBuildCount}`,
           '',
           result.content,

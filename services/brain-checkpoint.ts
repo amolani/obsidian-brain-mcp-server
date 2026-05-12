@@ -32,7 +32,7 @@ export function brainCheckpoint(vault: Vault, options: BrainCheckpointOptions): 
   const path = dryRun
     ? `${folder}/${sanitizePathSegment(title)}.md`
     : uniqueRelativePath(vault.vaultPath, folder, `${sanitizePathSegment(title)}.md`)
-  const content = `---\nstatus: aktiv\ntags:\n  - checkpoint\n  - session\n${options.client ? `kunde: ${options.client}\n` : ''}aktualisiert: ${new Date().toISOString()}\nquelle: brain-checkpoint\n---\n\n# ${title}\n\n${options.summary.trim()}\n${options.sourcePath ? `\nQuelle: [[${options.sourcePath}]]\n` : ''}`
+  const content = `---\nstatus: aktiv\ntags:\n  - checkpoint\n  - session\n${options.client ? `kunde: ${options.client}\n` : ''}aktualisiert: ${new Date().toISOString()}\nquelle: brain-checkpoint\nknowledge_type: checkpoint\nsource_stage: checkpoint\n---\n\n# ${title}\n\n${options.summary.trim()}\n${options.sourcePath ? `\nQuelle: [[${options.sourcePath}]]\n` : ''}`
   let autoBuild: unknown
 
   if (!dryRun) {

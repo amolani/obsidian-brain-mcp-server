@@ -10,12 +10,19 @@ export interface ExtractClaimsOptions {
   path: string
   maxClaims?: number
   dryRun?: boolean
+  claimStatus?: ClaimStatus
+  sourceStage?: SourceStage
 }
+
+export type ClaimStatus = 'provisional' | 'confirmed' | 'superseded' | 'rejected'
+export type SourceStage = 'checkpoint' | 'stop_capture' | 'manual' | 'auto_build'
 
 export interface ExtractedClaim {
   claim: string
   source: string
   confidence: 'low' | 'medium' | 'high'
+  claimStatus: ClaimStatus
+  sourceStage: SourceStage
   contradictionCandidates: string[]
 }
 
@@ -46,6 +53,8 @@ function claimSentences(content: string, maxClaims: number): string[] {
     .map(line => line.replace(/^[-*#\s>\d.]+/, '').trim())
     .filter(line => line.length >= 25 && line.length <= 260)
     .filter(line => /\b(muss|soll|sollte|ist|sind|wird|werden|braucht|benötigt|benoetigt|should|must|needs|required|requires)\b/i.test(line))
+    .filter(line => !/^\s*(ich|du|wir)\s+(habe|haben|muss|müssen|muessen|soll|sollen|möchte|moechte|will|wollen)\b/i.test(line))
+    .filter(line => !/\?$/.test(line))
   return [...new Set(candidates)].slice(0, maxClaims)
 }
 
@@ -84,6 +93,9 @@ function renderClaimNote(claim: ExtractedClaim): string {
     tags: ['claim', 'evidence'].map(normalizeTag),
     datum: today(),
     quelle: claim.source,
+    knowledge_type: 'claim',
+    source_stage: claim.sourceStage,
+    claim_status: claim.claimStatus,
     confidence: claim.confidence,
     checked_at: today(),
     contradicted_by: claim.contradictionCandidates,
@@ -93,10 +105,14 @@ function renderClaimNote(claim: ExtractedClaim): string {
 export function extractClaims(vault: Vault, options: ExtractClaimsOptions): ExtractClaimsResult {
   const dryRun = options.dryRun ?? true
   const { source, content } = readSource(vault, options.path)
+  const sourceStage = options.sourceStage ?? inferSourceStage(vault, source)
+  const claimStatus = options.claimStatus ?? (sourceStage === 'manual' ? 'confirmed' : 'provisional')
   const claims = claimSentences(content, Math.max(1, Math.min(options.maxClaims ?? 8, 20))).map(claim => ({
     claim,
     source,
     confidence: 'medium' as const,
+    claimStatus,
+    sourceStage,
     contradictionCandidates: contradictionCandidates(vault, claim),
   }))
   const written: string[] = []
@@ -123,4 +139,13 @@ export function extractClaims(vault: Vault, options: ExtractClaimsOptions): Extr
   }
 
   return { dryRun, source, claims, written }
+}
+
+function inferSourceStage(vault: Vault, source: string): SourceStage {
+  const note = vault.notes.get(source)
+  if (!note) return 'manual'
+  if (source.startsWith('Knowledge/Checkpoints/') || note.tags.includes('checkpoint') || note.frontmatter.source_stage === 'checkpoint') return 'checkpoint'
+  if (note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester' || note.frontmatter.source_stage === 'stop_capture') return 'stop_capture'
+  if (String(note.frontmatter.quelle ?? '').includes('brain-auto-build')) return 'auto_build'
+  return 'manual'
 }

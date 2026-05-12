@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { loadClients } from '../config.ts'
+import { resolveClientContext } from '../services/client-resolver.ts'
 import { appendActionLog } from '../services/action-log.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { Vault } from '../vault.ts'
@@ -114,14 +114,7 @@ process.stdin.on('end', async () => {
       : null
 
     // Detect client from CWD
-    const cwdLower = cwd.toLowerCase()
-    let detectedClient: string | null = null
-    for (const [key, name] of Object.entries(loadClients())) {
-      if (cwdLower.includes(key)) {
-        detectedClient = name
-        break
-      }
-    }
+    const detectedClient = resolveClientContext(cwd).client
 
     if (!detectedClient) {
       // No client context - just output daily note + organize status

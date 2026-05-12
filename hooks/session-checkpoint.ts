@@ -6,7 +6,7 @@
 // when policy thresholds and debounce rules say the session is long enough.
 
 import { appendFileSync, readFileSync } from 'node:fs'
-import { loadClients } from '../config.ts'
+import { resolveClientContext } from '../services/client-resolver.ts'
 import { evaluateLongSessionCheckpoint } from '../services/long-session-monitor.ts'
 import { cleanupSessionStates, markSessionCheckpoint, recordSessionEvent } from '../services/session-state.ts'
 import { loadBrainPolicy } from '../services/policy.ts'
@@ -31,11 +31,7 @@ function log(message: string): void {
 }
 
 function detectClient(cwd: string): string | null {
-  const cwdLower = cwd.toLowerCase()
-  for (const [key, name] of Object.entries(loadClients())) {
-    if (cwdLower.includes(key)) return name
-  }
-  return null
+  return resolveClientContext(cwd).client
 }
 
 function digestTranscript(path?: string): TranscriptDigest {

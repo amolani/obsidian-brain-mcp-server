@@ -104,6 +104,14 @@ function isAutoCapture(vault: Vault, sourcePath?: string): boolean {
   return !!note && (note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester')
 }
 
+function isCheckpoint(vault: Vault, sourcePath?: string): boolean {
+  if (!sourcePath) return false
+  const note = vault.notes.get(sourcePath)
+  return sourcePath.startsWith('Knowledge/Checkpoints/')
+    || !!note?.tags.includes('checkpoint')
+    || note?.frontmatter.source_stage === 'checkpoint'
+}
+
 function pushStep(steps: BrainAutoBuildStep[], step: string, fn: () => unknown, dryRun: boolean): void {
   try {
     const result = fn()
@@ -272,6 +280,19 @@ function countRunbookSignals(content: string): number {
   return commands + phases + fixes
 }
 
+function performedCommands(content: string): string[] {
+  const section = textSection(content, 'Durchgeführte Befehle')
+  return [...section.matchAll(/^\d+\.\s+`([^`]+)`/gm)].map(match => match[1])
+}
+
+function isMutatingCommand(command: string): boolean {
+  return /\b(systemctl\s+(start|stop|restart|reload|enable|disable)|docker\s+compose\s+up|docker\s+(restart|exec|compose)|apt(?:-get)?\s+(install|remove|upgrade|dist-upgrade)|cp\s+|mv\s+|rm\s+|sed\s+-i|tee\s+|chmod\s+|chown\s+|certbot|acme\.sh)\b/i.test(command)
+}
+
+function hasImplementationSignals(content: string): boolean {
+  return performedCommands(content).some(isMutatingCommand)
+}
+
 function learnedMaxClaims(learning: BrainAutoBuildLearning, requested: number): number {
   const gate = learningGate(learning, 'extract_claims')
   if (gate?.blocked) return 0
@@ -411,6 +432,8 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
       pushLimitedStep(steps, 'extract_claims', budget, maxClaims, () => vault.extractClaims({
         path: sourcePath,
         maxClaims,
+        claimStatus: 'provisional',
+        sourceStage: isCheckpoint(vault, sourcePath) ? 'checkpoint' : isAutoCapture(vault, sourcePath) ? 'stop_capture' : 'manual',
         dryRun,
       }), dryRun)
     }
@@ -427,7 +450,9 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
   }
 
   if (sourcePath && after.promoteRunbooks && !alreadyPromoted) {
-    const signals = countRunbookSignals(sourceContent(vault, sourcePath))
+    const content = sourceContent(vault, sourcePath)
+    const signals = countRunbookSignals(content)
+    const implementationSignals = hasImplementationSignals(content)
     const threshold = learnedRunbookThreshold(learning)
     const blocked = !Number.isFinite(threshold)
     const item: BrainAutoBuildPlanItem = {
@@ -435,10 +460,14 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
       action: 'generate_runbook',
       title: `Runbook aus ${sourceTitle(vault, sourcePath)}`,
       sourcePath,
-      quality: !blocked && signals >= threshold ? 'pass' : 'skip',
+      quality: !blocked && !isCheckpoint(vault, sourcePath) && implementationSignals && signals >= threshold ? 'pass' : 'skip',
       reason: blocked
         ? 'feedback gate blocked'
-        : signals >= threshold
+        : isCheckpoint(vault, sourcePath)
+          ? 'Runbooks aus Zwischen-Checkpoints bleiben Review-Kandidaten'
+          : !implementationSignals
+            ? 'keine umsetzenden Befehle erkannt; vermutlich Recherche/Analyse'
+            : signals >= threshold
           ? `runbook gate passed (${signals} Signale, threshold ${threshold})`
           : `zu wenig Runbook-Signale (${signals}/${threshold})`,
     }

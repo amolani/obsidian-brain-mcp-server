@@ -140,3 +140,48 @@ describe('Harvester: minimum substance filtering', () => {
     assert.ok(!existsSync(stateFile), 'Short sessions should not be marked captured')
   })
 })
+
+describe('Harvester: client resolver', () => {
+  let vaultPath: string
+  let stateDir: string
+  let transcript: string
+
+  before(() => {
+    vaultPath = createTempVault()
+    stateDir = mkdtempSync(join(tmpdir(), 'harvester-client-'))
+    transcript = join(stateDir, 'dussledorf.jsonl')
+    const entries = [
+      { type: 'user', message: { content: 'In Düsseldorf muss edulution per FQDN erreichbar werden.' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Ich pruefe die Konfiguration und fasse danach den Befund zusammen.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.119.0.4 "cat /srv/docker/edulution-ui/traefik.yml"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'entryPoints configured' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.119.0.4 "docker ps --format names"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'edulution-ui\ntraefik' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.119.0.4 "systemctl restart nginx"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.119.0.4 "docker compose up -d"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'containers started' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: edulution wurde fuer Düsseldorf geprueft und die Dienste wurden neu gestartet. Die FQDN-Umstellung bleibt als naechster Schritt dokumentiert.' }] } },
+    ]
+    writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+  })
+
+  after(() => {
+    cleanupVault(vaultPath)
+    cleanupVault(stateDir)
+  })
+
+  test('routes typo cwd to known customer via fuzzy resolver', () => {
+    const result = runHarvester(vaultPath, stateDir, {
+      session_id: 'test-dussledorf',
+      transcript_path: transcript,
+      cwd: '/home/amo/Documents/code/amo/düssledorf',
+    })
+    assert.equal(result.status, 0, result.stderr)
+
+    const expectedDir = join(vaultPath, 'Kunden', 'Düsseldorf')
+    assert.ok(existsSync(expectedDir))
+    const created = readFileSync(join(stateDir, 'log.txt'), 'utf-8')
+    assert.match(created, /Fuzzy-Kunde Düsseldorf/)
+  })
+})

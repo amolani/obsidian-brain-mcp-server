@@ -196,4 +196,58 @@ describe('brain auto-build', () => {
     assert.ok(metrics.notes >= 2)
     assert.ok(metrics.autoCaptures >= 1)
   })
+
+  test('checkpoint claims stay provisional and do not produce final runbooks', () => {
+    const checkpoint = vault.brainCheckpoint({
+      title: 'DNS Zwischenstand',
+      summary: 'bkbach.de ist nicht registriert. Spaeter muss die richtige Domain geprueft werden.',
+      client: 'Schule',
+      runAutoBuild: true,
+      dryRun: false,
+    })
+
+    const autoBuild = checkpoint.autoBuild as any
+    assert.ok(autoBuild.steps.some((step: any) => step.step === 'extract_claims'))
+    assert.ok(autoBuild.plan.every((item: any) => item.action !== 'generate_runbook' || item.quality === 'skip'))
+
+    const claims = [...vault.notes.values()].filter(note => note.relativePath.startsWith('Knowledge/Claims/'))
+    assert.ok(claims.some(note => note.frontmatter.claim_status === 'provisional' && note.frontmatter.source_stage === 'checkpoint'))
+  })
+
+  test('research-only captures do not auto-promote to runbooks', async () => {
+    writeNote(vaultPath, {
+      path: 'Kunden/Schule/Research Only.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['auto-capture', 'prozedur', 'kunde/schule'],
+        quelle: 'knowledge-harvester',
+        kunde: 'Schule',
+      },
+      title: 'Research Only',
+      body: [
+        '## Zusammenfassung',
+        '',
+        'Recherche-Zusammenfassung: Traefik hat noch keinen Resolver, DNS muss geprueft werden.',
+        '',
+        '## Durchgeführte Befehle',
+        '',
+        '1. `dig NS example.org @1.1.1.1`',
+        '2. `cat /srv/docker/edulution-ui/traefik.yml`',
+        '3. `docker ps --format "table {{.Names}}"`',
+      ].join('\n'),
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    await vault.init()
+
+    const result = vault.brainAutoBuild({
+      sourcePath: 'Kunden/Schule/Research Only.md',
+      client: 'Schule',
+      dryRun: true,
+    })
+
+    const runbook = result.plan.find(item => item.action === 'generate_runbook')
+    assert.equal(runbook?.quality, 'skip')
+    assert.match(runbook?.reason ?? '', /Recherche\/Analyse/)
+  })
 })

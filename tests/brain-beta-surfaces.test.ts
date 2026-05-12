@@ -13,7 +13,7 @@ describe('public beta brain surfaces', () => {
     vaultPath = createTempVault()
     writeNote(vaultPath, {
       path: 'Kunden/Acme/Captures/Firewall DHCP.md',
-      frontmatter: { status: 'aktiv', tags: ['auto-capture', 'prozedur'], quelle: 'knowledge-harvester', datum: '2026-05-12' },
+      frontmatter: { status: 'aktiv', tags: ['auto-capture', 'prozedur'], quelle: 'knowledge-harvester', datum: '2026-05-12', client_match_method: 'fuzzy_cwd', client_match_confidence: 'medium', client_match_candidate: 'akme', client_match_alias: 'Acme' },
       title: 'Firewall DHCP',
       body: `## Zusammenfassung
 
@@ -71,6 +71,7 @@ Restart service after config validation.`,
     assert.equal(preview.dryRun, true)
     assert.equal(preview.captureCount, 1)
     assert.equal(preview.promotionCandidateCount, 1)
+    assert.equal(preview.uncertainClientCount, 1)
     assert.equal(preview.noisyAutoBuildCount, 1)
     assert.ok(!existsSync(join(vaultPath, preview.path)))
 
