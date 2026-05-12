@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import type { SaveKnowledgeOptions, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { autoBuildFeedbackCategory, brainAutoBuildLearning, type BrainAutoBuildLearning } from './brain-feedback.ts'
+import { classifyIntent, isMutatingCommand, performedCommands, type ClassifiedIntent } from './intent-classifier.ts'
 import { assertCanWriteTool, loadBrainPolicy } from './policy.ts'
+import { buildSessionImpactReport } from './session-impact-report.ts'
 import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface BrainAutoBuildOptions {
@@ -37,10 +39,12 @@ export interface BrainAutoBuildResult {
   mode: 'auto_build' | 'review_only' | 'off'
   sourcePath: string | null
   client: string | null
+  intent: ClassifiedIntent
   plan: BrainAutoBuildPlanItem[]
   steps: BrainAutoBuildStep[]
   manifestPath: string
   reportPath: string | null
+  impactReportPath: string | null
 }
 
 interface AutoBuildBudget {
@@ -57,6 +61,8 @@ interface AutoBuildManifestEntry {
   archiveFolder?: string
   artifacts: string[]
   reportPath?: string | null
+  impactReportPath?: string | null
+  intent?: ClassifiedIntent
   plan: BrainAutoBuildPlanItem[]
   steps: Array<{ step: string; applied: boolean; skipped: boolean; summary: string }>
 }
@@ -280,15 +286,6 @@ function countRunbookSignals(content: string): number {
   return commands + phases + fixes
 }
 
-function performedCommands(content: string): string[] {
-  const section = textSection(content, 'Durchgeführte Befehle')
-  return [...section.matchAll(/^\d+\.\s+`([^`]+)`/gm)].map(match => match[1])
-}
-
-function isMutatingCommand(command: string): boolean {
-  return /\b(systemctl\s+(start|stop|restart|reload|enable|disable)|docker\s+compose\s+up|docker\s+(restart|exec|compose)|apt(?:-get)?\s+(install|remove|upgrade|dist-upgrade)|cp\s+|mv\s+|rm\s+|sed\s+-i|tee\s+|chmod\s+|chown\s+|certbot|acme\.sh)\b/i.test(command)
-}
-
 function hasImplementationSignals(content: string): boolean {
   return performedCommands(content).some(isMutatingCommand)
 }
@@ -312,7 +309,7 @@ function reportPathFor(sourcePath: string | null): string {
   return `Maintenance/Auto-Build/${stamp}-${source}.md`
 }
 
-function renderReport(result: Omit<BrainAutoBuildResult, 'reportPath'>): string {
+function renderReport(result: Omit<BrainAutoBuildResult, 'reportPath' | 'impactReportPath'>): string {
   const stepLines = result.steps.length > 0
     ? result.steps.map(step => `- ${step.applied ? '[x]' : step.skipped ? '[!]' : '[ ]'} \`${step.step}\`: ${step.summary}`).join('\n')
     : '- Keine Schritte'
@@ -323,10 +320,10 @@ function renderReport(result: Omit<BrainAutoBuildResult, 'reportPath'>): string 
     ? '- Skips im Brain Review oder Auto-Build-Plan prüfen\n- Bei zu strengen Gates Feedback/Policy anpassen'
     : '- Keine unmittelbare Aktion nötig'
 
-  return `---\nstatus: aktiv\ntags:\n  - auto-build\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: brain-auto-build\n---\n\n# Auto-Build Report\n\nQuelle: ${result.sourcePath ? `[[${result.sourcePath}]]` : '(keine)'}\nClient: ${result.client ?? '(keiner)'}\nMode: ${result.mode}\nDry-Run: ${result.dryRun}\n\n## Schritte\n\n${stepLines}\n\n## Promotion Plan\n\n${planLines}\n\n## Nächste Aktionen\n\n${next}\n`
+  return `---\nstatus: aktiv\ntags:\n  - auto-build\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: brain-auto-build\nsession_intent: ${result.intent.intent}\nintent_confidence: ${result.intent.confidence}\n---\n\n# Auto-Build Report\n\nQuelle: ${result.sourcePath ? `[[${result.sourcePath}]]` : '(keine)'}\nClient: ${result.client ?? '(keiner)'}\nMode: ${result.mode}\nDry-Run: ${result.dryRun}\nIntent: ${result.intent.intent} (${result.intent.confidence})\n\n## Intent-Gründe\n\n${result.intent.reasons.map(reason => `- ${reason}`).join('\n')}\n\n## Schritte\n\n${stepLines}\n\n## Promotion Plan\n\n${planLines}\n\n## Nächste Aktionen\n\n${next}\n`
 }
 
-function writeReport(vault: Vault, result: Omit<BrainAutoBuildResult, 'reportPath'>): string | null {
+function writeReport(vault: Vault, result: Omit<BrainAutoBuildResult, 'reportPath' | 'impactReportPath'>): string | null {
   if (result.dryRun) return null
   const path = reportPathFor(result.sourcePath)
   assertCanWriteTool('brain_auto_build', [path])
@@ -345,12 +342,13 @@ function writeReport(vault: Vault, result: Omit<BrainAutoBuildResult, 'reportPat
   return path
 }
 
-function collectArtifacts(steps: BrainAutoBuildStep[], sourcePath: string | null, reportPath: string | null): string[] {
+function collectArtifacts(steps: BrainAutoBuildStep[], sourcePath: string | null, reportPath: string | null, impactReportPath: string | null): string[] {
   const artifacts = new Set<string>()
   const add = (value: unknown) => {
     if (typeof value !== 'string' || !value.endsWith('.md')) return
     if (sourcePath && value === sourcePath) return
     if (value === 'Knowledge/_brain.md' || value === 'Knowledge/index.md' || value === 'Knowledge/hot.md') return
+    if (value === 'Maintenance/Knowledge Inbox.md') return
     if (/^Kunden\/[^/]+\/_(timeline|snapshot)\.md$/.test(value)) return
     artifacts.add(value)
   }
@@ -364,6 +362,7 @@ function collectArtifacts(steps: BrainAutoBuildStep[], sourcePath: string | null
     if (Array.isArray(result.paths)) result.paths.forEach(add)
   }
   add(reportPath)
+  add(impactReportPath)
   return [...artifacts].sort()
 }
 
@@ -379,6 +378,10 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
   const dryRun = options.dryRun ?? policy.automation.mode !== 'auto_build'
   const sourcePath = options.sourcePath ?? null
   const client = options.client ?? null
+  const source = sourcePath ? vault.notes.get(sourcePath) : null
+  const intent = source
+    ? classifyIntent(source.content, source.tags)
+    : classifyIntent('', [])
   const steps: BrainAutoBuildStep[] = []
   const plan: BrainAutoBuildPlanItem[] = []
   const learning = brainAutoBuildLearning(vault)
@@ -390,7 +393,7 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
   }
 
   if (policy.automation.mode === 'off') {
-    const offResult = { dryRun, mode: policy.automation.mode, sourcePath, client, plan, manifestPath: AUTO_BUILD_MANIFEST_PATH, reportPath: null, steps: [{ step: 'policy', applied: false, skipped: true, summary: 'Automation ist deaktiviert' }] }
+    const offResult = { dryRun, mode: policy.automation.mode, sourcePath, client, intent, plan, manifestPath: AUTO_BUILD_MANIFEST_PATH, reportPath: null, impactReportPath: null, steps: [{ step: 'policy', applied: false, skipped: true, summary: 'Automation ist deaktiviert' }] }
     return offResult
   }
 
@@ -455,16 +458,19 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
     const implementationSignals = hasImplementationSignals(content)
     const threshold = learnedRunbookThreshold(learning)
     const blocked = !Number.isFinite(threshold)
+    const allowedIntent = ['implementation', 'troubleshooting'].includes(intent.intent)
     const item: BrainAutoBuildPlanItem = {
       id: `generate_runbook:${sourcePath}`.replace(/[^a-zA-Z0-9._:/-]+/g, '_'),
       action: 'generate_runbook',
       title: `Runbook aus ${sourceTitle(vault, sourcePath)}`,
       sourcePath,
-      quality: !blocked && !isCheckpoint(vault, sourcePath) && implementationSignals && signals >= threshold ? 'pass' : 'skip',
+      quality: !blocked && !isCheckpoint(vault, sourcePath) && allowedIntent && implementationSignals && signals >= threshold ? 'pass' : 'skip',
       reason: blocked
         ? 'feedback gate blocked'
         : isCheckpoint(vault, sourcePath)
           ? 'Runbooks aus Zwischen-Checkpoints bleiben Review-Kandidaten'
+          : !allowedIntent
+            ? `Intent ${intent.intent} bleibt Review-Kandidat statt Runbook; vermutlich Recherche/Analyse`
           : !implementationSignals
             ? 'keine umsetzenden Befehle erkannt; vermutlich Recherche/Analyse'
             : signals >= threshold
@@ -503,23 +509,45 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
     mode: policy.automation.mode,
     sourcePath,
     client,
+    intent,
     plan,
     steps,
     manifestPath: AUTO_BUILD_MANIFEST_PATH,
   }
   const reportPath = writeReport(vault, resultWithoutReport)
+  const impact = sourcePath
+    ? buildSessionImpactReport(vault, {
+      sourcePath,
+      autoBuild: { ...resultWithoutReport, reportPath },
+      dryRun,
+    })
+    : null
+  const impactReportPath = impact && !impact.dryRun ? impact.path : null
 
   if (!dryRun && sourcePath && hash) {
     manifest.sources[sourcePath] = {
       sourcePath,
       hash,
       promotedAt: new Date().toISOString(),
-      artifacts: collectArtifacts(steps, sourcePath, reportPath),
+      artifacts: collectArtifacts(steps, sourcePath, reportPath, impactReportPath),
       reportPath,
+      impactReportPath,
+      intent,
       plan,
       steps: steps.map(step => ({ step: step.step, applied: step.applied, skipped: step.skipped, summary: step.summary })),
     }
     writeManifest(vault, manifest)
+  }
+
+  if (after.buildKnowledgeInbox) {
+    pushLimitedStep(steps, 'build_knowledge_inbox', budget, 0, () => vault.buildKnowledgeInbox({ dryRun }), dryRun)
+    if (!dryRun && sourcePath && hash) {
+      manifest.sources[sourcePath].steps = steps.map(step => ({ step: step.step, applied: step.applied, skipped: step.skipped, summary: step.summary }))
+      writeManifest(vault, manifest)
+    }
+  }
+
+  if (!dryRun && sourcePath && hash) {
     appendActionLog(vault.vaultPath, {
       tool: 'brain_auto_build',
       mode: 'apply',
@@ -532,5 +560,6 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
   return {
     ...resultWithoutReport,
     reportPath,
+    impactReportPath,
   }
 }

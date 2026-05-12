@@ -412,6 +412,30 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'build_session_impact_report',
+      description:
+        'Dry-run-first session impact report for one capture/checkpoint/source. Explains intent, written artifacts, skipped steps, provisional claims, and next review actions. Writes Maintenance/Session Impact/{source}.md.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          source_path: { type: 'string', description: 'Source capture/checkpoint/source note path.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write the report.' },
+        },
+        required: ['source_path'],
+      },
+    },
+    {
+      name: 'build_knowledge_inbox',
+      description:
+        'Dry-run-first central review inbox for provisional claims, uncertain customer routing, runbook candidates, auto-build skips, and recent session impact reports. Writes Maintenance/Knowledge Inbox.md.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Maintenance/Knowledge Inbox.md.' },
+        },
+      },
+    },
+    {
       name: 'record_brain_feedback',
       description:
         'Dry-run-first feedback loop for review and auto-build items. Records accepted/rejected/snoozed outcomes in .brain-feedback.json so future tuning and auto-build gates can use your preferences.',

@@ -98,7 +98,7 @@ export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {})
   add('checkpoint_policy', 'Long-session policy', policy.automation.duringSession.autoCheckpoint ? 'ok' : 'warn', `autoCheckpoint=${policy.automation.duringSession.autoCheckpoint}, minCommands=${policy.automation.duringSession.minCommandsBetweenCheckpoints}, minMinutes=${policy.automation.duringSession.minMinutesBetweenCheckpoints}`)
   add('risky_auto_apply', 'Risky auto-apply block', policy.automation.neverAutoApply.includes('merge_duplicates') && policy.automation.neverAutoApply.includes('rename_note') ? 'ok' : 'warn', `neverAutoApply=${policy.automation.neverAutoApply.join(', ')}`)
 
-  const requiredTools = ['brain_auto_build', 'archive_auto_build_run', 'brain_checkpoint', 'brain_metrics', 'record_brain_feedback', 'build_capture_review', 'build_evidence_dashboard']
+  const requiredTools = ['brain_auto_build', 'archive_auto_build_run', 'brain_checkpoint', 'brain_metrics', 'record_brain_feedback', 'build_capture_review', 'build_evidence_dashboard', 'build_session_impact_report', 'build_knowledge_inbox']
   for (const tool of requiredTools) {
     add(`tool_policy_${tool}`, `Tool policy ${tool}`, policy.tools[tool] ? 'ok' : 'fail', policy.tools[tool] ? `risk=${policy.tools[tool].risk}, write=${policy.tools[tool].write}` : 'Tool fehlt in brain-policy.json')
   }

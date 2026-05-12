@@ -486,6 +486,53 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     }
   },
 
+  build_session_impact_report(vault, args) {
+    const result = vault.buildSessionImpactReport({
+      sourcePath: args.source_path as string,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Session Impact Report Vorschau' : '# Session Impact Report aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Quelle: \`${result.sourcePath}\``,
+          `Pfad: \`${result.path}\``,
+          `Intent: ${result.intent.intent} (${result.intent.confidence})`,
+          `Geschrieben/Artefakte: ${result.createdCount}`,
+          `Review nötig: ${result.reviewCount}`,
+          `Skips: ${result.skippedCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  build_knowledge_inbox(vault, args) {
+    const result = vault.buildKnowledgeInbox({ dryRun: args.dry_run !== false })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Knowledge Inbox Vorschau' : '# Knowledge Inbox aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Provisional Claims: ${result.provisionalClaimCount}`,
+          `Kundenzuordnung prüfen: ${result.uncertainClientCount}`,
+          `Runbook-Kandidaten: ${result.runbookCandidateCount}`,
+          `Auto-Build Skips: ${result.skippedAutoBuildCount}`,
+          `Impact Reports: ${result.impactReportCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
   record_brain_feedback(vault, args) {
     const outcome = ['accepted', 'rejected', 'snoozed'].includes(String(args.outcome))
       ? args.outcome as 'accepted' | 'rejected' | 'snoozed'

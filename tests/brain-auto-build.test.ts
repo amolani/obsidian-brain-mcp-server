@@ -86,13 +86,18 @@ describe('brain auto-build', () => {
     assert.ok(existsSync(join(vaultPath, 'Knowledge', 'hot.md')))
     assert.ok(existsSync(join(vaultPath, 'Kunden', 'Schule', '_timeline.md')))
     assert.ok(existsSync(join(vaultPath, 'Kunden', 'Schule', '_snapshot.md')))
+    assert.ok(existsSync(join(vaultPath, 'Maintenance', 'Knowledge Inbox.md')))
     assert.ok(existsSync(join(vaultPath, '.brain-auto-build-manifest.json')))
     assert.ok(result.reportPath)
     assert.ok(existsSync(join(vaultPath, result.reportPath)))
+    assert.ok(result.impactReportPath)
+    assert.ok(existsSync(join(vaultPath, result.impactReportPath)))
+    assert.equal(result.intent.intent, 'implementation')
     assert.ok(result.plan.some(item => item.action === 'generate_runbook' && item.quality === 'pass'))
     assert.ok(result.steps.some(step => step.step === 'generate_runbook' && step.applied))
     const manifest = JSON.parse(readFileSync(join(vaultPath, '.brain-auto-build-manifest.json'), 'utf-8'))
     assert.ok(manifest.sources['Kunden/Schule/Schule Auto Capture.md'].artifacts.length >= 4)
+    assert.equal(manifest.sources['Kunden/Schule/Schule Auto Capture.md'].intent.intent, 'implementation')
 
     const second = vault.brainAutoBuild({
       sourcePath: 'Kunden/Schule/Schule Auto Capture.md',

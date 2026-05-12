@@ -17,6 +17,8 @@ Open `/tmp/obsidian-brain-demo` in Obsidian and inspect:
 - `Knowledge/_brain.md`
 - `Knowledge/evidence.md` after running `build_evidence_dashboard`
 - `Maintenance/Capture Review.md` after running `build_capture_review`
+- `Maintenance/Knowledge Inbox.md` after running `build_knowledge_inbox`
+- `Maintenance/Session Impact/` after a real auto-build run or `build_session_impact_report`
 - `Knowledge/Runbooks/Runbook Firewall DHCP.md`
 
 ## Real Vault Setup
@@ -36,9 +38,10 @@ node cli.ts install-hooks --vault "$VAULT_PATH" --apply
 - Risky refactors stay out of automatic apply.
 - Hook installation preserves unrelated Claude settings.
 - Capture Review and Evidence Dashboard are dry-run-first surfaces.
+- Session Impact Report and Knowledge Inbox are dry-run-first surfaces.
 - Runbook generation through the MCP tool previews by default.
 - Checkpoint and capture-derived claims are marked provisional until reviewed.
-- Fuzzy or content-based customer matches are surfaced in Capture Review.
+- Fuzzy or content-based customer matches are surfaced in Capture Review and Knowledge Inbox.
 
 ## Good First Commands
 
@@ -46,6 +49,7 @@ node cli.ts install-hooks --vault "$VAULT_PATH" --apply
 brain_health_check
 brain_metrics
 build_capture_review
+build_knowledge_inbox
 build_evidence_dashboard
 brain_review
 ```

@@ -28,6 +28,7 @@ export interface BrainPolicy {
       updateHotCache: boolean
       buildCustomerTimeline: boolean
       buildCustomerSnapshot: boolean
+      buildKnowledgeInbox: boolean
       promoteRunbooks: boolean
     }
     limits: {
@@ -80,6 +81,7 @@ const DEFAULT_POLICY: BrainPolicy = {
       updateHotCache: true,
       buildCustomerTimeline: true,
       buildCustomerSnapshot: true,
+      buildKnowledgeInbox: true,
       promoteRunbooks: true,
     },
     limits: {
@@ -137,6 +139,8 @@ const DEFAULT_POLICY: BrainPolicy = {
     build_brain_dashboard: { write: true, risk: 'low', requiresDryRunDefault: true },
     build_capture_review: { write: true, risk: 'low', requiresDryRunDefault: true },
     build_evidence_dashboard: { write: true, risk: 'low', requiresDryRunDefault: true },
+    build_session_impact_report: { write: true, risk: 'low', requiresDryRunDefault: true },
+    build_knowledge_inbox: { write: true, risk: 'low', requiresDryRunDefault: true },
     record_brain_feedback: { write: true, risk: 'low', requiresDryRunDefault: true },
     brain_feedback_summary: { write: false, risk: 'low' },
     build_memory_timeline: { write: true, risk: 'low', requiresDryRunDefault: true },
@@ -188,6 +192,7 @@ function mergePolicy(raw: Partial<BrainPolicy>): BrainPolicy {
         updateHotCache: asBoolean(raw.automation?.afterSession?.updateHotCache, DEFAULT_POLICY.automation.afterSession.updateHotCache),
         buildCustomerTimeline: asBoolean(raw.automation?.afterSession?.buildCustomerTimeline, DEFAULT_POLICY.automation.afterSession.buildCustomerTimeline),
         buildCustomerSnapshot: asBoolean(raw.automation?.afterSession?.buildCustomerSnapshot, DEFAULT_POLICY.automation.afterSession.buildCustomerSnapshot),
+        buildKnowledgeInbox: asBoolean(raw.automation?.afterSession?.buildKnowledgeInbox, DEFAULT_POLICY.automation.afterSession.buildKnowledgeInbox),
         promoteRunbooks: asBoolean(raw.automation?.afterSession?.promoteRunbooks, DEFAULT_POLICY.automation.afterSession.promoteRunbooks),
       },
       limits: {

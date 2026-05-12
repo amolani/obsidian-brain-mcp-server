@@ -14,6 +14,7 @@
       "updateHotCache": true,
       "buildCustomerTimeline": true,
       "buildCustomerSnapshot": true,
+      "buildKnowledgeInbox": true,
       "promoteRunbooks": true
     },
     "limits": {
@@ -82,6 +83,8 @@
     "build_brain_dashboard": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "build_capture_review": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "build_evidence_dashboard": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "build_session_impact_report": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "build_knowledge_inbox": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "record_brain_feedback": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "brain_feedback_summary": { "write": false, "risk": "low" },
     "build_memory_timeline": { "write": true, "risk": "low", "requiresDryRunDefault": true },

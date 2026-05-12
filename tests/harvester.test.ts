@@ -183,5 +183,7 @@ describe('Harvester: client resolver', () => {
     assert.ok(existsSync(expectedDir))
     const created = readFileSync(join(stateDir, 'log.txt'), 'utf-8')
     assert.match(created, /Fuzzy-Kunde Düsseldorf/)
+    const notePath = join(expectedDir, 'Düsseldorf — Docker Setup (2026-05-12).md')
+    assert.match(readFileSync(notePath, 'utf-8'), /session_intent: implementation/)
   })
 })

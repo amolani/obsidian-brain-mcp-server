@@ -14,6 +14,7 @@ import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
 import { resolveClientContext, type ClientMatch } from '../services/client-resolver.ts'
+import { classifyIntent, type ClassifiedIntent } from '../services/intent-classifier.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { Vault } from '../vault.ts'
 
@@ -234,6 +235,7 @@ interface ExtractedKnowledge {
   errorFixes: string[]
   summaries: string[]
   phases: Phase[]
+  intent: ClassifiedIntent
 }
 
 // Extract "phases" = work-blocks between user messages
@@ -362,8 +364,14 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
 
   const title = generateTitle(entries, cwd, tags)
   const phases = extractPhases(entries)
+  const intentContent = [
+    summaries.join('\n\n'),
+    procedures.map((procedure, i) => `${i + 1}. \`${procedure}\``).join('\n'),
+    errorFixes.join('\n\n'),
+  ].join('\n\n')
+  const intent = classifyIntent(intentContent, tags)
 
-  return { title, client, clientMatch, tags, procedures, errorFixes, summaries, phases }
+  return { title, client, clientMatch, tags, procedures, errorFixes, summaries, phases, intent }
 }
 
 function stripSsh(cmd: string): string {
@@ -397,6 +405,8 @@ datum: ${datum}
 quelle: knowledge-harvester
 knowledge_type: capture
 source_stage: stop_capture
+session_intent: ${k.intent.intent}
+intent_confidence: ${k.intent.confidence}
 client_match_method: ${k.clientMatch.method}
 client_match_confidence: ${k.clientMatch.confidence}
 ${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\n` : ''}${k.clientMatch.matched ? `client_match_alias: ${k.clientMatch.matched}\n` : ''}${k.client ? `kunde: ${k.client}\n` : ''}
@@ -406,6 +416,8 @@ ${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\
 
 > [!info] Auto-Capture
 > Automatisch aus Session erfasst am ${datum}.`)
+
+  sections.push(`\n## Intent\n\n- Intent: ${k.intent.intent}\n- Confidence: ${k.intent.confidence}\n${k.intent.reasons.map(reason => `- ${reason}`).join('\n')}`)
 
   // Ablauf - human-readable phase-by-phase narrative (TOP)
   if (k.phases.length > 0) {
@@ -565,6 +577,7 @@ process.stdin.on('end', async () => {
         tags: knowledge.tags,
         client: knowledge.client,
         clientMatch: knowledge.clientMatch,
+        intent: knowledge.intent,
       },
     })
 

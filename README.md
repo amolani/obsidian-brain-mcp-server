@@ -210,6 +210,7 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
 | `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
 | `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
+| `build_session_impact_report`, `build_knowledge_inbox` | Explain one session's vault impact and collect review work in one inbox |
 | `build_knowledge_index`, `update_hot_cache` | Knowledge map and manual hot context cache |
 | `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
 
@@ -440,7 +441,7 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Generate a runbook for the linuxmuster installation."
 - "Run vault maintenance."
 
-The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a typed capture note to the appropriate folder. Captures include `knowledge_type`, `source_stage`, and client-match metadata so fuzzy folder typos and content-based customer matches are visible in Capture Review.
+The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a typed capture note to the appropriate folder. Captures include `knowledge_type`, `source_stage`, `session_intent`, and client-match metadata so fuzzy folder typos and content-based customer matches are visible in Capture Review and Knowledge Inbox.
 
 When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately after a successful session capture:
 
@@ -449,11 +450,13 @@ When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately 
 - records processed source hashes in `.brain-auto-build-manifest.json` to prevent repeated promotion of the same capture
 - enforces policy limits for maximum new notes, claim count, and runtime
 - creates an Auto-Build report under `Maintenance/Auto-Build/`
+- creates a Session Impact report under `Maintenance/Session Impact/` explaining what changed, what skipped, and what needs review
 - promotes runbook candidates only from implemented procedural captures, not from checkpoints or research-only reads
 - learns from archived auto-build artifacts and repeated rejected feedback, making noisy promotion categories stricter over time
 - extracts claims into `Knowledge/Claims/`; checkpoint and capture-derived claims start as `claim_status: provisional`
 - updates evidence metadata on the capture
 - refreshes `Knowledge/_brain.md`, `Knowledge/index.md`, `Knowledge/hot.md`
+- refreshes `Maintenance/Knowledge Inbox.md` with provisional claims, uncertain clients, runbook candidates, and auto-build skips
 - refreshes `Kunden/{Client}/_timeline.md` and `Kunden/{Client}/_snapshot.md` when a client was detected
 
 Risky operations such as duplicate merges, note renames, folder reorganization, broken-link rewrites, and link suggestion application stay out of automatic apply.
@@ -527,7 +530,7 @@ Current focus is operational reliability first, then a smoother plugin experienc
 |---|---|
 | Plugin packaging | Claude Code plugin template is scaffolded; CLI remains the Public Beta install path |
 | First-run setup | `obsidian-brain doctor`, `install-hooks`, `init`, `demo`, and `release-check` |
-| Visual surfaces | Brain dashboard, capture review, evidence dashboard, runbook lists, and customer snapshots |
+| Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, runbook lists, and customer snapshots |
 | Feedback loop | Easier archive/reject/retry guidance for noisy auto-build output |
 | Import paths | Source ingest profiles for markdown, tickets, web exports, and incident logs |
 | Collaboration | Shareable policy presets while keeping vault data local |
