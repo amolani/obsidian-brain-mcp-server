@@ -2,9 +2,9 @@
 
 # Obsidian Brain MCP
 
-**A filesystem-native second brain for Claude Code and Obsidian.**
+**Turn Claude Code sessions into a durable Obsidian knowledge system.**
 
-Build a living technical knowledge base while you work: capture sessions, promote durable knowledge, track evidence, generate runbooks, maintain customer memory, and keep risky refactors dry-run-first.
+Local-first MCP server for consultants, sysadmins, and technical operators who want their real work to become searchable memory: session captures, customer context, evidence-backed claims, runbooks, dashboards, and review queues.
 
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-ESM-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
@@ -13,17 +13,31 @@ Build a living technical knowledge base while you work: capture sessions, promot
 [![Obsidian](https://img.shields.io/badge/Obsidian-vault%20native-7C3AED?logo=obsidian&logoColor=white)](README.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**[Quick Start](#quick-start)** · **[What It Does](#what-it-does)** · **[Brain Workflow](#brain-workflow)** · **[Tool Surface](#tool-surface)** · **[Safety Model](#safety-model)**
+**[Quick Start](#quick-start)** · **[Session Flow](#brain-workflow)** · **[What You Get](#what-lands-in-obsidian)** · **[Tools](#tool-surface)** · **[Safety](#safety-model)**
 
-<img src="./assets/obsidian-brain-hero.svg" alt="Obsidian Brain MCP hero banner showing Claude Code connected to an Obsidian knowledge graph" width="100%">
+<img src="./assets/obsidian-brain-hero-v2.png" alt="Obsidian Brain MCP hero banner showing a terminal session flowing into a guarded local vault, evidence cards, runbooks, dashboards, and an Obsidian knowledge graph" width="100%">
+
+<sub>Product visual generated with OpenAI image generation; implementation is plain TypeScript, Markdown, and local files.</sub>
 
 </div>
 
 ---
 
+## The Short Version
+
+Obsidian Brain MCP watches Claude Code work at the session boundary and turns useful traces into structured Obsidian knowledge. It is not a hosted notes app, not a vector database you have to trust blindly, and not an auto-refactor bot. Your vault stays Markdown-first and risky maintenance stays reviewable.
+
+| You do the work | The MCP server extracts | Your vault gains |
+|---|---|---|
+| Debug systems, run commands, fix incidents | Commands, errors, outcomes, decisions | Session captures, TODOs, technical notes |
+| Repeat operational procedures | Steps, prerequisites, validation signals | Runbooks and troubleshooting patterns |
+| Research or compare facts | Claims, sources, confidence, contradictions | Evidence notes and recheck schedules |
+| Work across customers or projects | Current folder, client aliases, related notes | Timelines, snapshots, project memory |
+| Let the vault age | Quality gaps, missing links, stale evidence | Review queues and safe maintenance proposals |
+
 ## What It Does
 
-Obsidian Brain MCP turns Claude Code into a local-first knowledge worker for sysadmins, consultants, and technical operators. It indexes your Obsidian vault directly on disk, captures meaningful Claude Code sessions, and gradually turns operational work into reusable memory.
+Obsidian Brain MCP turns Claude Code into a local-first knowledge worker. It indexes your Obsidian vault directly on disk, captures meaningful Claude Code sessions, and gradually promotes operational work into reusable memory.
 
 | Layer | What happens | Output |
 |---|---|---|
@@ -32,6 +46,23 @@ Obsidian Brain MCP turns Claude Code into a local-first knowledge worker for sys
 | **Verify** | Evidence metadata tracks confidence, sources, rechecks, and contradictions | Claims, evidence reports, schedules |
 | **Maintain** | Review tools propose cleanup while executors stay dry-run-first | Dashboards, MOCs, link fixes, lifecycle updates |
 | **Learn** | Archived auto-build artifacts become feedback for stricter future gates | Usefulness score, adaptive promotion behavior |
+
+## What Lands In Obsidian
+
+The output is deliberately boring in the best way: normal Markdown files in normal folders.
+
+```text
+YourVault/
+├── Daily/2026-05-12.md                  # session notes and TODOs
+├── Kunden/Client/_timeline.md           # project memory over time
+├── Kunden/Client/_snapshot.md           # current client context
+├── Knowledge/Claims/                    # evidence-backed statements
+├── Knowledge/Runbooks/                  # reusable procedures
+├── Knowledge/_brain.md                  # operating dashboard
+├── Knowledge/index.md                   # knowledge map
+├── Knowledge/hot.md                     # current high-value context
+└── Maintenance/Auto-Build/              # reports, reviews, feedback
+```
 
 ## Quick Start
 
@@ -68,13 +99,17 @@ If the health check is clean, just work normally. Captures, dashboards, evidence
 
 ## Session Experience
 
+This is the intended loop:
+
 ```text
 > brain_health_check
 Status: ok
 Checks: policy ok, hooks ok, auto-build manifest ok, action log ok
 
-> Work normally in Claude Code
-Stop hook -> Knowledge Harvester -> Auto-Capture -> Auto-Build Report
+> Work normally in Claude Code: debug, inspect, edit, verify
+SessionStart -> client context and daily note
+PostToolUse -> debounced long-session checkpoint
+Stop -> Knowledge Harvester -> Auto-Capture -> Auto-Build Report
 
 > brain_metrics
 Auto-Captures: 18
@@ -83,6 +118,8 @@ Auto-build usefulness score: 0.86
 ```
 
 ## Brain Workflow
+
+The important part is the policy gate: automatic writes are for derived knowledge and generated surfaces; risky refactors remain explicit.
 
 ```mermaid
 flowchart LR
@@ -108,7 +145,7 @@ flowchart LR
 
 Most note systems wait for you to organize after the work is done. This one watches the work itself.
 
-- **Claude Code-native**: MCP tools plus SessionStart, PostToolUse, and Stop hooks.
+- **Claude Code-native**: MCP tools plus SessionStart, Bash PostToolUse, and Stop hooks.
 - **Obsidian-native**: plain Markdown, local folders, backlinks, frontmatter, no database lock-in.
 - **Sysadmin-friendly**: customer folders, runbooks, commands, incidents, TODOs, evidence, lifecycle state.
 - **Safe automation**: auto-build can write derived knowledge; risky operations stay out of automatic apply.
@@ -257,6 +294,9 @@ Add to `~/.claude/settings.json`:
 
 ```json
 {
+  "env": {
+    "VAULT_PATH": "/path/to/your/obsidian/vault"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -271,11 +311,13 @@ Add to `~/.claude/settings.json`:
     ],
     "PostToolUse": [
       {
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "node /absolute/path/to/obsidian-brain-mcp-server/hooks/session-checkpoint.ts",
-            "timeout": 12
+            "timeout": 12,
+            "statusMessage": "Checking long-session checkpoint..."
           }
         ]
       }
@@ -296,7 +338,7 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Hook environment requires `VAULT_PATH` to be set (inherited from your shell or set via Claude Code env config).
+The checkpoint hook should be registered for `PostToolUse` with `matcher: "Bash"` so long-running terminal-heavy sessions can be checkpointed without firing on every edit.
 
 ### 5. (Optional) Add client instructions
 
@@ -456,6 +498,19 @@ YourVault/
 ├── Referenz/              # Misc reference (organized into Technik/ automatically)
 └── Persönlich/            # Private
 ```
+
+## Roadmap
+
+Current focus is operational reliability first, then a smoother plugin experience.
+
+| Area | Direction |
+|---|---|
+| Plugin packaging | Claude Code plugin bundle with fewer manual setup steps |
+| First-run setup | Guided health check, vault validation, and hook registration hints |
+| Visual surfaces | Better dashboard previews, runbook lists, evidence status, and customer snapshots |
+| Feedback loop | Easier archive/reject/retry workflow for noisy auto-build output |
+| Import paths | Safer source ingestion profiles for PDFs, web exports, tickets, and incident logs |
+| Collaboration | Shareable policy presets while keeping vault data local |
 
 ## Development
 
