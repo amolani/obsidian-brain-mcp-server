@@ -141,6 +141,7 @@ const DEFAULT_POLICY: BrainPolicy = {
     brain_schedule: { write: false, risk: 'low' },
     build_customer_snapshot: { write: true, risk: 'low', requiresDryRunDefault: true },
     brain_metrics: { write: false, risk: 'low' },
+    brain_health_check: { write: false, risk: 'low' },
     brain_checkpoint: { write: true, risk: 'low', requiresDryRunDefault: true },
     create_daily_note: { write: true, risk: 'low' },
     daily_note: { write: true, risk: 'low' },

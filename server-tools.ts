@@ -483,6 +483,17 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'brain_health_check',
+      description:
+        'Read-only operational readiness check for a fresh Claude session. Verifies vault path, policy, required brain tools, generated surfaces, auto-build manifest/action log, and optional Claude hook registration.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          check_hooks: { type: 'boolean', description: 'Default true. Set false to skip ~/.claude/settings.json hook checks.' },
+        },
+      },
+    },
+    {
       name: 'brain_checkpoint',
       description:
         'Dry-run-first long-session checkpoint. Writes Knowledge/Checkpoints note and can optionally run brain_auto_build for the checkpoint/source.',

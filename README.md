@@ -47,6 +47,7 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 - `archive_auto_build_run` — dry-run-first archive tool for artifacts created by one auto-build source run; archived artifacts become negative learning feedback
 - `brain_checkpoint` — long-session checkpoint note with optional auto-build trigger
 - `brain_metrics` — read-only health metrics for captures, promotions, claims, evidence, questions, feedback, and auto-build processing
+- `brain_health_check` — read-only readiness check for policy, hooks, generated surfaces, manifest, and action log
 
 **Maintenance (Analyzer → Recommender → Executor)**
 - `find_duplicates` — fuzzy match on title, content, tags (with confidence scores)
@@ -316,9 +317,10 @@ Use the vault as a dry-run-first operating loop:
 11. Let `brain_auto_build` run automatically after captures through the Stop hook. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/` and run an incremental auto-build when command/time thresholds are reached; you can still call `brain_checkpoint` or `brain_auto_build` explicitly.
 12. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
 13. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
-14. Use `brain_schedule` for propose-only upkeep: due evidence rechecks, open contradictions, missing dashboards, and explicit next tools.
-15. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
-16. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
+14. In a fresh Claude session, run `brain_health_check` first. It reports whether policy, hooks, generated surfaces, manifest, and action log are ready.
+15. Use `brain_schedule` for propose-only upkeep: due evidence rechecks, open contradictions, missing dashboards, and explicit next tools.
+16. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
+17. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
 
 ## Folder conventions
 

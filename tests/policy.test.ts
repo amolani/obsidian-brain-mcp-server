@@ -53,6 +53,7 @@ describe('brain policy', () => {
     assert.equal(policy.automation.duringSession.minCommandsBetweenCheckpoints, 12)
     assert.equal(policy.automation.duringSession.maxCheckpointsPerSession, 6)
     assert.equal(policy.tools.archive_auto_build_run.requiresDryRunDefault, true)
+    assert.equal(policy.tools.brain_health_check.write, false)
     assert.ok(policy.automation.neverAutoApply.includes('merge_duplicates'))
     assert.ok(policy.automation.neverAutoApply.includes('rename_note'))
   })

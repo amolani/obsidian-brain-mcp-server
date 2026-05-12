@@ -86,6 +86,7 @@
     "brain_schedule": { "write": false, "risk": "low" },
     "build_customer_snapshot": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "brain_metrics": { "write": false, "risk": "low" },
+    "brain_health_check": { "write": false, "risk": "low" },
     "brain_checkpoint": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "auto_capture": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
     "daily_note": { "write": true, "risk": "low", "requiresDryRunDefault": false },

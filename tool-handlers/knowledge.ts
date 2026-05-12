@@ -645,6 +645,36 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     }
   },
 
+  brain_health_check(vault, args) {
+    const result = vault.brainHealthCheck({
+      checkHooks: typeof args.check_hooks === 'boolean' ? args.check_hooks : undefined,
+    })
+    const lines = result.checks.map(check =>
+      `- **${check.status}** \`${check.id}\`: ${check.message}`,
+    ).join('\n')
+    const next = result.nextActions.length > 0
+      ? result.nextActions.map(action => `- ${action}`).join('\n')
+      : '- Keine unmittelbaren Aktionen'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Health Check',
+          '',
+          `Status: ${result.status}`,
+          `Vault: \`${result.vaultPath}\``,
+          `Checks: ok ${result.summary.ok}, warn ${result.summary.warn}, fail ${result.summary.fail}`,
+          '',
+          '## Checks',
+          lines,
+          '',
+          '## Nächste Aktionen',
+          next,
+        ].join('\n'),
+      }],
+    }
+  },
+
   brain_checkpoint(vault, args) {
     const result = vault.brainCheckpoint({
       title: typeof args.title === 'string' ? args.title : undefined,
