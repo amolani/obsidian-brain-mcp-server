@@ -161,7 +161,7 @@ describe('Harvester: client resolver', () => {
       { type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } },
       { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.119.0.4 "docker compose up -d"' } }] } },
       { type: 'user', message: { content: [{ type: 'tool_result', content: 'containers started' }] } },
-      { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: edulution wurde fuer Düsseldorf geprueft und die Dienste wurden neu gestartet. Die FQDN-Umstellung bleibt als naechster Schritt dokumentiert.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: edulution wurde fuer Düsseldorf geprueft und die Dienste wurden neu gestartet. Test-Token token=supersecretvalue12345 wurde nur als Redaction-Fixture gesehen. Die FQDN-Umstellung bleibt als naechster Schritt dokumentiert.' }] } },
     ]
     writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
   })
@@ -184,6 +184,10 @@ describe('Harvester: client resolver', () => {
     const created = readFileSync(join(stateDir, 'log.txt'), 'utf-8')
     assert.match(created, /Fuzzy-Kunde Düsseldorf/)
     const notePath = join(expectedDir, 'Düsseldorf — Docker Setup (2026-05-12).md')
-    assert.match(readFileSync(notePath, 'utf-8'), /session_intent: implementation/)
+    const note = readFileSync(notePath, 'utf-8')
+    assert.match(note, /session_intent: implementation/)
+    assert.match(note, /sensitive: true/)
+    assert.match(note, /capture_value: \d+/)
+    assert.ok(!note.includes('supersecretvalue12345'))
   })
 })

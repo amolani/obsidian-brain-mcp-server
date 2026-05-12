@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
+import { knowledgeInboxItemId } from '../services/knowledge-inbox-actions.ts'
 import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
 
 describe('session impact and knowledge inbox', () => {
@@ -103,5 +104,24 @@ describe('session impact and knowledge inbox', () => {
     assert.equal(preview.uncertainClientCount, 1)
     assert.equal(preview.runbookCandidateCount, 1)
     assert.ok(!existsSync(join(vaultPath, preview.path)))
+  })
+
+  test('inbox claim action is dry-run-first and can confirm a claim', () => {
+    vault.brainAutoBuild({
+      sourcePath: 'Kunden/Schule/Firewall Capture.md',
+      client: 'Schule',
+      dryRun: false,
+    })
+    const claim = [...vault.notes.values()].find(note => note.relativePath.startsWith('Knowledge/Claims/'))
+    assert.ok(claim)
+    const itemId = knowledgeInboxItemId('confirm_claim', claim.relativePath)
+
+    const preview = vault.brainApplyInboxItem({ itemId, dryRun: true })
+    assert.equal(preview.dryRun, true)
+    assert.equal(vault.notes.get(claim.relativePath)?.frontmatter.claim_status, 'provisional')
+
+    const applied = vault.brainApplyInboxItem({ itemId, dryRun: false })
+    assert.equal(applied.dryRun, false)
+    assert.equal(vault.notes.get(claim.relativePath)?.frontmatter.claim_status, 'confirmed')
   })
 })

@@ -18,6 +18,7 @@ Open `/tmp/obsidian-brain-demo` in Obsidian and inspect:
 - `Knowledge/evidence.md` after running `build_evidence_dashboard`
 - `Maintenance/Capture Review.md` after running `build_capture_review`
 - `Maintenance/Knowledge Inbox.md` after running `build_knowledge_inbox`
+- `Maintenance/Change Ledger.md` after running `build_change_ledger`
 - `Maintenance/Session Impact/` after a real auto-build run or `build_session_impact_report`
 - `Knowledge/Runbooks/Runbook Firewall DHCP.md`
 
@@ -42,6 +43,8 @@ node cli.ts install-hooks --vault "$VAULT_PATH" --apply
 - Runbook generation through the MCP tool previews by default.
 - Checkpoint and capture-derived claims are marked provisional until reviewed.
 - Fuzzy or content-based customer matches are surfaced in Capture Review and Knowledge Inbox.
+- Secret-like tokens are redacted before auto-captures are written.
+- Legacy captures/claims can be backfilled with `migrate_brain_metadata` dry-run first.
 
 ## Good First Commands
 
@@ -50,6 +53,8 @@ brain_health_check
 brain_metrics
 build_capture_review
 build_knowledge_inbox
+build_change_ledger
 build_evidence_dashboard
+migrate_brain_metadata
 brain_review
 ```

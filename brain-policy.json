@@ -43,7 +43,12 @@
     "createDailyNote": true,
     "autoCapture": true,
     "appendDailyCaptureLink": true,
-    "autoOrganize": false
+    "autoOrganize": false,
+    "captureSafety": {
+      "secretRedaction": true,
+      "blockOnSecret": false,
+      "excludeCwdPatterns": []
+    }
   },
   "protectedPaths": [
     ".git/",
@@ -85,6 +90,9 @@
     "build_evidence_dashboard": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "build_session_impact_report": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "build_knowledge_inbox": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "brain_apply_inbox_item": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "migrate_brain_metadata": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "build_change_ledger": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "record_brain_feedback": { "write": true, "risk": "low", "requiresDryRunDefault": true },
     "brain_feedback_summary": { "write": false, "risk": "low" },
     "build_memory_timeline": { "write": true, "risk": "low", "requiresDryRunDefault": true },

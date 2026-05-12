@@ -13,9 +13,11 @@ import { join, basename } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import { scoreCapture } from '../services/capture-scoring.ts'
 import { resolveClientContext, type ClientMatch } from '../services/client-resolver.ts'
 import { classifyIntent, type ClassifiedIntent } from '../services/intent-classifier.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
+import { redactSecrets, type RedactionResult } from '../services/secret-redaction.ts'
 import { Vault } from '../vault.ts'
 
 if (!process.env.VAULT_PATH) {
@@ -460,6 +462,32 @@ ${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\
   return sections.join('\n')
 }
 
+function yamlList(values: string[]): string {
+  return values.length > 0 ? values.map(value => `  - ${value}`).join('\n') : '  - none'
+}
+
+function injectCaptureMetadata(content: string, redaction: RedactionResult, scores: ReturnType<typeof scoreCapture>): string {
+  const fields = [
+    `sensitive: ${redaction.count > 0}`,
+    `redactions: ${redaction.count}`,
+    `redaction_types:\n${yamlList(redaction.types)}`,
+    `capture_value: ${scores.captureValue}`,
+    `runbook_readiness: ${scores.runbookReadiness}`,
+    `review_need: ${scores.reviewNeed}`,
+  ].join('\n')
+  return content.replace(/^---\n/, `---\n${fields}\n`)
+}
+
+function cwdExcluded(cwd: string, patterns: string[]): boolean {
+  return patterns.some(pattern => {
+    try {
+      return new RegExp(pattern, 'i').test(cwd)
+    } catch {
+      return cwd.toLowerCase().includes(pattern.toLowerCase())
+    }
+  })
+}
+
 // ── Session State ──────────────────────────────────────────────────
 
 function hasSessionBeenCaptured(sessionId: string): boolean {
@@ -503,6 +531,11 @@ process.stdin.on('end', async () => {
 
     if (!sessionId || !transcriptPath) process.exit(0)
     if (hasSessionBeenCaptured(sessionId)) process.exit(0)
+    if (cwdExcluded(cwd, policy.hooks.captureSafety.excludeCwdPatterns)) {
+      log(`Session ${sessionId.slice(0, 8)}: CWD durch captureSafety.excludeCwdPatterns ausgeschlossen`)
+      markSessionCaptured(sessionId)
+      process.exit(0)
+    }
 
     const entries = parseTranscript(transcriptPath)
     if (entries.length < 10) process.exit(0)
@@ -562,7 +595,23 @@ process.stdin.on('end', async () => {
     }
 
     mkdirSync(fullDir, { recursive: true })
-    const noteContent = generateNote(knowledge)
+    const rawNoteContent = generateNote(knowledge)
+    const redaction = policy.hooks.captureSafety.secretRedaction
+      ? redactSecrets(rawNoteContent)
+      : { content: rawNoteContent, count: 0, types: [] }
+    if (redaction.count > 0 && policy.hooks.captureSafety.blockOnSecret) {
+      log(`Session ${sessionId.slice(0, 8)}: Secret erkannt, Capture durch captureSafety.blockOnSecret blockiert`)
+      markSessionCaptured(sessionId)
+      process.exit(0)
+    }
+    const scores = scoreCapture({
+      content: redaction.content,
+      tags: ['auto-capture', 'prozedur', ...knowledge.tags],
+      intent: knowledge.intent,
+      clientMatchMethod: knowledge.clientMatch.method,
+      redactionCount: redaction.count,
+    })
+    const noteContent = injectCaptureMetadata(redaction.content, redaction, scores)
     writeFileSync(fullPath, noteContent, 'utf-8')
     markSessionCaptured(sessionId)
     log(`Captured: ${folder}/${safeTitle}.md`)
@@ -578,6 +627,8 @@ process.stdin.on('end', async () => {
         client: knowledge.client,
         clientMatch: knowledge.clientMatch,
         intent: knowledge.intent,
+        redactions: redaction.count,
+        scores,
       },
     })
 

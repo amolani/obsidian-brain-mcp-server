@@ -533,6 +533,77 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     }
   },
 
+  brain_apply_inbox_item(vault, args) {
+    const result = vault.brainApplyInboxItem({
+      itemId: args.item_id as string,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Knowledge Inbox Action Vorschau' : '# Knowledge Inbox Action angewendet',
+          '',
+          `Item: \`${result.item.id}\``,
+          `Aktion: ${result.item.kind}`,
+          `Target: \`${result.item.target}\``,
+          `Dry-Run: ${result.dryRun}`,
+          `Summary: ${result.summary}`,
+          '',
+          '## Ergebnis',
+          '```json',
+          JSON.stringify(result.result, null, 2),
+          '```',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  migrate_brain_metadata(vault, args) {
+    const result = vault.migrateBrainMetadata({
+      dryRun: args.dry_run !== false,
+      limit: typeof args.limit === 'number' ? args.limit : undefined,
+    })
+    const lines = result.changed.slice(0, 40)
+      .map(change => `- \`${change.path}\`: ${change.fields.join(', ')}`)
+      .join('\n') || '- Keine Änderungen'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Brain Metadata Migration Vorschau' : '# Brain Metadata Migration angewendet',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Gescannt: ${result.scanned}`,
+          `Änderungen: ${result.changed.length}`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  build_change_ledger(vault, args) {
+    const result = vault.buildChangeLedger({
+      dryRun: args.dry_run !== false,
+      limit: typeof args.limit === 'number' ? args.limit : undefined,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Change Ledger Vorschau' : '# Change Ledger aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Einträge: ${result.entryCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
   record_brain_feedback(vault, args) {
     const outcome = ['accepted', 'rejected', 'snoozed'].includes(String(args.outcome))
       ? args.outcome as 'accepted' | 'rejected' | 'snoozed'

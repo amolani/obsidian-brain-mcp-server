@@ -51,6 +51,11 @@ export interface BrainPolicy {
     autoCapture: boolean
     appendDailyCaptureLink: boolean
     autoOrganize: boolean
+    captureSafety: {
+      secretRedaction: boolean
+      blockOnSecret: boolean
+      excludeCwdPatterns: string[]
+    }
   }
   protectedPaths: string[]
   tools: Record<string, ToolPolicy>
@@ -111,6 +116,11 @@ const DEFAULT_POLICY: BrainPolicy = {
     autoCapture: true,
     appendDailyCaptureLink: true,
     autoOrganize: false,
+    captureSafety: {
+      secretRedaction: true,
+      blockOnSecret: false,
+      excludeCwdPatterns: [],
+    },
   },
   protectedPaths: ['.git/', '.obsidian/', '.trash/', 'System/', 'Templates/'],
   tools: {
@@ -141,6 +151,9 @@ const DEFAULT_POLICY: BrainPolicy = {
     build_evidence_dashboard: { write: true, risk: 'low', requiresDryRunDefault: true },
     build_session_impact_report: { write: true, risk: 'low', requiresDryRunDefault: true },
     build_knowledge_inbox: { write: true, risk: 'low', requiresDryRunDefault: true },
+    brain_apply_inbox_item: { write: true, risk: 'medium', requiresDryRunDefault: true },
+    migrate_brain_metadata: { write: true, risk: 'low', requiresDryRunDefault: true },
+    build_change_ledger: { write: true, risk: 'low', requiresDryRunDefault: true },
     record_brain_feedback: { write: true, risk: 'low', requiresDryRunDefault: true },
     brain_feedback_summary: { write: false, risk: 'low' },
     build_memory_timeline: { write: true, risk: 'low', requiresDryRunDefault: true },
@@ -235,6 +248,15 @@ function mergePolicy(raw: Partial<BrainPolicy>): BrainPolicy {
       autoCapture: asBoolean(raw.hooks?.autoCapture, DEFAULT_POLICY.hooks.autoCapture),
       appendDailyCaptureLink: asBoolean(raw.hooks?.appendDailyCaptureLink, DEFAULT_POLICY.hooks.appendDailyCaptureLink),
       autoOrganize: asBoolean(raw.hooks?.autoOrganize, DEFAULT_POLICY.hooks.autoOrganize),
+      captureSafety: {
+        ...DEFAULT_POLICY.hooks.captureSafety,
+        ...(raw.hooks?.captureSafety ?? {}),
+        secretRedaction: asBoolean(raw.hooks?.captureSafety?.secretRedaction, DEFAULT_POLICY.hooks.captureSafety.secretRedaction),
+        blockOnSecret: asBoolean(raw.hooks?.captureSafety?.blockOnSecret, DEFAULT_POLICY.hooks.captureSafety.blockOnSecret),
+        excludeCwdPatterns: Array.isArray(raw.hooks?.captureSafety?.excludeCwdPatterns)
+          ? raw.hooks!.captureSafety!.excludeCwdPatterns.map(String)
+          : DEFAULT_POLICY.hooks.captureSafety.excludeCwdPatterns,
+      },
     },
     protectedPaths: Array.isArray(raw.protectedPaths) ? raw.protectedPaths.map(String) : DEFAULT_POLICY.protectedPaths,
     tools: {

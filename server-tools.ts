@@ -436,6 +436,43 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'brain_apply_inbox_item',
+      description:
+        'Dry-run-first executor for one Knowledge Inbox item. Can confirm/reject provisional claims, preview runbook generation, or return a manual alias-learning suggestion.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_id: { type: 'string', description: 'Exact item id from build_knowledge_inbox, e.g. inbox:confirm_claim:Knowledge%2FClaims%2FClaim.md.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to apply supported actions.' },
+        },
+        required: ['item_id'],
+      },
+    },
+    {
+      name: 'migrate_brain_metadata',
+      description:
+        'Dry-run-first metadata migration for older captures and claims. Adds missing knowledge_type, source_stage, session_intent, scores, redaction fields, and claim lifecycle fields without moving or renaming notes.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to update frontmatter in place.' },
+          limit: { type: 'number', description: 'Maximum notes to scan. Default 200, max 2000.' },
+        },
+      },
+    },
+    {
+      name: 'build_change_ledger',
+      description:
+        'Dry-run-first Markdown ledger built from .action-log.jsonl. Shows the latest Brain write actions, tools, summaries, modes, and targets. Writes Maintenance/Change Ledger.md.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Maintenance/Change Ledger.md.' },
+          limit: { type: 'number', description: 'Maximum action-log entries. Default 80, max 500.' },
+        },
+      },
+    },
+    {
       name: 'record_brain_feedback',
       description:
         'Dry-run-first feedback loop for review and auto-build items. Records accepted/rejected/snoozed outcomes in .brain-feedback.json so future tuning and auto-build gates can use your preferences.',

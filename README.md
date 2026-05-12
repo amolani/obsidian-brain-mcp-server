@@ -210,7 +210,8 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
 | `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
 | `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
-| `build_session_impact_report`, `build_knowledge_inbox` | Explain one session's vault impact and collect review work in one inbox |
+| `build_session_impact_report`, `build_knowledge_inbox`, `build_change_ledger` | Explain one session's vault impact, collect review work, and show recent Brain writes |
+| `brain_apply_inbox_item`, `migrate_brain_metadata` | Dry-run-first review actions and legacy metadata repair |
 | `build_knowledge_index`, `update_hot_cache` | Knowledge map and manual hot context cache |
 | `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
 
@@ -441,7 +442,7 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Generate a runbook for the linuxmuster installation."
 - "Run vault maintenance."
 
-The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a typed capture note to the appropriate folder. Captures include `knowledge_type`, `source_stage`, `session_intent`, and client-match metadata so fuzzy folder typos and content-based customer matches are visible in Capture Review and Knowledge Inbox.
+The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a typed capture note to the appropriate folder. Captures include `knowledge_type`, `source_stage`, `session_intent`, `capture_value`, `runbook_readiness`, `review_need`, and client-match metadata so fuzzy folder typos and content-based customer matches are visible in Capture Review and Knowledge Inbox. Secret-like tokens are redacted before the capture is written.
 
 When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately after a successful session capture:
 
@@ -530,8 +531,9 @@ Current focus is operational reliability first, then a smoother plugin experienc
 |---|---|
 | Plugin packaging | Claude Code plugin template is scaffolded; CLI remains the Public Beta install path |
 | First-run setup | `obsidian-brain doctor`, `install-hooks`, `init`, `demo`, and `release-check` |
-| Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, runbook lists, and customer snapshots |
-| Feedback loop | Easier archive/reject/retry guidance for noisy auto-build output |
+| Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, change ledger, runbook lists, and customer snapshots |
+| Feedback loop | Inbox actions for claims/runbook previews plus archive/reject/retry guidance for noisy auto-build output |
+| Production safety | CI, secret redaction, dry-run-first metadata migration, and capture scoring |
 | Import paths | Source ingest profiles for markdown, tickets, web exports, and incident logs |
 | Collaboration | Shareable policy presets while keeping vault data local |
 
