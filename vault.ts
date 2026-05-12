@@ -30,9 +30,16 @@ import { renameNote as renameNoteService, type RenameNoteOptions, type RenameNot
 import { triageInbox as triageInboxService, triageNote as triageNoteService, type TriageInboxOptions, type TriageInboxResult, type TriageNoteOptions, type TriageNoteResult } from './services/inbox-triage.ts'
 import { acceptReviewItem as acceptReviewItemService, applyAllSafeFixes as applyAllSafeFixesService, rejectReviewItem as rejectReviewItemService, snoozeReviewItem as snoozeReviewItemService, type ApplyAllSafeFixesOptions, type ReviewQueueActionOptions, type ReviewQueueActionResult } from './services/review-queue-actions.ts'
 import { extractTroubleshootingPattern as extractTroubleshootingPatternService, generatePostmortem as generatePostmortemService, promoteCaptureToRunbook as promoteCaptureToRunbookService, type ExtractTroubleshootingPatternResult, type GeneratePostmortemOptions, type GeneratePostmortemResult, type PromoteCaptureToRunbookOptions, type PromoteCaptureToRunbookResult } from './services/incident-extractor.ts'
+import { ingestSource as ingestSourceService, type IngestSourceOptions, type IngestSourceResult } from './services/source-ingest.ts'
+import { saveKnowledge as saveKnowledgeService, type SaveKnowledgeOptions, type SaveKnowledgeResult, type SavedKnowledgeType } from './services/knowledge-capture.ts'
+import { readHotCache as readHotCacheService, updateHotCache as updateHotCacheService, type HotCacheResult, type UpdateHotCacheOptions } from './services/hot-cache.ts'
+import { buildKnowledgeIndex as buildKnowledgeIndexService, type BuildKnowledgeIndexOptions, type KnowledgeIndexResult } from './services/knowledge-index.ts'
+import { flagContradiction as flagContradictionService, flagKnowledgeGap as flagKnowledgeGapService, listOpenQuestions as listOpenQuestionsService, resolveGap as resolveGapService, type FlagContradictionOptions, type FlagKnowledgeGapOptions, type KnowledgeGapResult, type OpenQuestion, type ResolveGapOptions } from './services/knowledge-gaps.ts'
+import { createResearchPlan as createResearchPlanService, type CreateResearchPlanOptions, type ResearchPlanResult } from './services/research-plan.ts'
+import { brainApplyReviewItem as brainApplyReviewItemService, brainReview as brainReviewService, type BrainApplyReviewItemOptions, type BrainApplyReviewItemResult, type BrainReviewItem, type BrainReviewOptions, type BrainReviewResult } from './services/brain-review.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
-export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult }
+export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -262,6 +269,66 @@ export class Vault {
 
   captureV2(content: string, options: CaptureV2Options = {}): CaptureV2Result {
     return captureV2Service(this, content, options)
+  }
+
+  ingestSource(options: IngestSourceOptions): IngestSourceResult {
+    return ingestSourceService(this, options)
+  }
+
+  saveKnowledge(options: SaveKnowledgeOptions): SaveKnowledgeResult {
+    return saveKnowledgeService(this, options)
+  }
+
+  saveInsight(options: Omit<SaveKnowledgeOptions, 'type'>): SaveKnowledgeResult {
+    return this.saveKnowledge({ ...options, type: 'insight' })
+  }
+
+  saveDecision(options: Omit<SaveKnowledgeOptions, 'type'>): SaveKnowledgeResult {
+    return this.saveKnowledge({ ...options, type: 'decision' })
+  }
+
+  saveAnswer(options: Omit<SaveKnowledgeOptions, 'type'>): SaveKnowledgeResult {
+    return this.saveKnowledge({ ...options, type: 'answer' })
+  }
+
+  updateHotCache(options: UpdateHotCacheOptions = {}): HotCacheResult {
+    return updateHotCacheService(this, options)
+  }
+
+  readHotCache(): HotCacheResult {
+    return readHotCacheService(this)
+  }
+
+  buildKnowledgeIndex(options: BuildKnowledgeIndexOptions = {}): KnowledgeIndexResult {
+    return buildKnowledgeIndexService(this, options)
+  }
+
+  flagKnowledgeGap(options: FlagKnowledgeGapOptions): KnowledgeGapResult {
+    return flagKnowledgeGapService(this, options)
+  }
+
+  flagContradiction(options: FlagContradictionOptions): KnowledgeGapResult {
+    return flagContradictionService(this, options)
+  }
+
+  listOpenQuestions(): OpenQuestion[] {
+    return listOpenQuestionsService(this)
+  }
+
+  resolveGap(options: ResolveGapOptions): KnowledgeGapResult {
+    return resolveGapService(this, options)
+  }
+
+  createResearchPlan(options: CreateResearchPlanOptions): ResearchPlanResult {
+    return createResearchPlanService(this, options)
+  }
+
+  brainReview(options: BrainReviewOptions = {}): BrainReviewResult {
+    return brainReviewService(this, options)
+  }
+
+  brainApplyReviewItem(options: BrainApplyReviewItemOptions): BrainApplyReviewItemResult {
+    return brainApplyReviewItemService(this, options)
   }
 
   // ── Public API: Vault Overview ─────────────────────────────────────

@@ -1,5 +1,25 @@
 import { listSuggestions, promoteClientSuggestion, promoteTechnikSuggestion } from '../suggestions.ts'
-import type { ToolHandlerRegistry } from './types.ts'
+import type { SaveKnowledgeResult } from '../vault.ts'
+import { strings, type ToolHandlerRegistry } from './types.ts'
+
+function renderKnowledgeSave(result: SaveKnowledgeResult) {
+  return {
+    content: [{
+      type: 'text' as const,
+      text: [
+        result.dryRun ? '# Knowledge Save Vorschau' : '# Knowledge gespeichert',
+        '',
+        `Typ: ${result.type}`,
+        `Dry-Run: ${result.dryRun}`,
+        `Pfad: \`${result.path}\``,
+        `Tags: ${result.tags.join(', ')}`,
+        '',
+        result.dryRun ? '## Vorschau' : '',
+        result.dryRun ? result.content : '',
+      ].filter(Boolean).join('\n'),
+    }],
+  }
+}
 
 export const knowledgeHandlers: ToolHandlerRegistry = {
   create_note(vault, args) {
@@ -77,6 +97,227 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           ].join('\n'),
         },
       ],
+    }
+  },
+
+  ingest_source(vault, args) {
+    const result = vault.ingestSource({
+      sourcePath: args.source_path as string,
+      title: typeof args.title === 'string' ? args.title : undefined,
+      outputFolder: typeof args.output_folder === 'string' ? args.output_folder : undefined,
+      dryRun: args.dry_run !== false,
+      force: args.force === true,
+    })
+
+    const headings = result.headings.length > 0
+      ? result.headings.slice(0, 8).map(heading => `- ${heading}`).join('\n')
+      : '  (keine)'
+    const keyPoints = result.keyPoints.length > 0
+      ? result.keyPoints.slice(0, 6).map(point => `- ${point}`).join('\n')
+      : '  (keine)'
+
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Source-Ingest Vorschau' : '# Source ingestiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Skipped: ${result.skipped}`,
+          `Grund: ${result.reason}`,
+          `Quelle: \`${result.sourcePath}\``,
+          `Ziel: \`${result.outputPath}\``,
+          `Titel: ${result.title}`,
+          `Hash: \`${result.hash.slice(0, 12)}...\``,
+          '',
+          '## Erkannte Headings',
+          headings,
+          '',
+          '## Key Points',
+          keyPoints,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  save_insight(vault, args) {
+    return renderKnowledgeSave(vault.saveInsight({
+      title: args.title as string,
+      content: args.content as string,
+      context: typeof args.context === 'string' ? args.context : undefined,
+      source: typeof args.source === 'string' ? args.source : undefined,
+      tags: strings(args.tags),
+      folder: typeof args.folder === 'string' ? args.folder : undefined,
+      dryRun: args.dry_run !== false,
+    }))
+  },
+
+  save_decision(vault, args) {
+    return renderKnowledgeSave(vault.saveDecision({
+      title: args.title as string,
+      content: args.content as string,
+      context: typeof args.context === 'string' ? args.context : undefined,
+      source: typeof args.source === 'string' ? args.source : undefined,
+      tags: strings(args.tags),
+      folder: typeof args.folder === 'string' ? args.folder : undefined,
+      dryRun: args.dry_run !== false,
+    }))
+  },
+
+  save_answer(vault, args) {
+    return renderKnowledgeSave(vault.saveAnswer({
+      title: args.title as string,
+      content: args.content as string,
+      context: typeof args.context === 'string' ? args.context : undefined,
+      source: typeof args.source === 'string' ? args.source : undefined,
+      tags: strings(args.tags),
+      folder: typeof args.folder === 'string' ? args.folder : undefined,
+      dryRun: args.dry_run !== false,
+    }))
+  },
+
+  update_hot_cache(vault, args) {
+    const result = vault.updateHotCache({
+      query: typeof args.query === 'string' ? args.query : undefined,
+      maxNotes: typeof args.max_notes === 'number' ? args.max_notes : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Hot Cache Vorschau' : '# Hot Cache aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Query: ${result.query || '(Vault-Aktivität)'}`,
+          `Notizen: ${result.noteCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  read_hot_cache(vault) {
+    const result = vault.readHotCache()
+    return { content: [{ type: 'text', text: result.content }] }
+  },
+
+  build_knowledge_index(vault, args) {
+    const result = vault.buildKnowledgeIndex({ dryRun: args.dry_run !== false })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Knowledge Index Vorschau' : '# Knowledge Index aktualisiert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Notizen: ${result.noteCount}`,
+          `Sektionen: ${result.sectionCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  flag_knowledge_gap(vault, args) {
+    const result = vault.flagKnowledgeGap({
+      question: args.question as string,
+      context: typeof args.context === 'string' ? args.context : undefined,
+      tags: strings(args.tags),
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Wissenslücke Vorschau' : '# Wissenslücke erfasst',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          '',
+          result.dryRun ? result.content : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  flag_contradiction(vault, args) {
+    const result = vault.flagContradiction({
+      title: args.title as string,
+      claimA: args.claim_a as string,
+      claimB: args.claim_b as string,
+      sources: strings(args.sources),
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Widerspruch Vorschau' : '# Widerspruch erfasst',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          '',
+          result.dryRun ? result.content : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  list_open_questions(vault) {
+    const questions = vault.listOpenQuestions()
+    const lines = questions.length > 0
+      ? questions.map(item => `- [${item.type}] \`${item.path}\` - ${item.title}`).join('\n')
+      : 'Keine offenen Wissenslücken oder Widersprüche.'
+    return { content: [{ type: 'text', text: lines }] }
+  },
+
+  resolve_gap(vault, args) {
+    const result = vault.resolveGap({
+      path: args.path as string,
+      resolution: args.resolution as string,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Gap-Lösung Vorschau' : '# Gap gelöst',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          '',
+          result.dryRun ? result.content : '',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  create_research_plan(vault, args) {
+    const result = vault.createResearchPlan({
+      topic: args.topic as string,
+      question: typeof args.question === 'string' ? args.question : undefined,
+      scope: typeof args.scope === 'string' ? args.scope : undefined,
+      sources: strings(args.sources),
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Research Plan Vorschau' : '# Research Plan erstellt',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Pfad: \`${result.path}\``,
+          `Kontextnotizen: ${result.contextCount}`,
+          '',
+          result.content,
+        ].join('\n'),
+      }],
     }
   },
 

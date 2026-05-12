@@ -4,6 +4,7 @@ import { loadClients, loadTechTerms } from '../config.ts'
 import { classifyNote, type Classification } from '../technik-categories.ts'
 import { appendActionLog } from './action-log.ts'
 import { normalizeTag } from './frontmatter-linter.ts'
+import { assertCanWriteTool } from './policy.ts'
 import { uniqueRelativePath, vaultJoin, sanitizePathSegment } from './vault-paths.ts'
 
 export type CaptureMode = 'fast' | 'strict' | 'review'
@@ -183,6 +184,7 @@ ${body}
   const reviewRequired = mode === 'review' || folder === 'Inbox' || classification.topicCandidates.length > 0
 
   if (!dryRun) {
+    assertCanWriteTool(options.logTool ?? 'capture_v2', [relativePath])
     mkdirSync(fullDir, { recursive: true })
     writeFileSync(fullPath, noteContent, 'utf-8')
 

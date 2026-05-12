@@ -1,6 +1,7 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface CreateNoteOptions {
   title: string
@@ -156,6 +157,8 @@ export function createNote(ctx: NoteCreatorContext, options: CreateNoteOptions):
   const fileName = fileNameForTemplate(options.title, options.template)
   const fullDir = join(ctx.vaultPath, targetFolder)
   const fullPath = join(fullDir, fileName)
+  const relativePath = relative(ctx.vaultPath, fullPath)
+  assertCanWriteTool('create_note', [relativePath])
 
   mkdirSync(fullDir, { recursive: true })
   writeFileSync(fullPath, noteContent, 'utf-8')
@@ -163,7 +166,6 @@ export function createNote(ctx: NoteCreatorContext, options: CreateNoteOptions):
   const stat = statSync(fullPath)
   ctx.indexNote(fullPath, stat.mtimeMs)
 
-  const relativePath = relative(ctx.vaultPath, fullPath)
   appendActionLog(ctx.vaultPath, {
     tool: 'create_note',
     mode: 'apply',

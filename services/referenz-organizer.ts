@@ -3,6 +3,7 @@ import { basename, join, relative } from 'node:path'
 import type { NoteEntry } from '../vault.ts'
 import { classifyNote } from '../technik-categories.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface OrganizeReferenzMove {
   from: string
@@ -64,6 +65,7 @@ export function organizeReferenz(ctx: ReferenzOrganizerContext, dryRun: boolean 
     if (targetRelativePath === relativePath) continue
 
     if (!dryRun) {
+      assertCanWriteTool('organize_referenz', [relativePath, targetRelativePath])
       mkdirSync(targetDir, { recursive: true })
 
       try {

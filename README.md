@@ -23,9 +23,19 @@ A Second Brain MCP server for Obsidian vaults. Works directly on the filesystem 
 - `create_note` — structured notes from templates (kunde, referenz, troubleshooting, learning, daily)
 - `capture` — compatibility wrapper for quick capture
 - `capture_v2` — smart capture with unified client/Technik classification, tag normalization, dry-run previews, and `fast`/`strict`/`review` modes
+- `ingest_source` — dry-run-first ingest for immutable `.raw/` source files with hash manifest and structured source notes
+- `save_insight` / `save_decision` / `save_answer` — manual, dry-run-first durable memory saves under `Knowledge/`
 - `generate_runbook` — clean step-by-step guide from auto-captured sessions
 - `extract_troubleshooting_pattern` / `promote_capture_to_runbook` / `generate_postmortem` — dry-run-first incident extraction from captures and troubleshooting notes
 - `build_customer_context` / `build_project_dashboard` — generate customer dashboards with notes, TODOs, recent changes, runbooks, captures, tags, and issues
+
+**Manual Brain Layer**
+- `brain_review` / `brain_apply_review_item` — read-only brain review plus dry-run-first executor for one action-backed item
+- `recall_context` / `build_context_pack` — explicit read-only recall; no automatic injection
+- `update_hot_cache` / `read_hot_cache` — optional manual working-memory cache in `Knowledge/hot.md`
+- `build_knowledge_index` — dry-run-first overview note at `Knowledge/index.md`
+- `flag_knowledge_gap` / `flag_contradiction` / `list_open_questions` / `resolve_gap` — track unresolved questions and contradictory claims until they are clarified
+- `create_research_plan` — local-context research plan under `Knowledge/Research/` for explicit investigations
 
 **Maintenance (Analyzer → Recommender → Executor)**
 - `find_duplicates` — fuzzy match on title, content, tags (with confidence scores)
@@ -230,19 +240,35 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Generate a runbook for the linuxmuster installation."
 - "Run vault maintenance."
 
-The Knowledge Harvester runs automatically after each Claude response. If the session had substantial work (≥ 3 bash commands, ≥ 2 procedures with outcomes), it writes a capture note to the appropriate folder.
+The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a capture note to the appropriate folder.
+
+## Brain Policy
+
+`brain-policy.json` is the local safety contract for hooks, protected paths, and manual memory behavior.
+
+- Working memory is `manual_only`: `recall_context` runs only when explicitly called, and no context is injected automatically.
+- `update_hot_cache` is also manual-only; it writes `Knowledge/hot.md` only when explicitly applied.
+- Hook auto-organization is disabled by default: `hooks.autoOrganize=false`.
+- Auto-capture and daily-note creation are policy-controlled.
+- Protected folders such as `.obsidian/`, `.trash/`, `System/`, and `Templates/` are blocked for guarded writers.
+- Tool policies declare write capability, risk level, and whether dry-run-first behavior is expected.
+- Source ingest uses `.raw/.manifest.json` to skip unchanged sources unless `force=true`.
 
 ## Recommended Workflow
 
 Use the vault as a dry-run-first operating loop:
 
-1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note, detects the client from your current folder when possible, and runs the same Referenz→Technik organization logic as the MCP tool.
+1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note when policy allows it and detects the client from your current folder when possible. Automatic Referenz→Technik organization is disabled unless `brain-policy.json` explicitly enables it.
 2. Before creating new knowledge, search first with `vault_search` or `semantic_search`. Use `recall_context` when you explicitly want manual working-memory recall for a topic.
-3. Capture rough knowledge with `capture_v2` in `review` or `dry_run` mode for important notes, then apply once the suggested folder/title/tags look right. Use old `capture` only as the quick compatibility path.
+3. Capture rough knowledge with `capture_v2` in `review` or `dry_run` mode for important notes, then apply once the suggested folder/title/tags look right. Use `save_insight`, `save_decision`, or `save_answer` when you want an explicit durable memory instead of an auto-classified capture.
 4. During work, use `daily_note` for lightweight chronological notes and TODOs. Use `todo_list` or `weekly_review` to pull open work back into focus.
-5. After substantial terminal work, let the Stop hook harvest procedures automatically. For reusable operational docs, run `generate_runbook` against the topic/client after captures exist.
-6. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
-7. Periodically run `organize_referenz` dry-run, then apply. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
+5. When a question remains open or two notes disagree, use `flag_knowledge_gap` or `flag_contradiction`. Resolve it later with `resolve_gap`, so the vault keeps uncertainty visible instead of silently mixing weak facts with confirmed knowledge.
+6. After substantial terminal work, let the Stop hook harvest procedures automatically when policy allows it. For reusable operational docs, run `generate_runbook` against the topic/client after captures exist.
+7. For bigger investigations, create a `create_research_plan` first. It pulls local context and gives you a checklist for source ingest, final answer/decision capture, and contradiction handling.
+8. Run `brain_review` as the central operating view. It proposes items across maintenance, open questions, contradictions, quality, links, lifecycle, and index/cache drift. Apply one item at a time with `brain_apply_review_item`, first as dry-run.
+9. Periodically refresh `Knowledge/hot.md` with `update_hot_cache` and `Knowledge/index.md` with `build_knowledge_index`. Both are dry-run-first and manual.
+10. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
+11. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
 
 ## Folder conventions
 
@@ -259,7 +285,9 @@ YourVault/
 │   ├── Docker/
 │   └── Proxmox/
 ├── Daily/                 # Daily notes (auto-created)
+├── Knowledge/             # Manual memory, hot cache, index, gaps, contradictions
 ├── Maintenance/           # Review queues (auto-generated)
+├── .raw/                  # Immutable source documents and ingest manifest
 ├── Inbox/                 # Unsorted captures
 ├── Referenz/              # Misc reference (organized into Technik/ automatically)
 └── Persönlich/            # Private
@@ -282,6 +310,7 @@ obsidian-brain-mcp-server/
 ├── server.ts                      # MCP server entry point, tool registration
 ├── vault.ts                       # Core Vault class (indexing, search, maintenance)
 ├── technik-categories.ts          # Category classifier
+├── brain-policy.json              # Local safety policy for hooks, tools, protected paths, and manual recall
 ├── clients.json                   # Client definitions (editable)
 ├── technik-categories.json        # Category rules (editable)
 ├── tag-aliases.json               # Tag normalization (editable)

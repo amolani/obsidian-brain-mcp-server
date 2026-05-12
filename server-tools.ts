@@ -125,6 +125,194 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'ingest_source',
+      description:
+        'Dry-run-first source ingestion inspired by the LLM Wiki pattern. Reads an immutable source under .raw/, extracts headings/key points/links, writes a structured source note, and records a hash in .raw/.manifest.json to avoid reprocessing unchanged sources.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          source_path: {
+            type: 'string',
+            description: 'Vault-relative source path under .raw/, e.g. ".raw/articles/vendor-doc.md".',
+          },
+          title: {
+            type: 'string',
+            description: 'Optional title override for the generated source note.',
+          },
+          output_folder: {
+            type: 'string',
+            description: 'Optional output folder. Default Referenz/Quellen.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to write the source note and manifest entry.',
+          },
+          force: {
+            type: 'boolean',
+            description: 'Re-ingest even when the manifest hash says the source is unchanged.',
+          },
+        },
+        required: ['source_path'],
+      },
+    },
+    {
+      name: 'save_insight',
+      description:
+        'Dry-run-first manual save for durable insights. Writes to Knowledge/Insights by default and is never triggered automatically by hooks.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          title: { type: 'string', description: 'Short title for the insight.' },
+          content: { type: 'string', description: 'Insight content to store.' },
+          context: { type: 'string', description: 'Optional surrounding context.' },
+          source: { type: 'string', description: 'Optional source note, URL, or conversation reference.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
+          folder: { type: 'string', description: 'Optional output folder. Default Knowledge/Insights.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['title', 'content'],
+      },
+    },
+    {
+      name: 'save_decision',
+      description:
+        'Dry-run-first manual save for decisions and their rationale. Writes to Knowledge/Decisions by default.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          title: { type: 'string', description: 'Decision title.' },
+          content: { type: 'string', description: 'Decision and rationale.' },
+          context: { type: 'string', description: 'Optional alternatives, constraints, or tradeoffs.' },
+          source: { type: 'string', description: 'Optional source note, URL, or conversation reference.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
+          folder: { type: 'string', description: 'Optional output folder. Default Knowledge/Decisions.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['title', 'content'],
+      },
+    },
+    {
+      name: 'save_answer',
+      description:
+        'Dry-run-first manual save for reusable answers. Writes to Knowledge/Answers by default.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          title: { type: 'string', description: 'Answer title or question.' },
+          content: { type: 'string', description: 'Reusable answer content.' },
+          context: { type: 'string', description: 'Optional applicability notes.' },
+          source: { type: 'string', description: 'Optional source note, URL, or conversation reference.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
+          folder: { type: 'string', description: 'Optional output folder. Default Knowledge/Answers.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['title', 'content'],
+      },
+    },
+    {
+      name: 'update_hot_cache',
+      description:
+        'Manually refresh Knowledge/hot.md as an optional working-memory cache. It is policy-controlled and never auto-injected into sessions.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          query: { type: 'string', description: 'Optional topic/query. Without it, recent vault activity and TODOs are summarized.' },
+          max_notes: { type: 'number', description: 'Maximum notes to include. Default 8, max 20.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/hot.md.' },
+        },
+      },
+    },
+    {
+      name: 'read_hot_cache',
+      description:
+        'Read the optional manual hot cache from Knowledge/hot.md. Read-only.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'build_knowledge_index',
+      description:
+        'Dry-run-first builder for Knowledge/index.md, summarizing vault areas, frequent tags, recent notes, and open knowledge gaps.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/index.md.' },
+        },
+      },
+    },
+    {
+      name: 'flag_knowledge_gap',
+      description:
+        'Dry-run-first capture for an explicit open question or missing knowledge item under Knowledge/Gaps.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          question: { type: 'string', description: 'The open question.' },
+          context: { type: 'string', description: 'Optional current context or why this matters.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Optional additional tags.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['question'],
+      },
+    },
+    {
+      name: 'flag_contradiction',
+      description:
+        'Dry-run-first capture for contradictory knowledge claims under Knowledge/Contradictions.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          title: { type: 'string', description: 'Short contradiction title.' },
+          claim_a: { type: 'string', description: 'First claim.' },
+          claim_b: { type: 'string', description: 'Second claim.' },
+          sources: { type: 'array', items: { type: 'string' }, description: 'Optional source paths or URLs.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['title', 'claim_a', 'claim_b'],
+      },
+    },
+    {
+      name: 'list_open_questions',
+      description:
+        'List unresolved knowledge gaps and contradictions. Read-only.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'resolve_gap',
+      description:
+        'Dry-run-first resolver for a Knowledge/Gaps or Knowledge/Contradictions note. Marks status resolved and appends the resolution.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: { type: 'string', description: 'Vault-relative path to the gap/contradiction note.' },
+          resolution: { type: 'string', description: 'Resolution text to append.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write.' },
+        },
+        required: ['path', 'resolution'],
+      },
+    },
+    {
+      name: 'create_research_plan',
+      description:
+        'Dry-run-first research planner for explicit investigations. Uses local vault context, source candidates, and next steps; writes under Knowledge/Research.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          topic: { type: 'string', description: 'Research topic.' },
+          question: { type: 'string', description: 'Optional specific guiding question.' },
+          scope: { type: 'string', description: 'Optional scope/constraints.' },
+          sources: { type: 'array', items: { type: 'string' }, description: 'Optional source candidates, URLs, or local paths.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write Knowledge/Research/{topic}.md.' },
+        },
+        required: ['topic'],
+      },
+    },
+    {
       name: 'vault_overview',
       description:
         'Get vault statistics: total notes, notes per folder, tag cloud with counts, recently modified notes, orphan notes (no incoming links), and open TODO count.',
@@ -485,6 +673,47 @@ export const TOOL_DEFINITIONS = [
             description: 'If true, only shows what would be moved without actually moving files (default: false)',
           },
         },
+      },
+    },
+    {
+      name: 'brain_review',
+      description:
+        'Read-only brain review orchestrator. Aggregates duplicates, broken links, frontmatter fixes, lifecycle suggestions, link suggestions, low-quality notes, open questions, contradictions, and index/cache drift into actionable review items.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          limit: {
+            type: 'number',
+            description: 'Maximum review items to return. Default 50, max 200.',
+          },
+          include_low: {
+            type: 'boolean',
+            description: 'Include low-priority/low-confidence items. Default false.',
+          },
+        },
+      },
+    },
+    {
+      name: 'brain_apply_review_item',
+      description:
+        'Dry-run-first executor for one action-backed brain_review item. Rebuilds the current review, finds item_id, and delegates to the matching safe tool such as run_safe_maintenance, merge_duplicates, apply_lifecycle_updates, apply_link_suggestions, rebuild_semantic_index, build_knowledge_index, or update_hot_cache.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_id: {
+            type: 'string',
+            description: 'The exact item id from brain_review.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to apply the delegated action.',
+          },
+          force: {
+            type: 'boolean',
+            description: 'Only for duplicate merges: force an explicit merge if the delegated merge tool would otherwise block it.',
+          },
+        },
+        required: ['item_id'],
       },
     },
     {

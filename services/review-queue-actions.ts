@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export type ReviewItemStatus = 'accepted' | 'rejected' | 'snoozed'
 
@@ -74,6 +75,7 @@ function setReviewItemStatus(
   }
 
   if (!dryRun) {
+    assertCanWriteTool(`${status}_review_item`, [STATE_FILE])
     const state = readState(vault)
     state[options.itemId] = entry
     writeState(vault, state)

@@ -21,6 +21,68 @@ function frontmatterProfile(value: unknown): FrontmatterProfile | undefined {
 }
 
 export const maintenanceHandlers: ToolHandlerRegistry = {
+  brain_review(vault, args) {
+    const result = vault.brainReview({
+      limit: typeof args.limit === 'number' ? args.limit : undefined,
+      includeLow: args.include_low === true,
+    })
+    const items = result.items.length > 0
+      ? result.items.map(item => [
+        `- **${item.severity}** \`${item.id}\``,
+        `  ${item.title}`,
+        `  Kategorie: ${item.category}; Confidence: ${item.confidence}; Aktion: ${item.action.kind}`,
+        item.targets.length > 0 ? `  Targets: ${item.targets.map(target => `\`${target}\``).join(', ')}` : '',
+        `  ${item.detail}`,
+      ].filter(Boolean).join('\n')).join('\n\n')
+      : 'Keine Review-Items gefunden.'
+    const next = result.recommendedNextActions.map(action => `- ${action}`).join('\n')
+
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Review',
+          '',
+          `Generiert: ${result.generatedAt}`,
+          `Items: ${result.items.length}/${result.total}`,
+          `Severity: critical ${result.bySeverity.critical}, high ${result.bySeverity.high}, medium ${result.bySeverity.medium}, low ${result.bySeverity.low}`,
+          '',
+          '## Empfohlene nächste Aktionen',
+          next,
+          '',
+          '## Review Items',
+          items,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_apply_review_item(vault, args) {
+    const result = vault.brainApplyReviewItem({
+      itemId: args.item_id as string,
+      dryRun: args.dry_run !== false,
+      force: args.force === true,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Brain Review Apply Vorschau' : '# Brain Review Item angewendet',
+          '',
+          `Item: \`${result.item.id}\``,
+          `Aktion: ${result.item.action.kind}`,
+          `Dry-Run: ${result.dryRun}`,
+          `Summary: ${result.summary}`,
+          '',
+          '## Ergebnis',
+          '```json',
+          JSON.stringify(result.result, null, 2),
+          '```',
+        ].join('\n'),
+      }],
+    }
+  },
+
   run_vault_maintenance(vault) {
     const report = vault.runMaintenance()
     const text = [

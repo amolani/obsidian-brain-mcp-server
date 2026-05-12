@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import { join } from 'node:path'
 import { loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { Vault } from '../vault.ts'
 
 if (!process.env.VAULT_PATH) {
@@ -23,7 +24,10 @@ function today(): string {
 
 // Ensure daily note exists
 function ensureDailyNote(): string | null {
+  const policy = loadBrainPolicy()
+  if (!policy.hooks.createDailyNote) return null
   const datum = today()
+  assertCanWriteTool('create_daily_note', [`Daily/${datum}.md`])
   const dailyDir = join(VAULT_PATH, 'Daily')
   const dailyPath = join(dailyDir, `${datum}.md`)
   if (!existsSync(dailyPath)) {
@@ -42,6 +46,7 @@ function ensureDailyNote(): string | null {
 
 // Auto-organize through the same Vault implementation used by the MCP tool.
 async function autoOrganize(): Promise<number> {
+  if (!loadBrainPolicy().hooks.autoOrganize) return 0
   const vault = new Vault(VAULT_PATH)
   try {
     await vault.init()

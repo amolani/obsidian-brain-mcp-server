@@ -13,6 +13,7 @@ import { join, basename } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 
 if (!process.env.VAULT_PATH) {
   process.stderr.write('knowledge-harvester: VAULT_PATH environment variable required\n')
@@ -466,6 +467,12 @@ process.stdin.on('end', () => {
   clearTimeout(timeout)
 
   try {
+    const policy = loadBrainPolicy()
+    if (!policy.hooks.autoCapture) {
+      log('Auto-capture disabled by brain-policy.json')
+      process.exit(0)
+    }
+
     const data = JSON.parse(input || process.env.HARVESTER_INPUT_JSON || '{}')
     const sessionId = data.session_id
     const transcriptPath = data.transcript_path
@@ -519,6 +526,8 @@ process.stdin.on('end', () => {
     const safeTitle = knowledge.title.replace(/[/\\:*?"<>|]/g, '-').slice(0, 100)
     const fullDir = join(VAULT_PATH, folder)
     const fullPath = join(fullDir, `${safeTitle}.md`)
+    const relativeTarget = `${folder}/${safeTitle}.md`
+    assertCanWriteTool('auto_capture', [relativeTarget])
 
     if (existsSync(fullPath)) {
       log(`Note already exists: ${fullPath}`)
@@ -532,7 +541,6 @@ process.stdin.on('end', () => {
     markSessionCaptured(sessionId)
     log(`Captured: ${folder}/${safeTitle}.md`)
 
-    const relativeTarget = `${folder}/${safeTitle}.md`
     appendActionLog(VAULT_PATH, {
       tool: 'auto_capture',
       mode: 'apply',
@@ -548,7 +556,8 @@ process.stdin.on('end', () => {
     // Append to daily note
     const datum = new Date().toISOString().split('T')[0]
     const dailyPath = join(VAULT_PATH, 'Daily', `${datum}.md`)
-    if (existsSync(dailyPath)) {
+    if (policy.hooks.appendDailyCaptureLink && existsSync(dailyPath)) {
+      assertCanWriteTool('daily_note', [`Daily/${datum}.md`])
       appendFileSync(dailyPath, `\n- Auto-Capture: [[${folder}/${safeTitle}|${knowledge.title}]]\n`)
       appendActionLog(VAULT_PATH, {
         tool: 'daily_note',

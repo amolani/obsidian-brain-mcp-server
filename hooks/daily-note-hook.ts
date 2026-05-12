@@ -5,6 +5,7 @@
 
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 
 const VAULT_PATH = process.env.VAULT_PATH
 if (!VAULT_PATH) {
@@ -15,7 +16,10 @@ const today = new Date().toISOString().split('T')[0]
 const dailyDir = join(VAULT_PATH, 'Daily')
 const dailyPath = join(dailyDir, `${today}.md`)
 
-if (!existsSync(dailyPath)) {
+if (!loadBrainPolicy().hooks.createDailyNote) {
+  console.log(JSON.stringify({ result: 'continue' }))
+} else if (!existsSync(dailyPath)) {
+  assertCanWriteTool('create_daily_note', [`Daily/${today}.md`])
   mkdirSync(dailyDir, { recursive: true })
   writeFileSync(dailyPath, `---
 tags:

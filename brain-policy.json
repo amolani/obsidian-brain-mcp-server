@@ -1,0 +1,71 @@
+{
+  "workingMemory": {
+    "mode": "manual_only",
+    "allowAutomaticRecall": false
+  },
+  "hooks": {
+    "createDailyNote": true,
+    "autoCapture": true,
+    "appendDailyCaptureLink": true,
+    "autoOrganize": false
+  },
+  "protectedPaths": [
+    ".git/",
+    ".obsidian/",
+    ".trash/",
+    "System/",
+    "Templates/"
+  ],
+  "tools": {
+    "recall_context": { "write": false, "risk": "low" },
+    "build_context_pack": { "write": false, "risk": "low" },
+    "brain_review": { "write": false, "risk": "low" },
+    "brain_apply_review_item": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "vault_search": { "write": false, "risk": "low" },
+    "semantic_search": { "write": false, "risk": "low" },
+
+    "create_note": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
+    "capture": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
+    "capture_v2": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "ingest_source": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "save_insight": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "save_decision": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "save_answer": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "update_hot_cache": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "read_hot_cache": { "write": false, "risk": "low" },
+    "build_knowledge_index": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "flag_knowledge_gap": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "flag_contradiction": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "list_open_questions": { "write": false, "risk": "low" },
+    "resolve_gap": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "create_research_plan": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "auto_capture": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
+    "daily_note": { "write": true, "risk": "low", "requiresDryRunDefault": false },
+    "create_daily_note": { "write": true, "risk": "low", "requiresDryRunDefault": false },
+
+    "rename_note": { "write": true, "risk": "high", "requiresDryRunDefault": true },
+    "merge_duplicates": { "write": true, "risk": "high", "requiresDryRunDefault": true },
+    "triage_note": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "triage_inbox": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "organize_referenz": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+
+    "fix_frontmatter": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "fix_broken_links": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "apply_link_suggestions": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "apply_lifecycle_updates": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "apply_all_safe_fixes": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "run_safe_maintenance": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+
+    "generate_mocs": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "generate_runbook": { "write": true, "risk": "medium", "requiresDryRunDefault": false },
+    "promote_capture_to_runbook": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "generate_postmortem": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+    "build_customer_context": { "write": true, "risk": "medium", "requiresDryRunDefault": true },
+
+    "run_maintenance": { "write": true, "risk": "low", "requiresDryRunDefault": false },
+    "accepted_review_item": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "rejected_review_item": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "snoozed_review_item": { "write": true, "risk": "low", "requiresDryRunDefault": true },
+    "rebuild_semantic_index": { "write": true, "risk": "low", "requiresDryRunDefault": true }
+  }
+}

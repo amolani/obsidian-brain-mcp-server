@@ -6,6 +6,7 @@ import { classifyNote, type Classification } from '../technik-categories.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface TriageNoteOptions {
   path: string
@@ -179,6 +180,7 @@ function targetPathFor(note: NoteEntry, targetFolder: string): string {
 }
 
 function updateFrontmatter(vault: Vault, entry: NoteEntry, tags: string[]): string[] {
+  assertCanWriteTool('triage_note', [entry.relativePath])
   const raw = readFileSync(entry.path, 'utf-8')
   const fm = parseFrontmatter(raw)
   const changes: string[] = []

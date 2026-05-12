@@ -1,0 +1,228 @@
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { basename } from 'node:path'
+import type { Vault } from '../vault.ts'
+import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
+import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+
+export interface SourceManifestEntry {
+  hash: string
+  ingestedAt: string
+  sourcePath: string
+  outputPath: string
+  title: string
+}
+
+export interface SourceManifest {
+  sources: Record<string, SourceManifestEntry>
+}
+
+export interface IngestSourceOptions {
+  sourcePath: string
+  title?: string
+  outputFolder?: string
+  dryRun?: boolean
+  force?: boolean
+}
+
+export interface IngestSourceResult {
+  dryRun: boolean
+  skipped: boolean
+  reason: string
+  sourcePath: string
+  outputPath: string
+  title: string
+  hash: string
+  headings: string[]
+  keyPoints: string[]
+  links: string[]
+}
+
+const MANIFEST_PATH = '.raw/.manifest.json'
+
+function today(): string {
+  return new Date().toISOString().split('T')[0]
+}
+
+function readManifest(vaultPath: string): SourceManifest {
+  try {
+    const path = vaultJoin(vaultPath, MANIFEST_PATH)
+    if (!existsSync(path)) return { sources: {} }
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<SourceManifest>
+    return { sources: parsed.sources ?? {} }
+  } catch {
+    return { sources: {} }
+  }
+}
+
+function writeManifest(vaultPath: string, manifest: SourceManifest): void {
+  const path = vaultJoin(vaultPath, MANIFEST_PATH)
+  mkdirSync(vaultJoin(vaultPath, '.raw'), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8')
+}
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+function normalizeSourcePath(sourcePath: string): string {
+  const clean = sourcePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!clean.startsWith('.raw/')) throw new Error('ingest_source verarbeitet nur Quellen unter .raw/')
+  return clean
+}
+
+function titleFromSource(sourcePath: string, content: string, explicit?: string): string {
+  if (explicit?.trim()) return explicit.trim()
+  const h1 = content.match(/^#\s+(.+)$/m)?.[1]?.trim()
+  if (h1) return h1.slice(0, 100)
+  return basename(sourcePath).replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || `Source ${today()}`
+}
+
+function extractHeadings(content: string): string[] {
+  return [...content.matchAll(/^#{1,3}\s+(.+)$/gm)]
+    .map(match => match[1].trim())
+    .filter(Boolean)
+    .slice(0, 20)
+}
+
+function extractKeyPoints(content: string): string[] {
+  const points = content.split('\n')
+    .map(line => line.trim())
+    .filter(line => /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line))
+    .map(line => line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '').trim())
+    .filter(line => line.length >= 20)
+  const paragraphs = content.split(/\n\s*\n/)
+    .map(p => p.replace(/\s+/g, ' ').trim())
+    .filter(p => p.length >= 80 && p.length <= 500)
+  return [...new Set([...points, ...paragraphs])].slice(0, 12)
+}
+
+function extractLinks(content: string): string[] {
+  const markdown = [...content.matchAll(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/g)].map(match => match[1])
+  const plain = [...content.matchAll(/\bhttps?:\/\/[^\s)]+/g)].map(match => match[0])
+  return [...new Set([...markdown, ...plain])].slice(0, 20)
+}
+
+function renderSourceNote(result: Omit<IngestSourceResult, 'dryRun' | 'skipped' | 'reason'>): string {
+  const headingLines = result.headings.length > 0
+    ? result.headings.map(heading => `- ${heading}`).join('\n')
+    : '- (keine Headings erkannt)'
+  const keyPointLines = result.keyPoints.length > 0
+    ? result.keyPoints.map(point => `- ${point}`).join('\n')
+    : '- (keine Key Points automatisch erkannt)'
+  const linkLines = result.links.length > 0
+    ? result.links.map(link => `- ${link}`).join('\n')
+    : '- (keine externen Links erkannt)'
+
+  return `---
+status: aktiv
+tags:
+  - source
+  - ingest
+datum: ${today()}
+quelle: ${result.sourcePath}
+source_hash: ${result.hash}
+---
+
+# Source: ${result.title}
+
+Quelle: [[${result.sourcePath}|${basename(result.sourcePath)}]]
+
+## Kurzfassung
+
+Automatisch ingestierte Source-Note. Die Quelle bleibt unverändert unter \`${result.sourcePath}\`.
+
+## Erkannte Struktur
+
+${headingLines}
+
+## Key Points
+
+${keyPointLines}
+
+## Externe Links
+
+${linkLines}
+`
+}
+
+export function ingestSource(vault: Vault, options: IngestSourceOptions): IngestSourceResult {
+  const dryRun = options.dryRun ?? true
+  const sourcePath = normalizeSourcePath(options.sourcePath)
+  const fullSourcePath = vaultJoin(vault.vaultPath, sourcePath)
+  if (!existsSync(fullSourcePath)) throw new Error(`Quelle nicht gefunden: ${sourcePath}`)
+
+  const content = readFileSync(fullSourcePath, 'utf-8')
+  const hash = sha256(content)
+  const manifest = readManifest(vault.vaultPath)
+  const existing = manifest.sources[sourcePath]
+  const title = titleFromSource(sourcePath, content, options.title)
+  const outputFolder = options.outputFolder ?? 'Referenz/Quellen'
+  const outputPath = existing?.outputPath ?? (
+    dryRun
+      ? `${outputFolder}/${sanitizePathSegment(title)}.md`
+      : uniqueRelativePath(vault.vaultPath, outputFolder, `${sanitizePathSegment(title)}.md`)
+  )
+  const baseResult = {
+    sourcePath,
+    outputPath,
+    title,
+    hash,
+    headings: extractHeadings(content),
+    keyPoints: extractKeyPoints(content),
+    links: extractLinks(content),
+  }
+
+  if (existing && existing.hash === hash && !options.force) {
+    return {
+      dryRun,
+      skipped: true,
+      reason: 'Quelle unverändert laut Manifest',
+      ...baseResult,
+      outputPath: existing.outputPath,
+      title: existing.title,
+    }
+  }
+
+  if (dryRun) {
+    return {
+      dryRun,
+      skipped: false,
+      reason: existing ? 'Quelle geändert oder force=true; Re-Ingest möglich' : 'Neue Quelle; Ingest möglich',
+      ...baseResult,
+    }
+  }
+
+  assertCanWriteTool('ingest_source', [sourcePath, outputPath, MANIFEST_PATH])
+  const noteContent = renderSourceNote(baseResult)
+  const fullOutputPath = vaultJoin(vault.vaultPath, outputPath)
+  mkdirSync(vaultJoin(vault.vaultPath, outputFolder), { recursive: true })
+  writeFileSync(fullOutputPath, noteContent, 'utf-8')
+  vault.indexNote(fullOutputPath, statSync(fullOutputPath).mtimeMs)
+  vault.buildLinkIndex()
+
+  manifest.sources[sourcePath] = {
+    hash,
+    ingestedAt: new Date().toISOString(),
+    sourcePath,
+    outputPath,
+    title,
+  }
+  writeManifest(vault.vaultPath, manifest)
+
+  appendActionLog(vault.vaultPath, {
+    tool: 'ingest_source',
+    mode: 'apply',
+    targets: [sourcePath, outputPath, MANIFEST_PATH],
+    summary: `Quelle ingestiert: ${sourcePath} → ${outputPath}`,
+    meta: { hash, title, headings: baseResult.headings.length, keyPoints: baseResult.keyPoints.length },
+  })
+
+  return {
+    dryRun,
+    skipped: false,
+    reason: existing ? 'Quelle re-ingestiert' : 'Quelle ingestiert',
+    ...baseResult,
+  }
+}

@@ -2,6 +2,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface ExtractTroubleshootingPatternResult {
@@ -178,6 +179,7 @@ ${fixes.length > 0 ? fixes.map((fix, idx) => `### ${idx + 1}.\n${fix}`).join('\n
 `
 
   if (!dryRun) {
+    assertCanWriteTool('promote_capture_to_runbook', [relativePath])
     mkdirSync(vaultJoin(vault.vaultPath, folder), { recursive: true })
     const fullPath = vaultJoin(vault.vaultPath, relativePath)
     writeFileSync(fullPath, content, 'utf-8')
@@ -245,6 +247,7 @@ ${pattern.fixes.length > 0 ? pattern.fixes.map(item => `- ${item}`).join('\n') :
 `
 
   if (!dryRun) {
+    assertCanWriteTool('generate_postmortem', [relativePath])
     mkdirSync(vaultJoin(vault.vaultPath, folder), { recursive: true })
     const fullPath = vaultJoin(vault.vaultPath, relativePath)
     writeFileSync(fullPath, content, 'utf-8')

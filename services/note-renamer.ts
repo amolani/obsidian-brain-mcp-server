@@ -4,6 +4,7 @@ import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
+import { assertCanWriteTool } from './policy.ts'
 import { assertSafeRelativePath, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface RenameNoteOptions {
@@ -212,6 +213,12 @@ export function renameNote(vault: Vault, options: RenameNoteOptions): RenameNote
   const oldRaw = readFileSync(oldFullPath, 'utf-8')
   const targetUpdate = updateTargetContent(oldRaw, entry, newTitle, options.updateTitle !== false)
   plan.aliasesAdded = targetUpdate.aliasesAdded
+  assertCanWriteTool('rename_note', [
+    entry.relativePath,
+    target,
+    ...plan.changedLinks.map(change => change.source),
+    ...plan.changedFrontmatterRefs.map(change => change.source),
+  ])
 
   if (!samePath) mkdirSync(dirname(targetFullPath), { recursive: true })
 

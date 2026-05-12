@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, statSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { loadTagAliases } from '../config.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export type FrontmatterProfile =
   | 'Kunde'
@@ -410,6 +411,7 @@ export function fixFrontmatter(vault: Vault, dryRunOrOptions: boolean | Frontmat
 
     if (!dryRun) {
       try {
+        assertCanWriteTool('fix_frontmatter', [relPath])
         const raw = readFileSync(entry.path, 'utf-8')
         const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
         if (!fmMatch) {
