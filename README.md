@@ -124,6 +124,14 @@ node cli.ts demo --out /tmp/obsidian-brain-demo --force
 node cli.ts doctor --vault /tmp/obsidian-brain-demo --skip-hooks
 ```
 
+Run the local quality harness before release work:
+
+```bash
+npm run brain-quality
+```
+
+It replays anonymized golden fixtures in temporary vaults and checks capture recall, late-session updates, retrieval ranking, redaction, idempotency, and policy safety gates.
+
 For unattended operation, see [Production Setup](docs/production-setup.md).
 
 ## Session Experience
@@ -562,15 +570,15 @@ YourVault/
 
 ## Roadmap
 
-Current focus is the fixed [v1 product definition](docs/v1-product-definition.md), then a smoother plugin experience.
+Current focus is the fixed [v1 product definition](docs/v1-product-definition.md), the measurable [Brain Quality Contract](docs/brain-quality-contract.md), then a smoother plugin experience.
 
 | Area | Direction |
 |---|---|
 | Plugin packaging | Claude Code plugin template is scaffolded; CLI remains the Public Beta install path |
-| First-run setup | `obsidian-brain doctor`, `install-hooks`, `repair-hooks`, `init`, `demo`, `background`, `benchmark`, and `release-check` |
+| First-run setup | `obsidian-brain doctor`, `install-hooks`, `repair-hooks`, `init`, `demo`, `background`, `benchmark`, `brain-quality`, and `release-check` |
 | Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, change ledger, background report, runbook lists, and customer snapshots |
 | Feedback loop | Inbox actions with persistent state plus archive/reject/retry guidance for noisy auto-build output |
-| Production safety | CI, secret redaction, dry-run-first metadata migration, capture scoring, lock-protected background runs, and large-vault benchmark |
+| Production safety | CI, secret redaction, dry-run-first metadata migration, capture scoring, lock-protected background runs, large-vault benchmark, and Brain Quality gates |
 | Import paths | Source ingest profiles for markdown, tickets, web exports, and incident logs |
 | Collaboration | Shareable policy presets while keeping vault data local |
 
@@ -582,7 +590,7 @@ Current focus is the fixed [v1 product definition](docs/v1-product-definition.md
 npm test
 ```
 
-The test suite covers vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, brain auto-build, health checks, Knowledge Inbox state, background runs, benchmark generation, and the Knowledge Harvester end-to-end.
+The test suite covers vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, brain auto-build, health checks, Knowledge Inbox state, background runs, benchmark generation, Brain Quality fixtures, and the Knowledge Harvester end-to-end.
 
 ### Project structure
 

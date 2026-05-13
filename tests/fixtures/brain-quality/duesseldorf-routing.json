@@ -1,0 +1,33 @@
+{
+  "id": "duesseldorf-routing",
+  "type": "harvester_update",
+  "description": "Regression fixture: a misspelled Duesseldorf working directory must route to the canonical customer without reorganizing folders.",
+  "sessionId": "quality-duesseldorf-routing",
+  "cwd": "/home/amo/Documents/code/amo/dussledorf",
+  "expectedClient": "Düsseldorf",
+  "expectedPathIncludes": ["Kunden/Düsseldorf/"],
+  "steps": [
+    {
+      "name": "final-stop",
+      "entries": [
+        { "type": "user", "message": { "content": "In Duesseldorf muss edulution per FQDN erreichbar werden." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Ich pruefe die edulution- und Traefik-Konfiguration." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.119.0.4 'cat /srv/docker/edulution-ui/traefik.yml'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "entryPoints web und websecure vorhanden; certificatesResolvers fehlt" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.119.0.4 'cat /srv/docker/edulution-ui/edulution.env'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "EDULUTION_BASE_DOMAIN=10.119.0.4" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "dig NS bkb-duesseldorf.de @1.1.1.1 +short" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "ns01.agenturserver.de.\nns01.agenturserver.co.\nns01.agenturserver.it." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "curl -I http://88.79.139.15" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "Server: OPNsense\nHTTP/1.1 301 Moved Permanently" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Befund: edulution.bkb-duesseldorf.de fehlt noch als A-Record. HTTP-01 ist sinnvoll, aber Port 80 landet aktuell auf OPNsense statt auf 10.119.0.4. Traefik hat noch keinen certificatesResolvers.le Block." }] } }
+      ]
+    }
+  ],
+  "expectedFacts": [
+    { "id": "fqdn", "pattern": "edulution\\.bkb-duesseldorf\\.de", "mustCapture": true },
+    { "id": "opnsense-port80", "pattern": "OPNsense", "mustCapture": true },
+    { "id": "traefik-resolver-missing", "pattern": "certificatesResolvers", "mustCapture": true },
+    { "id": "base-domain-ip", "pattern": "10\\.119\\.0\\.4", "mustCapture": true }
+  ]
+}

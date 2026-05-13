@@ -7,6 +7,7 @@ Use this before cutting a GitHub Release.
 ```bash
 npm run typecheck
 npm test
+npm run brain-quality
 npm run release-check
 ```
 
@@ -19,6 +20,7 @@ CI runs the same release check on GitHub Actions for Node 22 and 24.
 - `docs/public-beta.md` still matches CLI behavior.
 - `docs/what-gets-written.md` explains all automatic writes and local state files.
 - `docs/production-setup.md` covers unattended background runs and scheduling.
+- `docs/brain-quality-contract.md` is current; if the harness exists, its hard gates pass before tagging.
 - `brain-policy.json` keeps risky tools dry-run-first or blocked from auto-apply.
 - Capture safety is enabled: secret redaction on, risky auto-apply still blocked.
 - `migrate_brain_metadata` preview has been reviewed for existing production vaults.

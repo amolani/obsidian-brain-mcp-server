@@ -9,6 +9,7 @@ import { Vault } from './vault.ts'
 import { createDemoVault } from './services/demo-vault.ts'
 import { installClaudeHooks } from './services/claude-hooks.ts'
 import { runLargeVaultBenchmark } from './services/large-vault-benchmark.ts'
+import { formatBrainQualityResult, runBrainQualityHarness } from './services/brain-quality-harness.ts'
 
 interface ParsedArgs {
   command: string
@@ -91,6 +92,7 @@ Usage:
   obsidian-brain init --vault <path> [--apply-hooks]
   obsidian-brain background --vault <path> [--apply] [--json] [--max-runtime-ms <ms>] [--jobs a,b]
   obsidian-brain benchmark --out <path> [--notes <n>] [--force]
+  obsidian-brain brain-quality [--fixtures <path>] [--json] [--keep-temp]
   obsidian-brain demo --out <path> [--force]
   obsidian-brain release-check
 `
@@ -266,6 +268,16 @@ async function runBenchmark(args: ParsedArgs): Promise<number> {
   return 0
 }
 
+async function runBrainQuality(args: ParsedArgs): Promise<number> {
+  const result = await runBrainQualityHarness({
+    fixturesDir: optionPath(args.options, 'fixtures'),
+    keepTemp: bool(args.options, 'keep-temp'),
+  })
+  if (bool(args.options, 'json')) printJson(result)
+  else process.stdout.write(`${formatBrainQualityResult(result)}\n`)
+  return result.status === 'fail' ? 1 : 0
+}
+
 function runCommand(name: string, command: string, args: string[]): void {
   process.stdout.write(`\n## ${name}\n`)
   const result = spawnSync(command, args, {
@@ -281,6 +293,7 @@ function runCommand(name: string, command: string, args: string[]): void {
 async function runReleaseCheck(): Promise<number> {
   runCommand('Typecheck', 'npm', ['run', 'typecheck'])
   runCommand('Tests', 'npm', ['test'])
+  runCommand('Brain Quality Harness', 'npm', ['run', 'brain-quality'])
 
   const pkg = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8')) as { bin?: unknown }
   const bin = pkg.bin as Record<string, string> | undefined
@@ -319,6 +332,8 @@ async function main(): Promise<number> {
       return runBackground(args)
     case 'benchmark':
       return runBenchmark(args)
+    case 'brain-quality':
+      return runBrainQuality(args)
     case 'demo':
       return runDemo(args)
     case 'release-check':

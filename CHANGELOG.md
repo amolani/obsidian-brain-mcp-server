@@ -19,10 +19,13 @@
 - `repair-hooks` CLI command for dry-run-first Claude Code hook repair.
 - `background` CLI command and `brain_run_background` MCP tool for unattended safe refresh jobs with locking and Markdown/JSON reports.
 - `benchmark` CLI command for synthetic large-vault performance checks.
+- `brain-quality` CLI command for deterministic golden-fixture quality gates.
 - Dry-run-first brain metadata migration for older captures and claims.
 - Change Ledger surface built from `.action-log.jsonl`.
 - Production setup and "what gets written" documentation.
 - Additional anonymized Claude Code transcript fixtures for research and troubleshooting sessions.
+- Brain Quality Contract defining measurable gates for capture, retrieval, promotion, review, safety, and background behavior.
+- Brain Quality fixtures for late-session capture updates, misspelled customer routing, retrieval ranking, generated-surface redaction, and policy safety.
 
 ### Changed
 

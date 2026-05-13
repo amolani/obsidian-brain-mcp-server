@@ -269,6 +269,7 @@ It evaluates its own behavior.
 Must have:
 
 - Brain Metrics,
+- Brain Quality Contract,
 - feedback summary,
 - auto-build usefulness score,
 - archived/noisy auto-build learning,
@@ -279,6 +280,7 @@ Must have:
 Acceptance criteria:
 
 - The user can tell whether auto-build is useful or noisy.
+- The project has measurable gates for capture recall, promotion precision, retrieval quality, idempotency, and safety.
 - Rejected categories become stricter.
 - Recent writes are visible without inspecting `.action-log.jsonl`.
 
@@ -666,6 +668,7 @@ The user should be able to trust the system because:
 v1.0 can be tagged only when all of these are true:
 
 - `npm run release-check` passes.
+- `docs/brain-quality-contract.md` is current and the implemented harness gates pass.
 - GitHub CI is green.
 - `brain_health_check` is green on demo vault.
 - Hook repair has tests.

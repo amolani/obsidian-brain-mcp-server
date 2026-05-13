@@ -11,6 +11,7 @@
     "start": "node server.ts",
     "test": "node --test --test-reporter=spec tests/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "brain-quality": "node cli.ts brain-quality",
     "benchmark": "node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force",
     "release-check": "node cli.ts release-check"
   },

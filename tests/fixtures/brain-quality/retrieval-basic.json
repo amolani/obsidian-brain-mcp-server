@@ -1,0 +1,51 @@
+{
+  "id": "retrieval-basic",
+  "type": "retrieval",
+  "notes": [
+    {
+      "path": "Kunden/HUG/Captures/HUG VPN Test.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - vpn\nkunde: HUG\n---\n\n# HUG VPN Test\n\nDer HUG VPN Tunnel steht. Synology01 ist unter 192.168.1.23 per DSM 5001 erreichbar. Die Route 192.168.1.0/24 laeuft via tun0.\n"
+    },
+    {
+      "path": "Kunden/Düsseldorf/Captures/Duesseldorf Edulution Lets Encrypt.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - edulution\nkunde: Düsseldorf\n---\n\n# Duesseldorf Edulution Lets Encrypt\n\nedulution.bkb-duesseldorf.de braucht einen A-Record. Port 80 landet aktuell auf OPNsense. Traefik braucht certificatesResolvers.le fuer HTTP-01.\n"
+    },
+    {
+      "path": "Technik/OpenVPN/OpenVPN Checkliste.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - runbook\n  - vpn\n---\n\n# OpenVPN Checkliste\n\nPruefe openvpn Version, Endpoint, tun0, Routing und interne Dienste.\n"
+    },
+    {
+      "path": "Referenz/Noise.md",
+      "content": "# Noise\n\nAllgemeine Notiz ohne HUG, Synology oder Edulution Relevanz.\n"
+    }
+  ],
+  "queries": [
+    {
+      "query": "Synology01",
+      "k": 5,
+      "relevantNotes": ["Kunden/HUG/Captures/HUG VPN Test.md"],
+      "minPrecisionAtK": 0.2,
+      "minRecallAtK": 1,
+      "minMrrAtK": 1,
+      "minNdcgAtK": 1
+    },
+    {
+      "query": "certificatesResolvers",
+      "k": 5,
+      "relevantNotes": ["Kunden/Düsseldorf/Captures/Duesseldorf Edulution Lets Encrypt.md"],
+      "minPrecisionAtK": 0.2,
+      "minRecallAtK": 1,
+      "minMrrAtK": 1,
+      "minNdcgAtK": 1
+    },
+    {
+      "query": "OpenVPN",
+      "k": 5,
+      "relevantNotes": ["Technik/OpenVPN/OpenVPN Checkliste.md"],
+      "minPrecisionAtK": 0.2,
+      "minRecallAtK": 1,
+      "minMrrAtK": 1,
+      "minNdcgAtK": 1
+    }
+  ]
+}
