@@ -526,6 +526,8 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           `Runbook-Kandidaten: ${result.runbookCandidateCount}`,
           `Auto-Build Skips: ${result.skippedAutoBuildCount}`,
           `Impact Reports: ${result.impactReportCount}`,
+          `Offene Actions: ${result.openItemCount}`,
+          `Persistierte States: ${result.persistedStateCount}`,
           '',
           result.content,
         ].join('\n'),
@@ -831,6 +833,45 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           '',
           '## Nächste Aktionen',
           next,
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_run_background(vault, args) {
+    const result = vault.runBackgroundBrain({
+      dryRun: args.dry_run !== false,
+      jobs: strings(args.jobs),
+      maxRuntimeMs: typeof args.max_runtime_ms === 'number' ? args.max_runtime_ms : undefined,
+      lockPath: typeof args.lock_path === 'string' ? args.lock_path : undefined,
+      settingsPath: typeof args.settings_path === 'string' ? args.settings_path : undefined,
+      client: typeof args.client === 'string' ? args.client : undefined,
+      sourcePath: typeof args.source_path === 'string' ? args.source_path : undefined,
+      runAutoBuild: args.run_auto_build === true,
+    })
+    const jobs = result.jobs.map(job => `- **${job.status}** \`${job.id}\`: ${job.summary}`).join('\n')
+    const next = result.nextActions.length > 0
+      ? result.nextActions.map(action => `- ${action}`).join('\n')
+      : '- Keine unmittelbaren Aktionen'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Background Run Vorschau' : '# Background Run ausgeführt',
+          '',
+          `Status: ${result.status}`,
+          `Dry-Run: ${result.dryRun}`,
+          `Dauer: ${result.durationMs} ms`,
+          `Report: \`${result.reportPath}\``,
+          `JSON: \`${result.jsonPath}\``,
+          '',
+          '## Jobs',
+          jobs || '- Keine Jobs',
+          '',
+          '## Nächste Aktionen',
+          next,
+          '',
+          result.content,
         ].join('\n'),
       }],
     }

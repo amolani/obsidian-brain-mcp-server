@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="700" viewBox="0 0 1180 700" role="img" aria-labelledby="title desc">
+  <title id="title">Knowledge Inbox demo surface</title>
+  <desc id="desc">Mock screenshot of the Obsidian Brain Knowledge Inbox with queue state, provisional claims, runbook candidates, and review actions.</desc>
+  <rect width="1180" height="700" fill="#f7f8fb"/>
+  <rect x="42" y="36" width="1096" height="628" rx="12" fill="#ffffff" stroke="#d9dee8"/>
+  <rect x="42" y="36" width="1096" height="56" rx="12" fill="#252a34"/>
+  <circle cx="76" cy="64" r="7" fill="#ff5f57"/>
+  <circle cx="100" cy="64" r="7" fill="#ffbd2e"/>
+  <circle cx="124" cy="64" r="7" fill="#28c840"/>
+  <text x="162" y="70" fill="#f8fafc" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Maintenance/Knowledge Inbox.md</text>
+  <text x="82" y="138" fill="#101828" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800">Knowledge Inbox</text>
+  <rect x="82" y="170" width="300" height="96" rx="8" fill="#eef7f1" stroke="#b6dfc5"/>
+  <text x="108" y="205" fill="#14532d" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Queue State</text>
+  <text x="108" y="236" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="16">Open actions: 6</text>
+  <text x="108" y="258" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="16">Persisted states: 14</text>
+  <rect x="410" y="170" width="300" height="96" rx="8" fill="#fef7e8" stroke="#f1cb7a"/>
+  <text x="436" y="205" fill="#92400e" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Provisional Claims</text>
+  <text x="436" y="236" fill="#92400e" font-family="Inter, Arial, sans-serif" font-size="16">2 need confirmation</text>
+  <text x="436" y="258" fill="#92400e" font-family="Inter, Arial, sans-serif" font-size="16">Evidence review first</text>
+  <rect x="738" y="170" width="300" height="96" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="764" y="205" fill="#3730a3" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Runbook Candidates</text>
+  <text x="764" y="236" fill="#4338ca" font-family="Inter, Arial, sans-serif" font-size="16">3 dry-run previews</text>
+  <text x="764" y="258" fill="#4338ca" font-family="Inter, Arial, sans-serif" font-size="16">No final auto-promotion</text>
+  <text x="82" y="326" fill="#101828" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800">Inbox Actions</text>
+  <g font-family="Inter, Arial, sans-serif" font-size="16">
+    <rect x="82" y="350" width="996" height="58" rx="6" fill="#f9fafb" stroke="#e5e7eb"/>
+    <text x="108" y="384" fill="#344054">inbox:confirm_claim:Knowledge%2FClaims%2FDHCP.md</text>
+    <text x="650" y="384" fill="#667085">Claim bestaetigen: DHCP Quelle Firewall</text>
+    <rect x="82" y="420" width="996" height="58" rx="6" fill="#f9fafb" stroke="#e5e7eb"/>
+    <text x="108" y="454" fill="#344054">inbox:runbook_preview:Kunden%2FAcme%2FCaptures%2FSession.md</text>
+    <text x="650" y="454" fill="#667085">Runbook Dry-Run: Session</text>
+    <rect x="82" y="490" width="996" height="58" rx="6" fill="#f9fafb" stroke="#e5e7eb"/>
+    <text x="108" y="524" fill="#344054">inbox:review_client_alias:Kunden%2FAcme%2FCaptures%2FSession.md</text>
+    <text x="650" y="524" fill="#667085">Kundenzuordnung pruefen</text>
+  </g>
+  <text x="82" y="606" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="16">Reviewed items are hidden by persistent local state until the source changes.</text>
+</svg>

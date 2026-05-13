@@ -582,6 +582,24 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'brain_run_background',
+      description:
+        'Dry-run-first unattended background run. Executes safe dashboard/index/review refresh jobs, keeps risky maintenance in preview mode, prevents concurrent runs with a lock, and writes Maintenance/Background Run Report.md plus .brain-background-last-run.json when applied.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to write safe generated surfaces and the background report.' },
+          jobs: { type: 'array', items: { type: 'string' }, description: 'Optional explicit job ids. Defaults to the V1 safe background job set.' },
+          max_runtime_ms: { type: 'number', description: 'Full run time budget. Default 30000, max 600000.' },
+          lock_path: { type: 'string', description: 'Vault-relative lock path. Default .brain-background.lock.' },
+          settings_path: { type: 'string', description: 'Optional Claude settings path for hook repair preview.' },
+          client: { type: 'string', description: 'Optional client for customer timeline/snapshot jobs.' },
+          source_path: { type: 'string', description: 'Optional source capture for an explicit brain_auto_build job.' },
+          run_auto_build: { type: 'boolean', description: 'Only runs brain_auto_build when true and job list includes brain_auto_build.' },
+        },
+      },
+    },
+    {
       name: 'brain_checkpoint',
       description:
         'Dry-run-first long-session checkpoint. Writes Knowledge/Checkpoints note and can optionally run brain_auto_build for the checkpoint/source.',

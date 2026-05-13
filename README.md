@@ -13,7 +13,7 @@ Local-first MCP server for consultants, sysadmins, and technical operators who w
 [![Obsidian](https://img.shields.io/badge/Obsidian-vault%20native-7C3AED?logo=obsidian&logoColor=white)](README.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**[Quick Start](#quick-start)** · **[Session Flow](#brain-workflow)** · **[What You Get](#what-lands-in-obsidian)** · **[Tools](#tool-surface)** · **[Safety](#safety-model)** · **[V1 Definition](docs/v1-product-definition.md)**
+**[Quick Start](#quick-start)** · **[Session Flow](#brain-workflow)** · **[What You Get](#what-lands-in-obsidian)** · **[Background Mode](#background-mode)** · **[Tools](#tool-surface)** · **[Safety](#safety-model)** · **[V1 Definition](docs/v1-product-definition.md)**
 
 <img src="./assets/obsidian-brain-hero-v2.png" alt="Obsidian Brain MCP hero banner showing a terminal session flowing into a guarded local vault, evidence cards, runbooks, dashboards, and an Obsidian knowledge graph" width="100%">
 
@@ -61,7 +61,10 @@ YourVault/
 ├── Knowledge/_brain.md                  # operating dashboard
 ├── Knowledge/index.md                   # knowledge map
 ├── Knowledge/hot.md                     # current high-value context
-└── Maintenance/Auto-Build/              # reports, reviews, feedback
+├── Maintenance/Auto-Build/              # reports, reviews, feedback
+├── Maintenance/Knowledge Inbox.md       # review queue with persistent item state
+├── Maintenance/Background Run Report.md # unattended run report
+└── .brain-*.json                        # local manifests, feedback, state, last run
 ```
 
 ## Quick Start
@@ -82,6 +85,13 @@ node cli.ts install-hooks --vault "$VAULT_PATH" --apply
 ```
 
 The first `install-hooks` command is a dry-run and prints the planned `~/.claude/settings.json` changes. The `--apply` run creates a backup before writing.
+
+If hooks drift later, repair them dry-run-first:
+
+```bash
+node cli.ts repair-hooks --vault "$VAULT_PATH"
+node cli.ts repair-hooks --vault "$VAULT_PATH" --apply
+```
 
 Register the MCP server globally for Claude Code:
 
@@ -114,6 +124,8 @@ node cli.ts demo --out /tmp/obsidian-brain-demo --force
 node cli.ts doctor --vault /tmp/obsidian-brain-demo --skip-hooks
 ```
 
+For unattended operation, see [Production Setup](docs/production-setup.md).
+
 ## Session Experience
 
 This is the intended loop:
@@ -133,6 +145,30 @@ Auto-Captures: 18
 Auto-promoted: 42
 Auto-build usefulness score: 0.86
 ```
+
+## Background Mode
+
+The background runner is the V1 unattended path: it refreshes safe generated surfaces, keeps risky maintenance in dry-run preview, prevents concurrent runs with a lock, and writes an inspectable report.
+
+```bash
+node cli.ts background --vault "$VAULT_PATH"        # preview
+node cli.ts background --vault "$VAULT_PATH" --apply
+```
+
+It writes `Maintenance/Background Run Report.md` and `.brain-background-last-run.json`. Reviewed Knowledge Inbox items are persisted in `.brain-knowledge-inbox-state.json`, so old accepted/rejected review items do not keep reappearing unless their source changes.
+
+For scale testing:
+
+```bash
+node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force
+```
+
+## Demo Surfaces
+
+<p>
+  <img src="./assets/demo-knowledge-inbox.svg" alt="Knowledge Inbox demo surface with persisted queue state and review actions" width="49%">
+  <img src="./assets/demo-background-report.svg" alt="Background Run Report demo surface with safe jobs and lock status" width="49%">
+</p>
 
 ## Brain Workflow
 
@@ -208,6 +244,7 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `brain_auto_build` | Policy-controlled promotion of captures into durable memory and generated surfaces |
 | `archive_auto_build_run` | Archive one auto-build run's artifacts and record negative learning feedback |
 | `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
+| `brain_run_background` | Lock-protected unattended safe refresh run with Markdown/JSON report |
 | `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
 | `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
 | `build_session_impact_report`, `build_knowledge_inbox`, `build_change_ledger` | Explain one session's vault impact, collect review work, and show recent Brain writes |
@@ -530,10 +567,10 @@ Current focus is the fixed [v1 product definition](docs/v1-product-definition.md
 | Area | Direction |
 |---|---|
 | Plugin packaging | Claude Code plugin template is scaffolded; CLI remains the Public Beta install path |
-| First-run setup | `obsidian-brain doctor`, `install-hooks`, `init`, `demo`, and `release-check` |
-| Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, change ledger, runbook lists, and customer snapshots |
-| Feedback loop | Inbox actions for claims/runbook previews plus archive/reject/retry guidance for noisy auto-build output |
-| Production safety | CI, secret redaction, dry-run-first metadata migration, and capture scoring |
+| First-run setup | `obsidian-brain doctor`, `install-hooks`, `repair-hooks`, `init`, `demo`, `background`, `benchmark`, and `release-check` |
+| Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, change ledger, background report, runbook lists, and customer snapshots |
+| Feedback loop | Inbox actions with persistent state plus archive/reject/retry guidance for noisy auto-build output |
+| Production safety | CI, secret redaction, dry-run-first metadata migration, capture scoring, lock-protected background runs, and large-vault benchmark |
 | Import paths | Source ingest profiles for markdown, tickets, web exports, and incident logs |
 | Collaboration | Shareable policy presets while keeping vault data local |
 
@@ -545,7 +582,7 @@ Current focus is the fixed [v1 product definition](docs/v1-product-definition.md
 npm test
 ```
 
-The test suite covers vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, brain auto-build, health checks, and the Knowledge Harvester end-to-end.
+The test suite covers vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, brain auto-build, health checks, Knowledge Inbox state, background runs, benchmark generation, and the Knowledge Harvester end-to-end.
 
 ### Project structure
 

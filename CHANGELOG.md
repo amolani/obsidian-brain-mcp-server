@@ -15,8 +15,14 @@
 - Secret redaction and capture-safety policy for automatic session captures.
 - Capture scoring fields for value, runbook readiness, and review need.
 - Knowledge Inbox actions for confirming/rejecting provisional claims and previewing runbooks.
+- Persistent Knowledge Inbox item state so reviewed items stop reappearing until their source changes.
+- `repair-hooks` CLI command for dry-run-first Claude Code hook repair.
+- `background` CLI command and `brain_run_background` MCP tool for unattended safe refresh jobs with locking and Markdown/JSON reports.
+- `benchmark` CLI command for synthetic large-vault performance checks.
 - Dry-run-first brain metadata migration for older captures and claims.
 - Change Ledger surface built from `.action-log.jsonl`.
+- Production setup and "what gets written" documentation.
+- Additional anonymized Claude Code transcript fixtures for research and troubleshooting sessions.
 
 ### Changed
 

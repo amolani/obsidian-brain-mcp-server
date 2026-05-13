@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
-import { knowledgeInboxItemId } from '../services/knowledge-inbox-actions.ts'
+import { KNOWLEDGE_INBOX_STATE_FILE, knowledgeInboxItemId } from '../services/knowledge-inbox-actions.ts'
 import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
 
 describe('session impact and knowledge inbox', () => {
@@ -123,5 +123,22 @@ describe('session impact and knowledge inbox', () => {
     const applied = vault.brainApplyInboxItem({ itemId, dryRun: false })
     assert.equal(applied.dryRun, false)
     assert.equal(vault.notes.get(claim.relativePath)?.frontmatter.claim_status, 'confirmed')
+  })
+
+  test('knowledge inbox state hides reviewed items until their source changes', () => {
+    const itemId = knowledgeInboxItemId('review_client_alias', 'Kunden/Schule/Firewall Capture.md')
+
+    const before = vault.buildKnowledgeInbox({ dryRun: true })
+    assert.equal(before.uncertainClientCount, 1)
+    assert.match(before.content, new RegExp(itemId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+
+    const applied = vault.brainApplyInboxItem({ itemId, dryRun: false })
+    assert.equal(applied.dryRun, false)
+    assert.equal(applied.state?.status, 'accepted')
+    assert.ok(existsSync(join(vaultPath, KNOWLEDGE_INBOX_STATE_FILE)))
+
+    const after = vault.buildKnowledgeInbox({ dryRun: true })
+    assert.equal(after.uncertainClientCount, 0)
+    assert.doesNotMatch(after.content, new RegExp(itemId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   })
 })

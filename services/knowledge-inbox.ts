@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { classifyIntent, isMutatingCommand, performedCommands } from './intent-classifier.ts'
-import { buildKnowledgeInboxItems, knowledgeInboxItemId } from './knowledge-inbox-actions.ts'
+import { buildKnowledgeInboxItems, knowledgeInboxItemId, readKnowledgeInboxState } from './knowledge-inbox-actions.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -19,6 +19,8 @@ export interface KnowledgeInboxResult {
   runbookCandidateCount: number
   skippedAutoBuildCount: number
   impactReportCount: number
+  openItemCount: number
+  persistedStateCount: number
   content: string
 }
 
@@ -92,16 +94,29 @@ export function buildKnowledgeInbox(vault: Vault, options: BuildKnowledgeInboxOp
     .sort((a, b) => b.lastModified - a.lastModified)
 
   const inboxItems = buildKnowledgeInboxItems(vault)
-  const content = `---\nstatus: aktiv\ntags:\n  - knowledge-inbox\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: knowledge-inbox\n---\n\n# Knowledge Inbox\n\n## Provisional Claims\n\n${lines(provisionalClaims.slice(0, 30).map(note => `${link(note)} - Quelle: \`${note.frontmatter.quelle ?? 'unbekannt'}\`; Actions: \`${knowledgeInboxItemId('confirm_claim', note.relativePath)}\`, \`${knowledgeInboxItemId('reject_claim', note.relativePath)}\``))}\n\n## Kundenzuordnung prüfen\n\n${lines(uncertainClients.slice(0, 30))}\n\n## Runbook-Kandidaten\n\n${lines(runbookCandidates.slice(0, 30))}\n\n## Auto-Build Skips\n\n${lines(skipped.map(item => `[[${item.sourcePath}|${basename(item.sourcePath, '.md')}]] - \`${item.action}\`: ${item.reason}`))}\n\n## Inbox Actions\n\n${lines(inboxItems.slice(0, 40).map(item => `\`${item.id}\` - ${item.title}: ${item.detail}`))}\n\n## Letzte Impact Reports\n\n${lines(impacts.slice(0, 20).map(link))}\n\n## Nächste Aktionen\n\n- Provisional Claims nur bestätigen, wenn Quelle und Gültigkeit belastbar sind.\n- Unsichere Kundenzuordnungen prüfen und stabile Aliase in clients.json ergänzen.\n- Runbook-Kandidaten zuerst mit generate_runbook dry-run ansehen.\n- Auto-Build Skips als Qualitätsfeedback behandeln, nicht blind umgehen.\n`
+  const active = new Set(inboxItems.map(item => `${item.kind}:${item.target}`))
+  const activeUncertainClients = uncertainClients.filter(line => {
+    const match = line.match(/\[\[([^|\]]+)/)
+    return match ? active.has(`review_client_alias:${match[1]}`) : true
+  })
+  const activeRunbookCandidates = runbookCandidates.filter(line => {
+    const match = line.match(/\[\[([^|\]]+)/)
+    return match ? active.has(`runbook_preview:${match[1]}`) : true
+  })
+  const state = readKnowledgeInboxState(vault)
+  const persistedStateCount = Object.keys(state.items).length
+  const content = `---\nstatus: aktiv\ntags:\n  - knowledge-inbox\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: knowledge-inbox\n---\n\n# Knowledge Inbox\n\n## Queue State\n\n- Offene Actions: ${inboxItems.length}\n- Persistierte Item-States: ${persistedStateCount}\n- Bereits bearbeitete Items bleiben ausgeblendet, solange sich die Quelle nicht ändert.\n\n## Provisional Claims\n\n${lines(provisionalClaims.slice(0, 30).map(note => `${link(note)} - Quelle: \`${note.frontmatter.quelle ?? 'unbekannt'}\`; Actions: \`${knowledgeInboxItemId('confirm_claim', note.relativePath)}\`, \`${knowledgeInboxItemId('reject_claim', note.relativePath)}\``))}\n\n## Kundenzuordnung prüfen\n\n${lines(activeUncertainClients.slice(0, 30))}\n\n## Runbook-Kandidaten\n\n${lines(activeRunbookCandidates.slice(0, 30))}\n\n## Auto-Build Skips\n\n${lines(skipped.map(item => `[[${item.sourcePath}|${basename(item.sourcePath, '.md')}]] - \`${item.action}\`: ${item.reason}`))}\n\n## Inbox Actions\n\n${lines(inboxItems.slice(0, 40).map(item => `\`${item.id}\` - ${item.title}: ${item.detail}`))}\n\n## Letzte Impact Reports\n\n${lines(impacts.slice(0, 20).map(link))}\n\n## Nächste Aktionen\n\n- Provisional Claims nur bestätigen, wenn Quelle und Gültigkeit belastbar sind.\n- Unsichere Kundenzuordnungen prüfen und stabile Aliase in clients.json ergänzen.\n- Runbook-Kandidaten zuerst mit generate_runbook dry-run ansehen.\n- Auto-Build Skips als Qualitätsfeedback behandeln, nicht blind umgehen.\n`
 
   const result = {
     dryRun,
     path: KNOWLEDGE_INBOX_PATH,
     provisionalClaimCount: provisionalClaims.length,
-    uncertainClientCount: uncertainClients.length,
-    runbookCandidateCount: runbookCandidates.length,
+    uncertainClientCount: activeUncertainClients.length,
+    runbookCandidateCount: activeRunbookCandidates.length,
     skippedAutoBuildCount: skipped.length,
     impactReportCount: impacts.length,
+    openItemCount: inboxItems.length,
+    persistedStateCount,
     content,
   }
 

@@ -677,20 +677,20 @@ v1.0 can be tagged only when all of these are true:
 - "What gets written to my vault?" doc exists.
 - README includes screenshots or GIFs for the core flow.
 
-## Remaining V1.0 Work Queue
+## V1.0 Implementation Queue
 
-This is the fixed remaining implementation queue.
+This is the fixed implementation queue. Completed items stay here to prevent scope drift.
 
-1. Persist Knowledge Inbox item state.
-2. Add `repair-hooks` / hook repair command.
-3. Add background runner for unattended safe jobs.
-4. Add Background Run Report surface.
-5. Add large-vault benchmark.
-6. Add more anonymized Claude Code transcript fixtures.
-7. Add "What gets written to my vault?" documentation.
-8. Add production setup guide for unattended scheduler.
-9. Build README screenshots/GIFs from demo output.
-10. Final release pass and version tag.
+1. Done: Persist Knowledge Inbox item state.
+2. Done: Add `repair-hooks` / hook repair command.
+3. Done: Add background runner for unattended safe jobs.
+4. Done: Add Background Run Report surface.
+5. Done: Add large-vault benchmark.
+6. Done: Add more anonymized Claude Code transcript fixtures.
+7. Done: Add "What gets written to my vault?" documentation.
+8. Done: Add production setup guide for unattended scheduler.
+9. Done: Build README screenshots/GIFs from demo output.
+10. Pending release decision: Final release pass and version tag.
 
 ## V1.1 Or Later
 

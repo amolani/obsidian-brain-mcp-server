@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { Vault } from './vault.ts'
 import { createDemoVault } from './services/demo-vault.ts'
 import { installClaudeHooks } from './services/claude-hooks.ts'
+import { runLargeVaultBenchmark } from './services/large-vault-benchmark.ts'
 
 interface ParsedArgs {
   command: string
@@ -64,6 +65,18 @@ function bool(options: Record<string, string | boolean>, name: string): boolean 
   return options[name] === true || options[name] === 'true'
 }
 
+function optionNumber(options: Record<string, string | boolean>, name: string): number | undefined {
+  const value = optionString(options, name)
+  if (!value) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function optionList(options: Record<string, string | boolean>, name: string): string[] | undefined {
+  const value = optionString(options, name)
+  return value ? value.split(',').map(item => item.trim()).filter(Boolean) : undefined
+}
+
 function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
@@ -74,7 +87,10 @@ function usage(): string {
 Usage:
   obsidian-brain doctor --vault <path> [--json] [--skip-hooks]
   obsidian-brain install-hooks --vault <path> [--apply] [--settings <path>] [--json]
+  obsidian-brain repair-hooks --vault <path> [--apply] [--settings <path>] [--json]
   obsidian-brain init --vault <path> [--apply-hooks]
+  obsidian-brain background --vault <path> [--apply] [--json] [--max-runtime-ms <ms>] [--jobs a,b]
+  obsidian-brain benchmark --out <path> [--notes <n>] [--force]
   obsidian-brain demo --out <path> [--force]
   obsidian-brain release-check
 `
@@ -149,6 +165,23 @@ function runInstallHooks(args: ParsedArgs): number {
   return 0
 }
 
+function runRepairHooks(args: ParsedArgs): number {
+  const vaultPath = requirePath(args.options, 'vault')
+  const result = installClaudeHooks({
+    vaultPath,
+    settingsPath: optionPath(args.options, 'settings'),
+    apply: bool(args.options, 'apply'),
+  })
+  if (bool(args.options, 'json')) printJson(result)
+  else {
+    process.stdout.write(`${formatHookInstall(result).replace(
+      result.dryRun ? '# Hook Install Dry-Run' : '# Hooks installiert',
+      result.dryRun ? '# Hook Repair Dry-Run' : '# Hooks repariert',
+    )}\n`)
+  }
+  return 0
+}
+
 async function runInit(args: ParsedArgs): Promise<number> {
   const vaultPath = requirePath(args.options, 'vault')
   const health = await withVault(vaultPath, vault => vault.brainHealthCheck({ checkHooks: true }))
@@ -179,6 +212,57 @@ function runDemo(args: ParsedArgs): number {
     '',
     result.files.map(file => `- ${file}`).join('\n'),
   ].join('\n') + '\n')
+  return 0
+}
+
+async function runBackground(args: ParsedArgs): Promise<number> {
+  const vaultPath = requirePath(args.options, 'vault')
+  const result = await withVault(vaultPath, vault => vault.runBackgroundBrain({
+    dryRun: !bool(args.options, 'apply'),
+    jobs: optionList(args.options, 'jobs'),
+    maxRuntimeMs: optionNumber(args.options, 'max-runtime-ms'),
+    lockPath: optionString(args.options, 'lock-path'),
+    settingsPath: optionPath(args.options, 'settings'),
+    client: optionString(args.options, 'client'),
+    sourcePath: optionString(args.options, 'source-path'),
+    runAutoBuild: bool(args.options, 'run-auto-build'),
+  }))
+  if (bool(args.options, 'json')) printJson(result)
+  else {
+    process.stdout.write([
+      result.dryRun ? '# Background Run Dry-Run' : '# Background Run',
+      '',
+      `Status: ${result.status}`,
+      `Dry-Run: ${result.dryRun}`,
+      `Report: ${result.reportPath}`,
+      `JSON: ${result.jsonPath}`,
+      '',
+      result.content,
+    ].join('\n') + '\n')
+  }
+  return result.status === 'fail' ? 1 : 0
+}
+
+async function runBenchmark(args: ParsedArgs): Promise<number> {
+  const outPath = requirePath(args.options, 'out')
+  const result = await runLargeVaultBenchmark({
+    outPath,
+    notes: optionNumber(args.options, 'notes'),
+    force: bool(args.options, 'force'),
+  })
+  if (bool(args.options, 'json')) printJson(result)
+  else {
+    process.stdout.write([
+      '# Large Vault Benchmark',
+      '',
+      `Path: ${result.outPath}`,
+      `Notes: ${result.notes}`,
+      `Files: ${result.files}`,
+      `Index: ${result.timings.indexMs} ms`,
+      `Background dry-run: ${result.timings.backgroundDryRunMs} ms`,
+      `Report: ${result.reportPath}`,
+    ].join('\n') + '\n')
+  }
   return 0
 }
 
@@ -227,8 +311,14 @@ async function main(): Promise<number> {
       return runDoctor(args)
     case 'install-hooks':
       return runInstallHooks(args)
+    case 'repair-hooks':
+      return runRepairHooks(args)
     case 'init':
       return runInit(args)
+    case 'background':
+      return runBackground(args)
+    case 'benchmark':
+      return runBenchmark(args)
     case 'demo':
       return runDemo(args)
     case 'release-check':

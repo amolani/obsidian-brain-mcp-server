@@ -238,6 +238,65 @@ Quelle: [[Kunden/Acme-Schule/Captures/2026-05-12 Firewall DHCP Fix|Firewall DHCP
 - Customer Snapshot aktualisiert
 `)
 
+  write(options.outPath, files, 'Maintenance/Knowledge Inbox.md', `---
+status: aktiv
+tags:
+  - knowledge-inbox
+  - maintenance
+datum: ${DEMO_DATE}
+quelle: demo
+---
+
+# Knowledge Inbox
+
+## Queue State
+
+- Offene Actions: 2
+- Persistierte Item-States: 1
+- Bereits bearbeitete Items bleiben ausgeblendet, solange sich die Quelle nicht ändert.
+
+## Inbox Actions
+
+- \`inbox:confirm_claim:Knowledge%2FClaims%2FDHCP%20Quelle%20Firewall.md\` - Claim bestätigen
+- \`inbox:runbook_preview:Kunden%2FAcme-Schule%2FCaptures%2F2026-05-12%20Firewall%20DHCP%20Fix.md\` - Runbook Dry-Run
+`)
+
+  write(options.outPath, files, 'Maintenance/Change Ledger.md', `---
+status: aktiv
+tags:
+  - change-ledger
+  - maintenance
+datum: ${DEMO_DATE}
+quelle: demo
+---
+
+# Change Ledger
+
+| Zeit | Tool | Mode | Summary | Targets |
+|---|---|---|---|---|
+| ${DEMO_DATE}T12:00:00.000Z | \`demo_vault\` | apply | Synthetic demo vault generated | \`Knowledge/_brain.md\` |
+`)
+
+  write(options.outPath, files, 'Maintenance/Background Run Report.md', `---
+status: aktiv
+tags:
+  - background-run
+  - maintenance
+datum: ${DEMO_DATE}
+quelle: demo
+---
+
+# Background Run Report
+
+Status: **ok**
+
+| Job | Status | Dauer ms | Summary |
+|---|---:|---:|---|
+| \`build_brain_dashboard\` | ok | 4 | path=Knowledge/_brain.md |
+| \`build_knowledge_inbox\` | ok | 3 | open actions=2 |
+| \`safe_maintenance_preview\` | ok | 6 | Dry-Run bleibt erzwungen |
+`)
+
   write(options.outPath, files, '.raw/tickets/acme-dhcp-incident.md', `# Ticket ACME-2026-0512
 
 - Clients im Verwaltungsnetz bekommen keine DHCP-Lease.
@@ -259,6 +318,32 @@ Quelle: [[Kunden/Acme-Schule/Captures/2026-05-12 Firewall DHCP Fix|Firewall DHCP
         reportPath: 'Maintenance/Auto-Build/2026-05-12 Firewall DHCP Fix.md',
       },
     },
+  }, null, 2)}\n`)
+
+  write(options.outPath, files, '.brain-knowledge-inbox-state.json', `${JSON.stringify({
+    version: 1,
+    items: {
+      'inbox:review_client_alias:Kunden%2FAcme-Schule%2FCaptures%2F2026-05-12%20Firewall%20DHCP%20Fix.md': {
+        itemId: 'inbox:review_client_alias:Kunden%2FAcme-Schule%2FCaptures%2F2026-05-12%20Firewall%20DHCP%20Fix.md',
+        kind: 'review_client_alias',
+        target: 'Kunden/Acme-Schule/Captures/2026-05-12 Firewall DHCP Fix.md',
+        status: 'accepted',
+        fingerprint: 'demo',
+        updatedAt: `${DEMO_DATE}T12:05:00.000Z`,
+      },
+    },
+  }, null, 2)}\n`)
+
+  write(options.outPath, files, '.brain-background-last-run.json', `${JSON.stringify({
+    dryRun: false,
+    status: 'ok',
+    generatedAt: `${DEMO_DATE}T12:10:00.000Z`,
+    reportPath: 'Maintenance/Background Run Report.md',
+    jobs: [
+      { id: 'build_brain_dashboard', status: 'ok' },
+      { id: 'build_knowledge_inbox', status: 'ok' },
+      { id: 'safe_maintenance_preview', status: 'ok' },
+    ],
   }, null, 2)}\n`)
 
   write(options.outPath, files, '.action-log.jsonl', `${JSON.stringify({

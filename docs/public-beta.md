@@ -29,9 +29,22 @@ export VAULT_PATH=/path/to/your/obsidian/vault
 node cli.ts doctor --vault "$VAULT_PATH"
 node cli.ts install-hooks --vault "$VAULT_PATH"
 node cli.ts install-hooks --vault "$VAULT_PATH" --apply
+node cli.ts repair-hooks --vault "$VAULT_PATH"
 ```
 
 `install-hooks` is dry-run by default. With `--apply`, it creates a timestamped backup of `~/.claude/settings.json` before writing.
+`repair-hooks` uses the same dry-run-first planner and is intended for drifted or partially missing SessionStart, Stop, and PostToolUse hook registrations.
+
+## Unattended Background Run
+
+```bash
+node cli.ts background --vault "$VAULT_PATH"
+node cli.ts background --vault "$VAULT_PATH" --apply
+```
+
+The apply run writes `Maintenance/Background Run Report.md` and `.brain-background-last-run.json`. Risky maintenance stays preview-only inside the background runner.
+
+For production scheduling, see [Production Setup](production-setup.md).
 
 ## Safety Defaults
 
@@ -45,12 +58,15 @@ node cli.ts install-hooks --vault "$VAULT_PATH" --apply
 - Fuzzy or content-based customer matches are surfaced in Capture Review and Knowledge Inbox.
 - Secret-like tokens are redacted before auto-captures are written.
 - Legacy captures/claims can be backfilled with `migrate_brain_metadata` dry-run first.
+- Background jobs use a lock and keep merge/rename/folder/link/gap actions out of automatic apply.
+- Reviewed Knowledge Inbox items are persisted in `.brain-knowledge-inbox-state.json`.
 
 ## Good First Commands
 
 ```text
 brain_health_check
 brain_metrics
+brain_run_background
 build_capture_review
 build_knowledge_inbox
 build_change_ledger
@@ -58,3 +74,11 @@ build_evidence_dashboard
 migrate_brain_metadata
 brain_review
 ```
+
+## Scale Check
+
+```bash
+node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force
+```
+
+The benchmark creates only synthetic Markdown and writes `benchmark-report.md` and `benchmark-report.json`.
