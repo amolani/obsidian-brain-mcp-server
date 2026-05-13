@@ -574,7 +574,10 @@ It currently evaluates checked-in fixture JSON files for:
 
 - late-session Harvester updates,
 - misspelled customer routing,
-- basic retrieval ranking,
+- retrieval ranking with Precision@k, Recall@k, MRR@k, and nDCG@k,
+- promotion quality with Precision, Recall, F0.5, Faithfulness, and Evidence Coverage,
+- Knowledge Inbox review coverage, stable item IDs, and resolved-item reappearance control,
+- background report completeness, action-log coverage, lock correctness, and failed-job count,
 - generated-surface redaction,
 - policy safety gates.
 

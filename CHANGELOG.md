@@ -25,7 +25,7 @@
 - Production setup and "what gets written" documentation.
 - Additional anonymized Claude Code transcript fixtures for research and troubleshooting sessions.
 - Brain Quality Contract defining measurable gates for capture, retrieval, promotion, review, safety, and background behavior.
-- Brain Quality fixtures for late-session capture updates, misspelled customer routing, retrieval ranking, generated-surface redaction, and policy safety.
+- Brain Quality fixtures for late-session capture updates, misspelled customer routing, retrieval ranking, promotion faithfulness, Knowledge Inbox review behavior, background operations, generated-surface redaction, and policy safety.
 
 ### Changed
 

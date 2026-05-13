@@ -1,0 +1,21 @@
+{
+  "id": "review-queue",
+  "type": "review",
+  "resolveItemPattern": "review_client_alias",
+  "expectedItems": [
+    { "id": "confirm-claim", "itemIdPattern": "confirm_claim" },
+    { "id": "reject-claim", "itemIdPattern": "reject_claim" },
+    { "id": "review-client-alias", "itemIdPattern": "review_client_alias" },
+    { "id": "runbook-preview", "itemIdPattern": "runbook_preview" }
+  ],
+  "notes": [
+    {
+      "path": "Knowledge/Claims/HUG VPN Route.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - claim\n  - evidence\nquelle: Kunden/HUG/Captures/HUG VPN Review Capture.md\nclaim_status: provisional\nsource_stage: stop_capture\nconfidence: medium\n---\n\n# Claim: HUG VPN Route\n\nDie Route 192.168.1.0/24 wird via tun0 gepusht.\n"
+    },
+    {
+      "path": "Kunden/HUG/Captures/HUG VPN Review Capture.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - kunde/hug\nkunde: HUG\nquelle: knowledge-harvester\nsource_stage: stop_capture\nclient_match_method: fuzzy_cwd\nclient_match_confidence: medium\nclient_match_candidate: hgu\nclient_match_alias: HUG\nrunbook_readiness: 75\n---\n\n# HUG VPN Review Capture\n\n## Zusammenfassung\n\nHUG VPN wurde eingerichtet und geprüft.\n\n## Durchgeführte Befehle\n\n1. `systemctl restart openvpn-client@hug`\n2. `docker compose up -d`\n"
+    }
+  ]
+}

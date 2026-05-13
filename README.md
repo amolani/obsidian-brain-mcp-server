@@ -130,7 +130,7 @@ Run the local quality harness before release work:
 npm run brain-quality
 ```
 
-It replays anonymized golden fixtures in temporary vaults and checks capture recall, late-session updates, retrieval ranking, redaction, idempotency, and policy safety gates.
+It replays anonymized golden fixtures in temporary vaults and checks capture recall, late-session updates, retrieval ranking, promotion precision, faithfulness, evidence coverage, review stability, background lock/report behavior, redaction, idempotency, and policy safety gates.
 
 For unattended operation, see [Production Setup](docs/production-setup.md).
 

@@ -46,6 +46,24 @@
       "minRecallAtK": 1,
       "minMrrAtK": 1,
       "minNdcgAtK": 1
+    },
+    {
+      "query": "OPNsense",
+      "k": 5,
+      "relevantNotes": ["Kunden/Düsseldorf/Captures/Duesseldorf Edulution Lets Encrypt.md"],
+      "minPrecisionAtK": 0.2,
+      "minRecallAtK": 1,
+      "minMrrAtK": 1,
+      "minNdcgAtK": 1
+    },
+    {
+      "query": "tun0",
+      "k": 5,
+      "relevantNotes": ["Kunden/HUG/Captures/HUG VPN Test.md"],
+      "minPrecisionAtK": 0.2,
+      "minRecallAtK": 1,
+      "minMrrAtK": 1,
+      "minNdcgAtK": 1
     }
   ]
 }

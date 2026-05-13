@@ -1,0 +1,13 @@
+{
+  "id": "background-operations",
+  "type": "background",
+  "jobs": ["brain_metrics", "build_knowledge_inbox", "build_change_ledger", "build_knowledge_index"],
+  "maxRuntimeMs": 10000,
+  "requireActionLog": true,
+  "notes": [
+    {
+      "path": "Kunden/HUG/Captures/HUG Background Capture.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - kunde/hug\nkunde: HUG\nquelle: knowledge-harvester\nsource_stage: stop_capture\n---\n\n# HUG Background Capture\n\nDer Hintergrundlauf soll sichere generierte Oberflächen aktualisieren und die Schreibaktionen protokollieren.\n"
+    }
+  ]
+}

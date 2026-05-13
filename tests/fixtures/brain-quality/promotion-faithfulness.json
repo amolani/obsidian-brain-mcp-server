@@ -1,0 +1,31 @@
+{
+  "id": "promotion-faithfulness",
+  "type": "promotion",
+  "sourcePath": "Kunden/HUG/Captures/HUG VPN Implementation Capture.md",
+  "client": "HUG",
+  "maxClaims": 1,
+  "expectedPromotions": [
+    {
+      "id": "session-insight",
+      "pathPattern": "^Knowledge/Insights/",
+      "requiredPatterns": ["HUG VPN Tunnel", "Synology01"]
+    },
+    {
+      "id": "provisional-claim",
+      "pathPattern": "^Knowledge/Claims/",
+      "requiredPatterns": ["HUG VPN Tunnel"]
+    },
+    {
+      "id": "runbook",
+      "pathPattern": "^Kunden/HUG/Runbook ",
+      "requiredPatterns": ["Synology01", "192\\.168\\.1\\.0/24"]
+    }
+  ],
+  "forbiddenPatterns": ["copy this command", "sudo needs a password"],
+  "notes": [
+    {
+      "path": "Kunden/HUG/Captures/HUG VPN Implementation Capture.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - prozedur\n  - kunde/hug\nkunde: HUG\nquelle: knowledge-harvester\nsource_stage: stop_capture\nsession_intent: implementation\nrunbook_readiness: 86\n---\n\n# HUG VPN Implementation Capture\n\n## Zusammenfassung\n\nDer HUG VPN Tunnel ist produktiv nutzbar. Synology01 ist unter 192.168.1.23 per DSM 5001 erreichbar.\n\n## Durchgeführte Befehle\n\n1. `systemctl restart openvpn-client@hug`\n2. `docker compose up -d`\n3. `chmod 600 /etc/openvpn/hug.auth`\n4. `systemctl reload NetworkManager`\n\n## Validierung\n\nDie Route 192.168.1.0/24 via tun0 ist aktiv. Synology01 ist unter 192.168.1.23 erreichbar.\n"
+    }
+  ]
+}
