@@ -64,7 +64,7 @@ function readManifest(vault: Vault): Array<{ sourcePath: string; action: string;
 
 function uncertainClientLine(note: NoteEntry): string | null {
   const method = String(note.frontmatter.client_match_method ?? '')
-  if (!['fuzzy_cwd', 'exact_content'].includes(method)) return null
+  if (!['fuzzy_cwd', 'exact_content', 'unknown_cwd'].includes(method)) return null
   const confidence = String(note.frontmatter.client_match_confidence ?? 'unknown')
   const candidate = note.frontmatter.client_match_candidate ? `; Kandidat: \`${note.frontmatter.client_match_candidate}\`` : ''
   const alias = note.frontmatter.client_match_alias ? `; Alias: \`${note.frontmatter.client_match_alias}\`` : ''

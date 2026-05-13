@@ -164,7 +164,7 @@ export function buildKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
 
     const isCapture = note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester'
     if (!isCapture) continue
-    if (['fuzzy_cwd', 'exact_content'].includes(String(note.frontmatter.client_match_method ?? ''))) {
+    if (['fuzzy_cwd', 'exact_content', 'unknown_cwd'].includes(String(note.frontmatter.client_match_method ?? ''))) {
       items.push(makeItem(
         'review_client_alias',
         note,

@@ -1,6 +1,6 @@
 import { loadClients } from '../config.ts'
 
-export type ClientMatchMethod = 'none' | 'exact_cwd' | 'exact_content' | 'fuzzy_cwd'
+export type ClientMatchMethod = 'none' | 'exact_cwd' | 'exact_content' | 'fuzzy_cwd' | 'unknown_cwd'
 export type ClientMatchConfidence = 'none' | 'low' | 'medium' | 'high'
 
 export interface ClientMatch {

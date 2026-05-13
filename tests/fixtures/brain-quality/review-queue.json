@@ -6,6 +6,7 @@
     { "id": "confirm-claim", "itemIdPattern": "confirm_claim" },
     { "id": "reject-claim", "itemIdPattern": "reject_claim" },
     { "id": "review-client-alias", "itemIdPattern": "review_client_alias" },
+    { "id": "review-unknown-cwd-client", "itemIdPattern": "review_client_alias.*Abt-Ulrich" },
     { "id": "runbook-preview", "itemIdPattern": "runbook_preview" }
   ],
   "notes": [
@@ -16,6 +17,10 @@
     {
       "path": "Kunden/HUG/Captures/HUG VPN Review Capture.md",
       "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - kunde/hug\nkunde: HUG\nquelle: knowledge-harvester\nsource_stage: stop_capture\nclient_match_method: fuzzy_cwd\nclient_match_confidence: medium\nclient_match_candidate: hgu\nclient_match_alias: HUG\nrunbook_readiness: 75\n---\n\n# HUG VPN Review Capture\n\n## Zusammenfassung\n\nHUG VPN wurde eingerichtet und geprüft.\n\n## Durchgeführte Befehle\n\n1. `systemctl restart openvpn-client@hug`\n2. `docker compose up -d`\n"
+    },
+    {
+      "path": "Technik/Linuxmuster/Abt-Ulrich Schulkonsole Capture.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - linuxmuster\nquelle: knowledge-harvester\nsource_stage: stop_capture\nclient_match_method: unknown_cwd\nclient_match_confidence: low\nclient_match_candidate: abt-ulrich-schule\nrunbook_readiness: 35\n---\n\n# Abt-Ulrich Schulkonsole Capture\n\nlinuxmuster-webui.service ist active running und lauscht auf 0.0.0.0:443.\n"
     }
   ]
 }

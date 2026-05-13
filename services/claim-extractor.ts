@@ -66,6 +66,10 @@ function isConversationOrStatusNoise(line: string): boolean {
   return /^(ich|du|wir)\b/i.test(trimmed)
     || /^(ok|okay|alles klar|verstanden|nicht ganz|hier|sag|sobald|wenn|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe|was ich von dir brauche|was du jetzt|soll ich)\b/i.test(trimmed)
     || /^(eine sache stimmt nicht|spurensuche-ergebnis|compose-syntax|pull durch|files stehen|damit ist die vorbereitung komplett|heute abend|nach dem edulution-ui-update)\b/i.test(trimmed)
+    || /^(zwei|drei|mehrere)\s+hinweise\s+sind\s+wichtig:?$/i.test(trimmed)
+    || /\b(das ist der entscheidende hinweis|entscheidende hinweis)\b/i.test(trimmed)
+    || /\b(crash-files?.*ajenti\.log|ajenti\.log.*crash-files?).*\b(nächst\w*|naechst\w*)\s+quellen\b/i.test(trimmed)
+    || /^die\s+`?\.bak`?\s+ist\s+identisch\b/i.test(trimmed)
     || /\b(sag bescheid|ich warte|ich melde mich|willst du|kannst du|soll ich|zum selber-ausführen|zum selber-ausfuehren)\b/i.test(trimmed)
     || /^[-*]?\s*(docker|compose|pull|admin|jwt_secret|db_password)\s*:/i.test(trimmed)
 }

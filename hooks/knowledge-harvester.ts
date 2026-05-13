@@ -664,6 +664,15 @@ process.stdin.on('end', async () => {
     if (!knowledge.client) {
       const suggestion = suggestClientFromCwd(cwd)
       if (suggestion) {
+        knowledge.clientMatch = {
+          client: null,
+          confidence: 'low',
+          method: 'unknown_cwd',
+          matched: null,
+          candidate: suggestion,
+          score: 0.5,
+          reason: `CWD-Segment "${suggestion}" sieht wie ein unbekannter Kunden-/Projektname aus`,
+        }
         logSuggestion(suggestion, cwd)
         log(`Session ${sessionId.slice(0, 8)}: Unbekannter Pfad — Vorschlag "${suggestion}" geloggt`)
       }

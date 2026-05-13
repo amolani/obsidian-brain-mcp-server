@@ -94,6 +94,43 @@ describe('claim extractor noise filtering', () => {
     })
   })
 
+  test('filters debug narration from Schulkonsole troubleshooting but keeps verified outcome', () => {
+    writeNote(vaultPath, {
+      path: 'Technik/Linuxmuster/Schulkonsole Capture.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['auto-capture', 'linuxmuster'],
+        quelle: 'knowledge-harvester',
+        source_stage: 'stop_capture',
+      },
+      title: 'Schulkonsole Capture',
+      body: [
+        'Drei Hinweise sind wichtig:',
+        "`Can't open PID file /run/ajenti.pid ... Operation not permitted` — Das ist der entscheidende Hinweis.",
+        'Die Crash-Files und `ajenti.log` sind die nächsten Quellen.',
+        'Die `.bak` ist identisch — also schon länger kaputt.',
+        'Root Cause: In `/etc/ajenti/config.yml` stand `bind.mode: unix`, aber `bind.socket` fehlte.',
+        'linuxmuster-webui.service ist active running und lauscht auf 0.0.0.0:443.',
+      ].join('\n\n'),
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    return vault.init().then(() => {
+      const result = vault.extractClaims({
+        path: 'Technik/Linuxmuster/Schulkonsole Capture.md',
+        maxClaims: 10,
+        dryRun: true,
+      })
+
+      const claims = result.claims.map(claim => claim.claim).join('\n')
+      assert.doesNotMatch(claims, /Drei Hinweise/)
+      assert.doesNotMatch(claims, /entscheidende Hinweis/)
+      assert.doesNotMatch(claims, /Crash-Files/)
+      assert.doesNotMatch(claims, /\.bak/)
+      assert.match(claims, /linuxmuster-webui\.service ist active running/)
+    })
+  })
+
   test('does not write duplicate claims when auto-build processes an updated source again', () => {
     writeNote(vaultPath, {
       path: 'Kunden/Düsseldorf/ADBK Dedup Capture.md',

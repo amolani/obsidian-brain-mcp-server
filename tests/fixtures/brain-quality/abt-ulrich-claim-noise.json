@@ -1,0 +1,22 @@
+{
+  "id": "abt-ulrich-claim-noise",
+  "type": "claim_extraction",
+  "sourcePath": "Technik/Linuxmuster/Schulkonsole Capture.md",
+  "maxClaims": 10,
+  "expectedClaimPatterns": [
+    "linuxmuster-webui\\.service ist active running",
+    "0\\.0\\.0\\.0:443"
+  ],
+  "forbiddenClaimPatterns": [
+    "Drei Hinweise sind wichtig",
+    "entscheidende Hinweis",
+    "Crash-Files",
+    "\\.bak.*identisch"
+  ],
+  "notes": [
+    {
+      "path": "Technik/Linuxmuster/Schulkonsole Capture.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - linuxmuster\nquelle: knowledge-harvester\nsource_stage: stop_capture\n---\n\n# Schulkonsole Capture\n\nDrei Hinweise sind wichtig:\n\n`Can't open PID file /run/ajenti.pid ... Operation not permitted` — Das ist der entscheidende Hinweis.\n\nDie Crash-Files und `ajenti.log` sind die nächsten Quellen.\n\nDie `.bak` ist identisch — also schon länger kaputt.\n\nRoot Cause: In `/etc/ajenti/config.yml` stand `bind.mode: unix`, aber `bind.socket` fehlte.\n\nlinuxmuster-webui.service ist active running und lauscht auf 0.0.0.0:443.\n"
+    }
+  ]
+}

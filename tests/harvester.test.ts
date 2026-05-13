@@ -8,6 +8,7 @@ import { existsSync, statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSy
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { Vault } from '../vault.ts'
 import { createTempVault, cleanupVault } from './helpers.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -191,6 +192,70 @@ describe('Harvester: client resolver', () => {
     assert.match(note, /sensitive: true/)
     assert.match(note, /capture_value: \d+/)
     assert.ok(!note.includes('supersecretvalue12345'))
+  })
+})
+
+describe('Harvester: unknown customer review signal', () => {
+  let vaultPath: string
+  let stateDir: string
+  let transcript: string
+
+  before(() => {
+    vaultPath = createTempVault()
+    stateDir = mkdtempSync(join(tmpdir(), 'harvester-unknown-client-'))
+    transcript = join(stateDir, 'abt-ulrich.jsonl')
+    const entries = [
+      { type: 'user', message: { content: 'In der Abt-Ulrich-Schule funktioniert die linuxmuster Schulkonsole nicht.' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Ich pruefe linuxmuster-webui, Ajenti und systemd.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.196.33.10 "systemctl status linuxmuster-webui --no-pager -l | head -40"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: "Active: inactive (dead)\nCan't open PID file /run/ajenti.pid: Operation not permitted" }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.196.33.10 "tail -100 /var/log/ajenti/ajenti.log"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: "KeyError: 'socket'" }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.196.33.10 "sed -i s/^  mode: unix/  mode: tcp/ /etc/ajenti/config.yml && systemctl restart linuxmuster-webui"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.196.33.10 "ss -tlnp | grep :443 && systemctl is-active linuxmuster-webui"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'LISTEN 0.0.0.0:443\nactive' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: linuxmuster-webui.service ist active running und lauscht auf 0.0.0.0:443. Root Cause war eine widerspruechliche Ajenti-Konfiguration: bind.mode unix ohne bind.socket, obwohl TCP/SSL konfiguriert war.' }] } },
+    ]
+    writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+  })
+
+  after(() => {
+    cleanupVault(vaultPath)
+    cleanupVault(stateDir)
+  })
+
+  test('stores unknown cwd candidate in capture metadata and Knowledge Inbox', async () => {
+    const result = runHarvester(vaultPath, stateDir, {
+      session_id: 'test-abt-ulrich-unknown-client',
+      transcript_path: transcript,
+      cwd: '/home/amo/Documents/code/amo/Abt-Ulrich-Schule',
+    })
+    assert.equal(result.status, 0, result.stderr)
+
+    const suggestions = readFileSync(join(stateDir, 'suggestions.log'), 'utf-8')
+    assert.match(suggestions, /abt-ulrich-schule/)
+
+    const linuxmusterDir = join(vaultPath, 'Technik', 'Linuxmuster')
+    const captureFile = readdirSync(linuxmusterDir).find(file => file.endsWith('.md'))
+    assert.ok(captureFile)
+    const capturePath = join(linuxmusterDir, captureFile)
+    assert.ok(existsSync(capturePath))
+    const capture = readFileSync(capturePath, 'utf-8')
+    assert.match(capture, /client_match_method: unknown_cwd/)
+    assert.match(capture, /client_match_candidate: abt-ulrich-schule/)
+
+    const vault = new Vault(vaultPath)
+    await vault.init()
+    try {
+      const inbox = vault.buildKnowledgeInbox({ dryRun: true })
+      assert.equal(inbox.uncertainClientCount, 1)
+      assert.match(inbox.content, /unknown_cwd\/low/)
+      assert.match(inbox.content, /abt-ulrich-schule/)
+      assert.match(inbox.content, /review_client_alias/)
+    } finally {
+      vault.shutdown()
+    }
   })
 })
 
