@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { safeGeneratedSnippet } from './generated-surface-redaction.ts'
 import { isActiveNote, isGeneratedCustomerSurfacePath } from './note-scope.ts'
 import { assertSafeRelativePath, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
@@ -102,7 +103,7 @@ function knownIssues(notes: CustomerNote[]): Array<{ note: CustomerNote; text: s
     if (lines.length === 0 && matchingLines.length === 0) {
       issues.push({ note, text: note.entry.title })
     } else {
-      for (const line of lines) issues.push({ note, text: line })
+      for (const line of lines) issues.push({ note, text: safeGeneratedSnippet(note.entry, line) })
     }
   }
   return issues.slice(0, 12)
@@ -119,7 +120,7 @@ function renderDashboard(client: string, notes: CustomerNote[]): CustomerDashboa
   const path = `${customerPrefix(client)}_dashboard.md`
 
   const noteLines = notes.slice(0, 30).map(note => `- ${link(note)} — ${note.path}`).join('\n') || 'Keine Notizen gefunden.'
-  const todoLines = todos.slice(0, 20).map(todo => `- [ ] ${todo.text} (${link(todo.note)}, Zeile ${todo.line})`).join('\n') || 'Keine offenen TODOs.'
+  const todoLines = todos.slice(0, 20).map(todo => `- [ ] ${safeGeneratedSnippet(todo.note.entry, todo.text)} (${link(todo.note)}, Zeile ${todo.line})`).join('\n') || 'Keine offenen TODOs.'
   const recentLines = recents.map(note => {
     const date = new Date(note.entry.lastModified).toISOString().split('T')[0]
     return `- ${date} — ${link(note)}`

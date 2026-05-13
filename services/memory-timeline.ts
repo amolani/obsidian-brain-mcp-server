@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { safeGeneratedSnippet } from './generated-surface-redaction.ts'
 import { isActiveNote, isGeneratedCustomerSurface } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
@@ -43,11 +44,12 @@ function kind(entry: NoteEntry): string {
 }
 
 function firstLine(entry: NoteEntry): string {
-  return entry.content
+  const line = entry.content
     .split('\n')
     .map(line => line.replace(/^[-*#\s]+/, '').trim())
     .find(line => line.length >= 20)
     ?.slice(0, 180) ?? entry.title
+  return safeGeneratedSnippet(entry, line)
 }
 
 function clientNotes(vault: Vault, client: string): Array<{ path: string; entry: NoteEntry }> {

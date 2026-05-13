@@ -106,6 +106,7 @@ interface SurfaceRedactionFixture {
   query: string
   client: string
   forbiddenSecrets: string[]
+  forbiddenPatterns?: string[]
   requireRedactionMarker?: boolean
 }
 
@@ -590,13 +591,18 @@ async function evaluateSurfaceRedactionFixture(fixture: SurfaceRedactionFixture,
     return await evaluateWithVault(vault, async () => {
       const hot = vault.updateHotCache({ query: fixture.query, dryRun: true, maxNotes: 8 })
       const snapshot = vault.buildCustomerSnapshot({ client: fixture.client, dryRun: true })
-      const content = `${hot.content}\n${snapshot.content}`
+      const timeline = vault.buildMemoryTimeline({ client: fixture.client, dryRun: true })
+      const dashboard = vault.buildCustomerDashboard(fixture.client, { dryRun: true })
+      const content = `${hot.content}\n${snapshot.content}\n${timeline.content}\n${dashboard.content}`
       const leakedSecrets = fixture.forbiddenSecrets.filter(secret => content.includes(secret))
       for (const secret of leakedSecrets) failures.push(`generated surface leaked forbidden secret: ${secret}`)
+      const forbiddenPatterns = (fixture.forbiddenPatterns ?? []).filter(pattern => matchesPattern(content, pattern))
+      for (const pattern of forbiddenPatterns) failures.push(`generated surface matched forbidden pattern: ${pattern}`)
       const markerPresent = content.includes('[REDACTED_SENSITIVE_NOTE_SNIPPET')
       if (fixture.requireRedactionMarker && !markerPresent) failures.push('expected sensitive-note redaction marker not found')
 
       metrics.push(metric('secret_leak_count', 'Secret Leak Count', leakedSecrets.length, 0, 'Generated surfaces must not expose literal secrets', false))
+      metrics.push(metric('forbidden_surface_pattern_count', 'Forbidden Surface Pattern Count', forbiddenPatterns.length, 0, 'Generated surfaces must not expose raw artifacts, verbose commands, or sensitive file probes', false))
       metrics.push(metric('redaction_marker_present', 'Redaction Marker Present', markerPresent ? 1 : 0, fixture.requireRedactionMarker ? 1 : undefined, 'Sensitive snippets should be hidden but linked'))
       for (const item of metrics.filter(item => item.status === 'fail')) failures.push(`${item.label} failed: ${item.value}`)
       return {

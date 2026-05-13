@@ -5,10 +5,15 @@
   "client": "HUG",
   "requireRedactionMarker": true,
   "forbiddenSecrets": ["HUG_FAKE_PASSWORD_12345", "HUG_FAKE_TOKEN_67890"],
+  "forbiddenPatterns": ["edulution\\.env", "cat\\s+/srv/app/\\.env", "StrictHostKeyChecking"],
   "notes": [
     {
       "path": "Kunden/HUG/Zugangsdaten.md",
       "content": "---\nstatus: aktiv\ntags:\n  - zugangsdaten\n  - kunde/hug\nkunde: HUG\n---\n\n# HUG Zugangsdaten\n\nVPN password=HUG_FAKE_PASSWORD_12345\nAPI token=HUG_FAKE_TOKEN_67890\n\n- [ ] Passwort HUG_FAKE_PASSWORD_12345 spaeter rotieren\n"
+    },
+    {
+      "path": "Kunden/HUG/Runbook Verbose Probe.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - runbook\n  - kunde/hug\nkunde: HUG\n---\n\n# Runbook Verbose Probe\n\n## Systeme\n\n1. `ssh -o StrictHostKeyChecking=accept-new root@10.0.0.5 'cat /srv/app/.env && grep -i token /srv/app/.env && docker compose ps'`\n\nSystem: HUG App ist erreichbar.\n"
     },
     {
       "path": "Kunden/HUG/Captures/HUG VPN Test.md",
