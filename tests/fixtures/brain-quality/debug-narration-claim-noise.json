@@ -1,5 +1,5 @@
 {
-  "id": "abt-ulrich-claim-noise",
+  "id": "debug-narration-claim-noise",
   "type": "claim_extraction",
   "sourcePath": "Technik/Linuxmuster/Schulkonsole Capture.md",
   "maxClaims": 10,
