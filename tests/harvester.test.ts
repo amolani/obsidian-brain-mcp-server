@@ -244,6 +244,9 @@ describe('Harvester: unknown customer review signal', () => {
     const capture = readFileSync(capturePath, 'utf-8')
     assert.match(capture, /client_match_method: unknown_cwd/)
     assert.match(capture, /client_match_candidate: abt-ulrich-schule/)
+    assert.match(capture, /## Session Digest/)
+    assert.match(capture, /Ajenti-Konfiguration war.*bind\.mode/)
+    assert.match(capture, /Kunden-\/Projektkandidat aus CWD prüfen: `abt-ulrich-schule`/)
 
     const vault = new Vault(vaultPath)
     await vault.init()

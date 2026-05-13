@@ -20,6 +20,7 @@ import { resolveClientContext, type ClientMatch } from '../services/client-resol
 import { classifyIntent, type ClassifiedIntent } from '../services/intent-classifier.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { redactSecrets, type RedactionResult } from '../services/secret-redaction.ts'
+import { renderSessionDigest } from '../services/session-digest.ts'
 import { Vault } from '../vault.ts'
 
 if (!process.env.VAULT_PATH) {
@@ -478,6 +479,17 @@ ${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\
     const best = k.summaries.slice(-3)
     sections.push(`\n## Zusammenfassung\n\n${best.join('\n\n---\n\n')}`)
   }
+
+  sections.push(`\n${renderSessionDigest({
+    title: k.title,
+    client: k.client,
+    clientMatch: k.clientMatch,
+    intent: k.intent,
+    phases: k.phases,
+    summaries: k.summaries,
+    procedures: k.procedures,
+    errorFixes: k.errorFixes,
+  })}`)
 
   // Error fixes (high-value knowledge)
   if (k.errorFixes.length > 0) {

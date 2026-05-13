@@ -37,6 +37,7 @@ If any check fails, fix readiness before adding features.
 Read these before changing brain behavior:
 
 - [Scientific Engineering Contract](docs/scientific-engineering-contract.md)
+- [Session Digest Contract](docs/session-digest-contract.md)
 - [V1.0 Product Contract](docs/v1-product-definition.md)
 - [Brain Quality Contract](docs/brain-quality-contract.md)
 - [Production Setup](docs/production-setup.md)

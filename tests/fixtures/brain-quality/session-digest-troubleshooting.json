@@ -1,0 +1,48 @@
+{
+  "id": "session-digest-troubleshooting",
+  "type": "session_digest",
+  "description": "A troubleshooting stop capture should contain an evidence-backed digest without debug narration, password commands, or client auto-apply.",
+  "sessionId": "quality-session-digest-troubleshooting",
+  "cwd": "/home/amo/Documents/code/amo/Abt-Ulrich-Schule",
+  "expectedDigestPatterns": [
+    "## Session Digest",
+    "Ajenti-Konfiguration war.*bind\\.mode.*unix.*bind\\.socket",
+    "bind\\.mode.*unix.*tcp",
+    "linuxmuster-webui.*active/running",
+    "0\\.0\\.0\\.0:443",
+    "abt-ulrich-schule"
+  ],
+  "forbiddenDigestPatterns": [
+    "Drei Hinweise sind wichtig",
+    "entscheidende Hinweis",
+    "Crash-Files",
+    "samba-tool user setpassword",
+    "--newpassword"
+  ],
+  "forbiddenGlobalPatterns": [
+    "AbtniMusterPasswd123",
+    "--newpassword"
+  ],
+  "steps": [
+    {
+      "name": "final-stop",
+      "entries": [
+        { "type": "user", "message": { "content": "In der Abt-Ulrich-Schule funktioniert die linuxmuster Schulkonsole nicht." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Ich pruefe linuxmuster-webui, Ajenti und systemd." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.196.33.10 \"systemctl status linuxmuster-webui --no-pager -l | head -40\"" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "Active: inactive (dead)\nCan't open PID file /run/ajenti.pid: Operation not permitted" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Drei Hinweise sind wichtig: Operation not permitted ist der entscheidende Hinweis. Die Crash-Files und ajenti.log sind die naechsten Quellen." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.196.33.10 \"tail -100 /var/log/ajenti/ajenti.log\"" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "KeyError: 'socket'" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Root Cause: In /etc/ajenti/config.yml stand bind.mode: unix, aber bind.socket fehlte. Gleichzeitig war TCP/SSL konfiguriert." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.196.33.10 \"cp /etc/ajenti/config.yml /etc/ajenti/config.yml.broken-2026-05-13 && sed -i 's/^  mode: unix/  mode: tcp/' /etc/ajenti/config.yml && systemctl restart linuxmuster-webui\"" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "ok" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.196.33.10 \"ss -tlnp | grep :443 && systemctl is-active linuxmuster-webui\"" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "LISTEN 0.0.0.0:443\nactive" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.196.33.10 \"samba-tool user setpassword netzint1 --newpassword='AbtniMusterPasswd123!'\"" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "Changed password OK" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Zusammenfassung: linuxmuster-webui.service ist active running und lauscht auf 0.0.0.0:443. Ajenti bind.mode wurde von unix auf tcp umgestellt." }] } }
+      ]
+    }
+  ]
+}

@@ -15,6 +15,7 @@ export type BrainQualityFixtureType =
   | 'review'
   | 'background'
   | 'claim_extraction'
+  | 'session_digest'
 
 export interface BrainQualityOptions {
   fixturesDir?: string
@@ -170,6 +171,19 @@ interface ClaimExtractionFixture {
   minClaimF0_5?: number
 }
 
+interface SessionDigestFixture {
+  id: string
+  type: 'session_digest'
+  description?: string
+  sessionId: string
+  cwd: string
+  steps: HarvesterStep[]
+  expectedDigestPatterns: string[]
+  forbiddenDigestPatterns?: string[]
+  forbiddenGlobalPatterns?: string[]
+  minDigestRecall?: number
+}
+
 type BrainQualityFixture =
   | HarvesterFixture
   | RetrievalFixture
@@ -178,6 +192,7 @@ type BrainQualityFixture =
   | ReviewFixture
   | BackgroundFixture
   | ClaimExtractionFixture
+  | SessionDigestFixture
 
 const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const DEFAULT_FIXTURES_DIR = join(PROJECT_ROOT, 'tests', 'fixtures', 'brain-quality')
@@ -791,6 +806,67 @@ async function evaluateClaimExtractionFixture(fixture: ClaimExtractionFixture, k
   }
 }
 
+function extractSessionDigest(content: string): string {
+  return content.match(/^##\s+Session Digest\s*\n([\s\S]*?)(?=^##\s+|(?![\s\S]))/im)?.[0] ?? ''
+}
+
+function evaluateSessionDigestFixture(fixture: SessionDigestFixture, keepTemp: boolean): BrainQualityFixtureResult {
+  const tempPath = mkdirTemp(`brain-quality-${fixture.id}-`)
+  const vaultPath = join(tempPath, 'vault')
+  const stateDir = join(tempPath, 'state')
+  const transcriptPath = join(tempPath, 'transcript.jsonl')
+  mkdirSync(vaultPath, { recursive: true })
+  mkdirSync(stateDir, { recursive: true })
+
+  const failures: string[] = []
+  const metrics: BrainQualityMetric[] = []
+  let finalSnapshot = new Map<string, string>()
+
+  try {
+    for (const step of fixture.steps) {
+      writeTranscript(transcriptPath, step.entries)
+      const result = runHarvester(vaultPath, stateDir, {
+        session_id: fixture.sessionId,
+        transcript_path: transcriptPath,
+        cwd: fixture.cwd,
+      })
+      if (result.status !== 0) failures.push(`${step.name}: harvester exited with ${result.status}; ${result.stderr}`)
+      finalSnapshot = markdownSnapshot(vaultPath)
+    }
+
+    const finalContent = combinedMarkdown(finalSnapshot)
+    const digest = extractSessionDigest(finalContent)
+    if (!digest) failures.push('Session Digest section not found')
+
+    const matchedExpected = fixture.expectedDigestPatterns.filter(pattern => matchesPattern(digest, pattern))
+    const missingExpected = fixture.expectedDigestPatterns.filter(pattern => !matchedExpected.includes(pattern))
+    const forbiddenDigest = (fixture.forbiddenDigestPatterns ?? []).filter(pattern => matchesPattern(digest, pattern))
+    const forbiddenGlobal = (fixture.forbiddenGlobalPatterns ?? []).filter(pattern => matchesPattern(finalContent, pattern))
+    for (const pattern of missingExpected) failures.push(`missing expected digest pattern: ${pattern}`)
+    for (const pattern of forbiddenDigest) failures.push(`forbidden digest pattern matched: ${pattern}`)
+    for (const pattern of forbiddenGlobal) failures.push(`forbidden generated content matched: ${pattern}`)
+
+    const digestRecall = fixture.expectedDigestPatterns.length === 0 ? 1 : matchedExpected.length / fixture.expectedDigestPatterns.length
+    metrics.push(metric('digest_present', 'Digest Present', digest ? 1 : 0, 1, 'Generated capture must contain a Session Digest section'))
+    metrics.push(metric('digest_required_fact_recall', 'Digest Required Fact Recall', clamp01(digestRecall), fixture.minDigestRecall ?? 0.85, `${matchedExpected.length}/${fixture.expectedDigestPatterns.length} expected digest facts found`))
+    metrics.push(metric('digest_noise_count', 'Digest Noise Count', forbiddenDigest.length, 0, 'Digest must not contain forbidden narration or raw command noise', false))
+    metrics.push(metric('digest_secret_leak_count', 'Digest Secret Leak Count', forbiddenGlobal.length, 0, 'Generated capture must not leak fixture secrets', false))
+    for (const item of metrics.filter(item => item.status === 'fail')) failures.push(`${item.label} below threshold: ${item.value}`)
+  } finally {
+    if (!keepTemp) rmSync(tempPath, { recursive: true, force: true })
+  }
+
+  return {
+    id: fixture.id,
+    type: fixture.type,
+    status: statusFromFailures(failures),
+    score: average(metrics.map(item => item.status === 'pass' ? 100 : item.value * 100)),
+    metrics,
+    failures,
+    tempPath: keepTemp ? tempPath : undefined,
+  }
+}
+
 function evaluatePolicySafety(): BrainQualityFixtureResult {
   const policy = loadBrainPolicy()
   const requiredNeverAutoApply = [
@@ -862,6 +938,7 @@ export async function runBrainQualityHarness(options: BrainQualityOptions = {}):
     else if (fixture.type === 'review') results.push(await evaluateReviewFixture(fixture, keepTemp))
     else if (fixture.type === 'background') results.push(await evaluateBackgroundFixture(fixture, keepTemp))
     else if (fixture.type === 'claim_extraction') results.push(await evaluateClaimExtractionFixture(fixture, keepTemp))
+    else if (fixture.type === 'session_digest') results.push(evaluateSessionDigestFixture(fixture, keepTemp))
   }
 
   const hardGateFailures = results.flatMap(result =>
