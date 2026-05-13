@@ -1,0 +1,26 @@
+{
+  "id": "adbk-claim-noise",
+  "type": "claim_extraction",
+  "sourcePath": "Kunden/Düsseldorf/ADBK Satellite Capture.md",
+  "expectedClaimPatterns": [
+    "Realm ist ADBK\\.LOCAL",
+    "KDC ist die Linuxmuster-Adresse 10\\.20\\.16\\.2",
+    "proxy\\.adbk\\.local ist auf 10\\.20\\.16\\.5",
+    "Docker service ist aktiv"
+  ],
+  "forbiddenClaimPatterns": [
+    "ich arbeite heute",
+    "Compose-Syntax",
+    "Eine Sache stimmt nicht",
+    "Pull durch",
+    "Vorbereitung komplett",
+    "Heute Abend",
+    "sag Bescheid"
+  ],
+  "notes": [
+    {
+      "path": "Kunden/Düsseldorf/ADBK Satellite Capture.md",
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - kunde/düsseldorf\nquelle: knowledge-harvester\nkunde: Düsseldorf\nsource_stage: stop_capture\n---\n\n# ADBK Satellite Capture\n\nich arbeite heute in einer linuxmuster umgebung in der edulution installiert ist.\n\nCompose-Syntax + Env sind sauber resolved.\n\nEine Sache stimmt nicht: Docker ist auf der VM NICHT installiert.\n\nPull durch — alle 4 Images sind lokal.\n\nDamit ist die Vorbereitung komplett. Heute Abend nach dem edulution-ui-Update geht es weiter.\n\nDer Realm ist ADBK.LOCAL.\n\nDer KDC ist die Linuxmuster-Adresse 10.20.16.2.\n\nproxy.adbk.local ist auf 10.20.16.5 gesetzt.\n\nDocker service ist aktiv und Compose ist installiert.\n"
+    }
+  ]
+}

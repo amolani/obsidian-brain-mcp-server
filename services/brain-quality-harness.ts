@@ -14,6 +14,7 @@ export type BrainQualityFixtureType =
   | 'promotion'
   | 'review'
   | 'background'
+  | 'claim_extraction'
 
 export interface BrainQualityOptions {
   fixturesDir?: string
@@ -155,6 +156,19 @@ interface BackgroundFixture {
   requireActionLog?: boolean
 }
 
+interface ClaimExtractionFixture {
+  id: string
+  type: 'claim_extraction'
+  notes: RetrievalNote[]
+  sourcePath: string
+  maxClaims?: number
+  expectedClaimPatterns: string[]
+  forbiddenClaimPatterns: string[]
+  minClaimPrecision?: number
+  minClaimRecall?: number
+  minClaimF0_5?: number
+}
+
 type BrainQualityFixture =
   | HarvesterFixture
   | RetrievalFixture
@@ -162,6 +176,7 @@ type BrainQualityFixture =
   | PromotionFixture
   | ReviewFixture
   | BackgroundFixture
+  | ClaimExtractionFixture
 
 const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const DEFAULT_FIXTURES_DIR = join(PROJECT_ROOT, 'tests', 'fixtures', 'brain-quality')
@@ -721,6 +736,55 @@ async function evaluateBackgroundFixture(fixture: BackgroundFixture, keepTemp: b
   }
 }
 
+async function evaluateClaimExtractionFixture(fixture: ClaimExtractionFixture, keepTemp: boolean): Promise<BrainQualityFixtureResult> {
+  const tempPath = mkdirTemp(`brain-quality-${fixture.id}-`)
+  const vaultPath = join(tempPath, 'vault')
+  mkdirSync(vaultPath, { recursive: true })
+  writeFixtureNotes(vaultPath, fixture.notes)
+
+  const failures: string[] = []
+  const metrics: BrainQualityMetric[] = []
+  const vault = new Vault(vaultPath)
+
+  try {
+    return await evaluateWithVault(vault, async () => {
+      const result = vault.extractClaims({
+        path: fixture.sourcePath,
+        maxClaims: fixture.maxClaims ?? 20,
+        dryRun: true,
+      })
+      const claims = result.claims.map(claim => claim.claim)
+      const matchedExpected = fixture.expectedClaimPatterns.filter(pattern => claims.some(claim => matchesPattern(claim, pattern)))
+      const forbiddenMatches = fixture.forbiddenClaimPatterns.filter(pattern => claims.some(claim => matchesPattern(claim, pattern)))
+      const validClaimCount = claims.filter(claim => fixture.expectedClaimPatterns.some(pattern => matchesPattern(claim, pattern))).length
+      const claimPrecision = claims.length === 0 ? fixture.expectedClaimPatterns.length === 0 ? 1 : 0 : validClaimCount / claims.length
+      const claimRecall = fixture.expectedClaimPatterns.length === 0 ? 1 : matchedExpected.length / fixture.expectedClaimPatterns.length
+      const claimF0_5 = fBeta(claimPrecision, claimRecall, 0.5)
+      const noiseRejection = forbiddenMatches.length === 0 ? 1 : 0
+
+      for (const pattern of fixture.expectedClaimPatterns.filter(pattern => !matchedExpected.includes(pattern))) failures.push(`missing expected claim pattern: ${pattern}`)
+      for (const pattern of forbiddenMatches) failures.push(`forbidden claim pattern matched: ${pattern}`)
+      metrics.push(metric('claim_precision', 'Claim Precision', clamp01(claimPrecision), fixture.minClaimPrecision ?? 0.90, `${validClaimCount}/${claims.length} extracted claims match expected durable facts`))
+      metrics.push(metric('claim_recall', 'Claim Recall', clamp01(claimRecall), fixture.minClaimRecall ?? 0.85, `${matchedExpected.length}/${fixture.expectedClaimPatterns.length} expected durable facts extracted`))
+      metrics.push(metric('claim_f0_5', 'Claim F0.5', clamp01(claimF0_5), fixture.minClaimF0_5 ?? 0.85, 'Precision-weighted claim extraction score'))
+      metrics.push(metric('claim_noise_rejection', 'Claim Noise Rejection', noiseRejection, 1, `${forbiddenMatches.length} forbidden/noisy claim matches`))
+      for (const item of metrics.filter(item => item.status === 'fail')) failures.push(`${item.label} below threshold: ${item.value}`)
+      return {
+        id: fixture.id,
+        type: fixture.type,
+        status: statusFromFailures(failures),
+        score: average(metrics.map(item => item.status === 'pass' ? 100 : item.value * 100)),
+        metrics,
+        failures,
+        tempPath: keepTemp ? tempPath : undefined,
+      }
+    })
+  } finally {
+    vault.shutdown()
+    if (!keepTemp) rmSync(tempPath, { recursive: true, force: true })
+  }
+}
+
 function evaluatePolicySafety(): BrainQualityFixtureResult {
   const policy = loadBrainPolicy()
   const requiredNeverAutoApply = [
@@ -791,6 +855,7 @@ export async function runBrainQualityHarness(options: BrainQualityOptions = {}):
     else if (fixture.type === 'promotion') results.push(await evaluatePromotionFixture(fixture, keepTemp))
     else if (fixture.type === 'review') results.push(await evaluateReviewFixture(fixture, keepTemp))
     else if (fixture.type === 'background') results.push(await evaluateBackgroundFixture(fixture, keepTemp))
+    else if (fixture.type === 'claim_extraction') results.push(await evaluateClaimExtractionFixture(fixture, keepTemp))
   }
 
   const hardGateFailures = results.flatMap(result =>
