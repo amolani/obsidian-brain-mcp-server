@@ -184,7 +184,7 @@ function generateTitle(entries: TranscriptEntry[], cwd: string, tags: string[]):
   const userTopics: string[] = []
   for (const entry of entries) {
     if (entry.role === 'user' && entry.type === 'text') {
-      const text = entry.content.trim()
+      const text = cleanCaptureText(entry.content)
       if (text.length > 20 && text.length < 300 && !/^(ja|nein|ok|gerne|weiter|danke|mach|klar)/i.test(text)) {
         userTopics.push(text)
       }
@@ -242,6 +242,33 @@ interface ExtractedKnowledge {
   intent: ClassifiedIntent
 }
 
+function cleanCaptureText(text: string): string {
+  return text
+    .replace(/<task-notification[\s\S]*?(?:<\/task-notification>|$)/gi, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function isNoisyCaptureText(text: string): boolean {
+  const trimmed = cleanCaptureText(text).replace(/^[-*#\s>\d.]+/, '').trim()
+  if (!trimmed) return true
+  return /^<(command|system|local-command|user-prompt|task-notification)\b/i.test(trimmed)
+    || /^(ok|okay|okey|alles klar|verstanden|nicht ganz|hier|sag|sobald|wenn|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe)\b/i.test(trimmed)
+    || /^(eine sache stimmt nicht|spurensuche-ergebnis|compose-syntax|pull durch|files stehen|damit ist die vorbereitung komplett|heute abend)\b/i.test(trimmed)
+    || /\b(sag bescheid|ich warte|ich melde mich|willst du|kannst du|soll ich|zum selber-ausführen|zum selber-ausfuehren)\b/i.test(trimmed)
+}
+
+function isReadOnlyOrInspectionCommand(cmd: string): boolean {
+  const trimmed = cmd.trim()
+  return /^(echo |cat |ls |head |tail |grep |find |less |wc |hostname|pwd|id |whoami|dig |nslookup|ip\s+(a|addr|route|link)\b|docker\s+(ps|images|info|version)\b|docker\s+compose\s+(config|version|ps)\b)/i.test(trimmed)
+    || trimmed.length < 100 && /\b(status|show|list|get |config .*output|info|ping |nslookup|dig )/i.test(trimmed)
+}
+
+function isSensitiveOrVerboseCommand(cmd: string): boolean {
+  return /<<|cat\s*>\s*\.?env\b|NETWORKBOX_|JWT_SECRET|DB_PASSWORD|MONGO_URI|auth-user-pass|password|passwd|secret|token/i.test(cmd)
+}
+
 // Extract "phases" = work-blocks between user messages
 function extractPhases(entries: TranscriptEntry[]): Phase[] {
   const phases: Phase[] = []
@@ -275,8 +302,8 @@ function extractPhases(entries: TranscriptEntry[]): Phase[] {
     if (entry.role === 'user' && entry.type === 'text') {
       flushPhase()
       // Start new phase
-      const text = entry.content.trim()
-      if (text.length >= 10 && !/^<(command|system|local-command|user-prompt)/i.test(text)) {
+      const text = cleanCaptureText(entry.content)
+      if (text.length >= 10 && !isNoisyCaptureText(text)) {
         currentUserRequest = text.slice(0, 200).replace(/\n+/g, ' ').trim()
         inPhase = true
       } else {
@@ -284,7 +311,8 @@ function extractPhases(entries: TranscriptEntry[]): Phase[] {
       }
     } else if (inPhase) {
       if (entry.role === 'assistant' && entry.type === 'text' && entry.content.length > 30) {
-        currentAssistantTexts.push(entry.content)
+        const text = cleanCaptureText(entry.content)
+        if (text.length > 30 && !isNoisyCaptureText(text)) currentAssistantTexts.push(text)
       } else if (entry.type === 'tool_use' && entry.toolName === 'Bash') {
         currentCmdCount++
       } else if (entry.type === 'tool_result' && entry.isError) {
@@ -334,10 +362,10 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
 
     // Collect successful Bash commands (not reads/checks)
     if (entry.type === 'tool_result' && !entry.isError && lastBashCmd) {
-      const isRead = /^(echo |cat |ls |head |tail |grep |find |less |wc |hostname|pwd|id |whoami)/.test(lastBashCmd)
-      const isCheck = lastBashCmd.length < 80 && /(status|show|list|get |config .*output|info|ping |nslookup|dig )/.test(lastBashCmd)
-      if (lastBashCmd.length > 20 && !isRead && !isCheck) {
-        const cmd = stripSsh(lastBashCmd)
+      const cmd = stripSsh(lastBashCmd)
+      const isRead = isReadOnlyOrInspectionCommand(cmd)
+      const sensitiveOrVerbose = isSensitiveOrVerboseCommand(cmd)
+      if (cmd.length >= 15 && !isRead && !sensitiveOrVerbose) {
         if (cmd.length > 15) procedures.push(cmd.slice(0, 250))
       }
       lastBashCmd = ''
@@ -345,9 +373,10 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
 
     // Collect assistant summaries (the "Erledigt:", bullet-point messages)
     if (entry.role === 'assistant' && entry.type === 'text' && entry.content.length > 80) {
-      const text = entry.content
+      const text = cleanCaptureText(entry.content)
+      if (isNoisyCaptureText(text)) continue
       // Prioritize structured summaries
-      if (/erledigt|zusammenfassung|durchgelaufen|konfiguriert|installiert|eingerichtet|abgeschlossen/i.test(text)) {
+      if (/erledigt|zusammenfassung|befund|ergebnis|empfehlung|durchgelaufen|konfiguriert|installiert|eingerichtet|abgeschlossen/i.test(text)) {
         summaries.push(text.slice(0, 800))
       }
     }
@@ -361,10 +390,14 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
   const clientMatch = detectClient(cwd, resolverText)
   const client = clientMatch.client
 
-  // Need minimum substance
-  if (procedures.length < 2) return null
+  // Need minimum substance. Read-only investigation sessions can be valuable
+  // when the assistant produced a concrete finding summary, even if no commands
+  // should be promoted as reusable procedure steps.
+  const bashCommandCount = entries.filter(entry => entry.type === 'tool_use' && entry.toolName === 'Bash').length
+  const hasSubstantiveSummary = summaries.some(summary => summary.length >= 120)
+  if (procedures.length < 2 && !hasSubstantiveSummary) return null
   const totalSignals = procedures.length + errorFixes.length + summaries.length
-  if (totalSignals < 3) return null
+  if (totalSignals < 3 && !(hasSubstantiveSummary && bashCommandCount >= 3)) return null
 
   const title = generateTitle(entries, cwd, tags)
   const phases = extractPhases(entries)

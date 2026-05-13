@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
-import { isGeneratedCustomerSurface } from './note-scope.ts'
+import { isActiveNote, isGeneratedCustomerSurface } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
@@ -53,7 +53,8 @@ function firstLine(entry: NoteEntry): string {
 function clientNotes(vault: Vault, client: string): Array<{ path: string; entry: NoteEntry }> {
   const lower = client.toLowerCase()
   return [...vault.notes.entries()].filter(([path, entry]) =>
-    !isGeneratedCustomerSurface(entry)
+    isActiveNote(entry)
+      && !isGeneratedCustomerSurface(entry)
       && (path.toLowerCase().startsWith(`kunden/${lower}/`)
         || String(entry.frontmatter.kunde ?? '').toLowerCase() === lower
         || entry.tags.includes(client.toLowerCase()))

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { safeGeneratedSnippet, isSensitiveGeneratedSource } from './generated-surface-redaction.ts'
-import { isGeneratedCustomerSurface } from './note-scope.ts'
+import { isActiveNote, isGeneratedCustomerSurface } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
@@ -31,7 +31,8 @@ function today(): string {
 function notesForClient(vault: Vault, client: string): NoteEntry[] {
   const lower = client.toLowerCase()
   return [...vault.notes.values()].filter(note =>
-    !isGeneratedCustomerSurface(note)
+    isActiveNote(note)
+      && !isGeneratedCustomerSurface(note)
       && (note.relativePath.toLowerCase().startsWith(`kunden/${lower}/`)
         || String(note.frontmatter.kunde ?? '').toLowerCase() === lower
         || note.tags.includes(lower)
@@ -67,7 +68,9 @@ function isSnapshotNoiseLine(line: string): boolean {
   const trimmed = line.replace(/^[-*#\s>\d.]+/, '').trim()
   return /^(ich|du|wir)\b/i.test(trimmed)
     || /^(ok|okay|okey|alles klar|verstanden|nicht ganz|hier|sag|sobald|wenn|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe)\b/i.test(trimmed)
+    || /^(bereinigungsnotiz|diese seite wurde nachträglich kuratiert|diese seite wurde nachtraeglich kuratiert)\b/i.test(trimmed)
     || /\b(sag bescheid|ich warte|ich melde mich|willst du|kannst du|soll ich)\b/i.test(trimmed)
+    || /\b(rohfassung wurde archiviert|rohprotokoll enthielt)\b/i.test(trimmed)
     || /^\(?\d+\s+Befehle,?\s+mit Fehler-Workaround\)?\*?$/i.test(trimmed)
 }
 

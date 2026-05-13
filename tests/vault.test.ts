@@ -808,7 +808,7 @@ describe('Vault: customer dashboard', () => {
       path: 'Kunden/TestClient/TestClient — linuxmuster Setup.md',
       frontmatter: { status: 'aktiv', tags: ['auto-capture', 'linuxmuster'], datum: '2026-04-20', quelle: 'knowledge-harvester' },
       title: 'TestClient — linuxmuster Setup',
-      body: '## Fehler und Workarounds\n\nProblem wurde mit Workaround gelöst.',
+      body: '## Fehler und Workarounds\n\nProblem wurde mit Workaround gelöst.\n\nDiese Seite wurde nachträglich kuratiert, weil die erste Auto-Capture-Fassung zu viel Rohprotokoll enthielt: Tool-Notifications, Statusmeldungen, Zwischenfehler und lange Befehlslisten.',
     })
     vault = new Vault(vaultPath)
     await vault.init()
@@ -827,7 +827,26 @@ describe('Vault: customer dashboard', () => {
     assert.equal(result.runbookCount, 1)
     assert.equal(result.captureCount, 1)
     assert.ok(result.content.includes('# TestClient Dashboard'))
+    assert.doesNotMatch(result.content, /Rohprotokoll/)
     assert.ok(!existsSync(join(vaultPath, result.path)))
+  })
+
+  test('dashboard ignores archived notes', async () => {
+    writeNote(vaultPath, {
+      path: 'Archiv/Auto-Build/2026-05-13/TestClient Raw.md',
+      frontmatter: { status: 'aktiv', tags: ['auto-capture', 'kunde/testclient'], kunde: 'TestClient' },
+      title: 'Archived TestClient Raw',
+      body: 'Pull durch — alle 4 Images sind lokal.\n\n<task-notification><tool-use-id>toolu_bad</tool-use-id></task-notification>',
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    await vault.init()
+
+    const result = vault.buildCustomerDashboard('TestClient', { dryRun: true })
+    assert.equal(result.noteCount, 3)
+    assert.doesNotMatch(result.content, /Archived TestClient Raw/)
+    assert.doesNotMatch(result.content, /Pull durch/)
+    assert.doesNotMatch(result.content, /toolu_bad/)
   })
 
   test('rejects unsafe customer names', () => {

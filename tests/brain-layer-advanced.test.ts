@@ -142,6 +142,42 @@ describe('advanced brain layer', () => {
     assert.doesNotMatch(timeline.content, /_timeline/)
   })
 
+  test('customer generated surfaces ignore archived notes', async () => {
+    writeNote(vaultPath, {
+      path: 'Archiv/Auto-Build/2026-05-13/ADBK Cleanup/Raw Capture/ADBK Capture.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['auto-capture', 'kunde/adbk'],
+        kunde: 'ADBK',
+      },
+      title: 'ADBK Capture',
+      body: 'Pull durch — alle 4 Images sind lokal.\n\n<task-notification><tool-use-id>toolu_bad</tool-use-id></task-notification>',
+    })
+    writeNote(vaultPath, {
+      path: 'Kunden/ADBK/ADBK Vorbereitung.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['auto-capture', 'kunde/adbk'],
+        kunde: 'ADBK',
+      },
+      title: 'ADBK Vorbereitung',
+      body: 'ADBK Satellite ist vorbereitet. Realm ist ADBK.LOCAL.',
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    await vault.init()
+
+    const snapshot = vault.buildCustomerSnapshot({ client: 'ADBK', dryRun: true })
+    const timeline = vault.buildMemoryTimeline({ client: 'ADBK', dryRun: true })
+
+    assert.match(snapshot.content, /Kunden\/ADBK\/ADBK Vorbereitung/)
+    assert.match(timeline.content, /ADBK Vorbereitung/)
+    assert.doesNotMatch(snapshot.content, /Pull durch/)
+    assert.doesNotMatch(snapshot.content, /toolu_bad/)
+    assert.doesNotMatch(snapshot.content, /Archiv\/Auto-Build/)
+    assert.doesNotMatch(timeline.content, /Archiv\/Auto-Build/)
+  })
+
   test('customer snapshot filters conversational session noise', () => {
     writeNote(vaultPath, {
       path: 'Kunden/Schule/Session Capture.md',
@@ -154,6 +190,7 @@ describe('advanced brain layer', () => {
       body: [
         '1. ich arbeite heute in einer linuxmuster Umgebung.',
         'OK — ich warte auf docker --version.',
+        'Diese Seite wurde nachträglich kuratiert, weil die erste Auto-Capture-Fassung zu viel Rohprotokoll enthielt: Tool-Notifications, Statusmeldungen, Zwischenfehler und lange Befehlslisten.',
         'Docker service ist aktiv und Compose ist installiert.',
       ].join('\n\n'),
     })
@@ -164,6 +201,7 @@ describe('advanced brain layer', () => {
 
       assert.doesNotMatch(snapshot.content, /ich arbeite heute/)
       assert.doesNotMatch(snapshot.content, /ich warte/)
+      assert.doesNotMatch(snapshot.content, /Rohprotokoll/)
       assert.match(snapshot.content, /Docker service ist aktiv/)
     })
   })

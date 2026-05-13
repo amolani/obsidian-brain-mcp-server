@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
-import { isGeneratedCustomerSurfacePath } from './note-scope.ts'
+import { isActiveNote, isGeneratedCustomerSurfacePath } from './note-scope.ts'
 import { assertSafeRelativePath, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface CustomerDashboardOptions {
@@ -40,7 +40,7 @@ function customerPrefix(client: string): string {
 function collectCustomerNotes(vault: Vault, client: string): CustomerNote[] {
   const prefix = customerPrefix(client).toLowerCase()
   return [...vault.notes.entries()]
-    .filter(([path]) => path.toLowerCase().startsWith(prefix))
+    .filter(([path, entry]) => isActiveNote(entry) && path.toLowerCase().startsWith(prefix))
     .filter(([path]) => !isGeneratedCustomerSurfacePath(path))
     .map(([path, entry]) => ({ path, entry }))
     .sort((a, b) => a.path.localeCompare(b.path))
@@ -77,6 +77,12 @@ function openTodos(notes: CustomerNote[]): Array<{ note: CustomerNote; text: str
   return items
 }
 
+function isDashboardNoiseLine(line: string): boolean {
+  const trimmed = line.replace(/^[-*\s#]+/, '').trim()
+  return /^(bereinigungsnotiz|diese seite wurde nachträglich kuratiert|diese seite wurde nachtraeglich kuratiert)\b/i.test(trimmed)
+    || /\b(rohfassung wurde archiviert|rohprotokoll enthielt)\b/i.test(trimmed)
+}
+
 function knownIssues(notes: CustomerNote[]): Array<{ note: CustomerNote; text: string }> {
   const issues: Array<{ note: CustomerNote; text: string }> = []
   const patterns = [
@@ -85,13 +91,15 @@ function knownIssues(notes: CustomerNote[]): Array<{ note: CustomerNote; text: s
   ]
   for (const note of notes) {
     if (!patterns.some(pattern => pattern.test(note.entry.content))) continue
-    const lines = note.entry.content
+    const matchingLines = note.entry.content
       .split('\n')
       .filter(line => /fehler|problem|workaround|risiko|blocked|blocker/i.test(line))
+    const lines = matchingLines
       .map(line => line.replace(/^[-*\s#]+/, '').trim())
+      .filter(line => !isDashboardNoiseLine(line))
       .filter(line => line.length > 8)
       .slice(0, 2)
-    if (lines.length === 0) {
+    if (lines.length === 0 && matchingLines.length === 0) {
       issues.push({ note, text: note.entry.title })
     } else {
       for (const line of lines) issues.push({ note, text: line })

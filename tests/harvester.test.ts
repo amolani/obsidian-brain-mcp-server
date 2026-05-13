@@ -264,3 +264,59 @@ describe('Harvester: incremental session updates', () => {
     assert.match(log, /transcript hash unchanged/)
   })
 })
+
+describe('Harvester: capture hygiene', () => {
+  let vaultPath: string
+  let stateDir: string
+  let transcript: string
+
+  before(() => {
+    vaultPath = createTempVault()
+    stateDir = mkdtempSync(join(tmpdir(), 'harvester-hygiene-'))
+    transcript = join(stateDir, 'adbk-hygiene.jsonl')
+    const entries = [
+      { type: 'user', message: { content: 'Ich bereite bei ADBK den edulution Satellite vor und installiere Docker.' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Ich pruefe zuerst Realm, Proxy und Satellite-VM.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.20.16.2 "samba-tool domain info 127.0.0.1 | head -20"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'Realm: ADBK.LOCAL' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.20.16.4 "apt install -y docker-ce docker-ce-cli containerd.io"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'installed' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.20.16.4 "systemctl enable --now docker"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'active' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.20.16.4 "cat > .env << EOF\\nNETWORKBOX_JWT_SECRET=$(openssl rand -hex 40)\\nEOF"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'env written' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ssh root@10.20.16.4 "docker compose pull"' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'pulled' }] } },
+      { type: 'user', message: { content: '<task-notification><task-id>abc</task-id><tool-use-id>toolu_test</tool-use-id></task-notification>' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Pull durch — alle 4 Images sind lokal.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: ADBK Satellite ist vorbereitet. Realm ist ADBK.LOCAL, Docker ist aktiv, Compose-Images sind lokal, und proxy.adbk.local zeigt auf 10.20.16.5.' }] } },
+    ]
+    writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+  })
+
+  after(() => {
+    cleanupVault(vaultPath)
+    cleanupVault(stateDir)
+  })
+
+  test('filters internal task notifications and verbose secret commands', () => {
+    const result = runHarvester(vaultPath, stateDir, {
+      session_id: 'test-adbk-hygiene',
+      transcript_path: transcript,
+      cwd: '/home/amo/Documents/code/amo/adbk',
+    })
+    assert.equal(result.status, 0, result.stderr)
+
+    const dir = join(vaultPath, 'Kunden', 'ADBK')
+    const noteFile = readdirSync(dir).find(file => file.endsWith('.md'))
+    assert.ok(noteFile)
+    const note = readFileSync(join(dir, noteFile), 'utf-8')
+    assert.match(note, /kunde: ADBK/)
+    assert.match(note, /Realm ist ADBK\.LOCAL/)
+    assert.doesNotMatch(note, /task-notification/)
+    assert.doesNotMatch(note, /toolu_test/)
+    assert.doesNotMatch(note, /NETWORKBOX_JWT_SECRET/)
+    assert.doesNotMatch(note, /Pull durch/)
+    assert.doesNotMatch(note, /samba-tool domain info/)
+  })
+})
