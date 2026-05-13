@@ -5,6 +5,7 @@ import { findDuplicates } from './duplicate-analyzer.ts'
 import { evidenceReport } from './evidence.ts'
 import { lintFrontmatter } from './frontmatter-linter.ts'
 import { listLowQualityNotes } from './note-quality.ts'
+import { isActivePath } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -124,6 +125,7 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
 
   const duplicates = findDuplicates(vault, 60)
   for (const duplicate of duplicates.slice(0, 20)) {
+    if (!isActivePath(duplicate.noteA) || !isActivePath(duplicate.noteB)) continue
     if (duplicate.confidence === 'low' && !includeLow) continue
     items.push({
       id: itemId('duplicate', duplicate.noteA, duplicate.noteB),
@@ -147,7 +149,7 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
   const fixableFrontmatter = lintIssues.filter(issue => issue.autoFixable)
   addSafeMaintenanceItem(items, 'frontmatter', fixableFrontmatter.length, lintIssues.length - fixableFrontmatter.length, 'Frontmatter normalisieren', 'Auto-fixbare Frontmatter-Issues gefunden')
 
-  const linkSuggestions = vault.suggestLinksV2({ minConfidence: 0.9, maxTotal: 100 })
+  const linkSuggestions = vault.suggestLinksV2({ minConfidence: 0.9, maxTotal: 100 }).filter(suggestion => isActivePath(suggestion.source))
   const sourcesWithLinks = [...new Set(linkSuggestions.map(suggestion => suggestion.source))]
   for (const source of sourcesWithLinks.slice(0, 12)) {
     const count = linkSuggestions.filter(suggestion => suggestion.source === source).length
@@ -164,7 +166,7 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
   }
 
   const lifecycle = vault.suggestLifecycleUpdates({ maxResults: 100 })
-  for (const suggestion of lifecycle.filter(s => s.confidence === 'high' && s.blockedBy.length === 0).slice(0, 15)) {
+  for (const suggestion of lifecycle.filter(s => isActivePath(s.path) && s.confidence === 'high' && s.blockedBy.length === 0).slice(0, 15)) {
     items.push({
       id: itemId('lifecycle', suggestion.path, suggestion.recommendedStatus),
       severity: suggestion.action === 'archive' ? 'medium' : 'low',
@@ -182,7 +184,7 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
   }
 
   const lowQuality = listLowQualityNotes(vault, 49)
-  for (const score of lowQuality.slice(0, includeLow ? 20 : 8)) {
+  for (const score of lowQuality.filter(score => isActivePath(score.path)).slice(0, includeLow ? 20 : 8)) {
     items.push({
       id: itemId('quality', score.path),
       severity: score.score < 30 ? 'high' : 'medium',

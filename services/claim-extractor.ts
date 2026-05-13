@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
+import { isActiveNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
@@ -104,6 +105,7 @@ function normalizeClaim(value: string): string {
 function existingClaimKeys(vault: Vault): Set<string> {
   const keys = new Set<string>()
   for (const note of vault.notes.values()) {
+    if (!isActiveNote(note)) continue
     if (!note.relativePath.startsWith('Knowledge/Claims/') && !note.tags.includes('claim')) continue
     const body = note.content
       .split('\n')
@@ -120,6 +122,7 @@ function contradictionCandidates(vault: Vault, claim: string): string[] {
   const negated = hasNegation(claim)
   const candidates: string[] = []
   for (const note of vault.notes.values()) {
+    if (!isActiveNote(note)) continue
     if (!note.relativePath.startsWith('Knowledge/Claims/') && !note.tags.includes('claim')) continue
     const overlap = importantTerms(note.content).filter(term => terms.has(term)).length
     if (overlap >= 2 && hasNegation(note.content) !== negated) candidates.push(note.relativePath)

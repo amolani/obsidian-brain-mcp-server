@@ -4,6 +4,7 @@ import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
+import { isActiveNote } from './note-scope.ts'
 import { stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
@@ -155,6 +156,7 @@ function parseItemId(itemId: string): { kind: KnowledgeInboxActionKind; target: 
 export function buildKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
   const items: KnowledgeInboxItem[] = []
   for (const note of [...vault.notes.values()].sort((a, b) => b.lastModified - a.lastModified)) {
+    if (!isActiveNote(note)) continue
     if (note.tags.includes('claim') && note.frontmatter.claim_status === 'provisional') {
       items.push(makeItem('confirm_claim', note, `Claim bestätigen: ${note.title}`, 'Setzt claim_status auf confirmed.'))
       items.push(makeItem('reject_claim', note, `Claim ablehnen: ${note.title}`, 'Setzt claim_status auf rejected.'))

@@ -1,5 +1,6 @@
 import { dirname } from 'node:path'
 import type { Vault } from '../vault.ts'
+import { isActivePath } from './note-scope.ts'
 import { tokenize, tokenizeContent, jaccard } from './text-utils.ts'
 
 export interface DuplicateMatch {
@@ -14,7 +15,7 @@ export interface DuplicateMatch {
 }
 
 export function findDuplicates(vault: Vault, minScore: number = 40): DuplicateMatch[] {
-  const notes = [...vault.notes.entries()]
+  const notes = [...vault.notes.entries()].filter(([rel]) => isActivePath(rel))
   const candidates: DuplicateMatch[] = []
 
   // Pre-compute tokens for each note (cache)

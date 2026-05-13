@@ -129,4 +129,42 @@ describe('advanced brain layer', () => {
     assert.ok(schedule.items.some(item => item.id.includes('Kunden/Schule/Projekt.md')))
     assert.ok(schedule.items.every(item => item.suggestedTool))
   })
+
+  test('customer generated surfaces do not ingest previous generated surfaces', () => {
+    vault.buildMemoryTimeline({ client: 'Schule', dryRun: false })
+    vault.buildCustomerSnapshot({ client: 'Schule', dryRun: false })
+    const snapshot = vault.buildCustomerSnapshot({ client: 'Schule', dryRun: false })
+    const timeline = vault.buildMemoryTimeline({ client: 'Schule', dryRun: false })
+
+    assert.doesNotMatch(snapshot.content, /Kunden\/Schule\/_snapshot/)
+    assert.doesNotMatch(snapshot.content, /Kunden\/Schule\/_timeline/)
+    assert.doesNotMatch(timeline.content, /_snapshot/)
+    assert.doesNotMatch(timeline.content, /_timeline/)
+  })
+
+  test('customer snapshot filters conversational session noise', () => {
+    writeNote(vaultPath, {
+      path: 'Kunden/Schule/Session Capture.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['auto-capture', 'kunde/schule'],
+        kunde: 'Schule',
+      },
+      title: 'Session Capture',
+      body: [
+        '1. ich arbeite heute in einer linuxmuster Umgebung.',
+        'OK — ich warte auf docker --version.',
+        'Docker service ist aktiv und Compose ist installiert.',
+      ].join('\n\n'),
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    return vault.init().then(() => {
+      const snapshot = vault.buildCustomerSnapshot({ client: 'Schule', dryRun: true })
+
+      assert.doesNotMatch(snapshot.content, /ich arbeite heute/)
+      assert.doesNotMatch(snapshot.content, /ich warte/)
+      assert.match(snapshot.content, /Docker service ist aktiv/)
+    })
+  })
 })

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { isGeneratedCustomerSurfacePath } from './note-scope.ts'
 import { assertSafeRelativePath, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface CustomerDashboardOptions {
@@ -40,7 +41,7 @@ function collectCustomerNotes(vault: Vault, client: string): CustomerNote[] {
   const prefix = customerPrefix(client).toLowerCase()
   return [...vault.notes.entries()]
     .filter(([path]) => path.toLowerCase().startsWith(prefix))
-    .filter(([path]) => !path.endsWith('/_dashboard.md'))
+    .filter(([path]) => !isGeneratedCustomerSurfacePath(path))
     .map(([path, entry]) => ({ path, entry }))
     .sort((a, b) => a.path.localeCompare(b.path))
 }

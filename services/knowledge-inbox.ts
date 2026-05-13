@@ -4,6 +4,7 @@ import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { classifyIntent, isMutatingCommand, performedCommands } from './intent-classifier.ts'
 import { buildKnowledgeInboxItems, knowledgeInboxItemId, readKnowledgeInboxState } from './knowledge-inbox-actions.ts'
+import { isActiveNote, isActivePath } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -27,7 +28,7 @@ export interface KnowledgeInboxResult {
 const KNOWLEDGE_INBOX_PATH = 'Maintenance/Knowledge Inbox.md'
 
 function isCapture(note: NoteEntry): boolean {
-  return note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester'
+  return isActiveNote(note) && (note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester')
 }
 
 function link(note: NoteEntry): string {
@@ -41,9 +42,10 @@ function lines(values: string[]): string {
 function readManifest(vault: Vault): Array<{ sourcePath: string; action: string; title: string; reason: string }> {
   try {
     const text = readFileSync(vaultJoin(vault.vaultPath, '.brain-auto-build-manifest.json'), 'utf-8')
-    const parsed = JSON.parse(text) as { sources?: Record<string, { plan?: Array<{ action?: string; title?: string; quality?: string; reason?: string }> }> }
+    const parsed = JSON.parse(text) as { sources?: Record<string, { archivedAt?: string; plan?: Array<{ action?: string; title?: string; quality?: string; reason?: string }> }> }
     const rows: Array<{ sourcePath: string; action: string; title: string; reason: string }> = []
     for (const [sourcePath, entry] of Object.entries(parsed.sources ?? {})) {
+      if (entry.archivedAt || !isActivePath(sourcePath) || !vault.notes.has(sourcePath)) continue
       for (const item of entry.plan ?? []) {
         if (item.quality !== 'skip') continue
         rows.push({
@@ -84,12 +86,14 @@ export function buildKnowledgeInbox(vault: Vault, options: BuildKnowledgeInboxOp
   const dryRun = options.dryRun ?? true
   const captures = [...vault.notes.values()].filter(isCapture).sort((a, b) => b.lastModified - a.lastModified)
   const provisionalClaims = [...vault.notes.values()]
+    .filter(isActiveNote)
     .filter(note => note.tags.includes('claim') && note.frontmatter.claim_status === 'provisional')
     .sort((a, b) => b.lastModified - a.lastModified)
   const uncertainClients = captures.map(uncertainClientLine).filter((value): value is string => !!value)
   const runbookCandidates = captures.map(runbookCandidateLine).filter((value): value is string => !!value)
   const skipped = readManifest(vault).slice(0, 30)
   const impacts = [...vault.notes.values()]
+    .filter(isActiveNote)
     .filter(note => note.relativePath.startsWith('Maintenance/Session Impact/') || note.tags.includes('session-impact'))
     .sort((a, b) => b.lastModified - a.lastModified)
 

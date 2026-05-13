@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { safeGeneratedSnippet, isSensitiveGeneratedSource } from './generated-surface-redaction.ts'
+import { isGeneratedCustomerSurface } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
@@ -30,10 +31,11 @@ function today(): string {
 function notesForClient(vault: Vault, client: string): NoteEntry[] {
   const lower = client.toLowerCase()
   return [...vault.notes.values()].filter(note =>
-    note.relativePath.toLowerCase().startsWith(`kunden/${lower}/`)
-      || String(note.frontmatter.kunde ?? '').toLowerCase() === lower
-      || note.tags.includes(lower)
-      || note.tags.includes(`kunde/${lower}`),
+    !isGeneratedCustomerSurface(note)
+      && (note.relativePath.toLowerCase().startsWith(`kunden/${lower}/`)
+        || String(note.frontmatter.kunde ?? '').toLowerCase() === lower
+        || note.tags.includes(lower)
+        || note.tags.includes(`kunde/${lower}`)),
   )
 }
 
@@ -47,6 +49,7 @@ function contentLines(notes: NoteEntry[], pattern: RegExp, limit = 12): string {
   for (const note of notes) {
     for (const line of note.content.split('\n')) {
       if (!pattern.test(line)) continue
+      if (isSnapshotNoiseLine(line)) continue
       if (isSensitiveGeneratedSource(note)) {
         if (redactedSources.has(note.relativePath)) continue
         redactedSources.add(note.relativePath)
@@ -58,6 +61,14 @@ function contentLines(notes: NoteEntry[], pattern: RegExp, limit = 12): string {
     }
   }
   return lines.join('\n') || '- Keine Einträge'
+}
+
+function isSnapshotNoiseLine(line: string): boolean {
+  const trimmed = line.replace(/^[-*#\s>\d.]+/, '').trim()
+  return /^(ich|du|wir)\b/i.test(trimmed)
+    || /^(ok|okay|okey|alles klar|verstanden|nicht ganz|hier|sag|sobald|wenn|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe)\b/i.test(trimmed)
+    || /\b(sag bescheid|ich warte|ich melde mich|willst du|kannst du|soll ich)\b/i.test(trimmed)
+    || /^\(?\d+\s+Befehle,?\s+mit Fehler-Workaround\)?\*?$/i.test(trimmed)
 }
 
 export function buildCustomerSnapshot(vault: Vault, options: BuildCustomerSnapshotOptions): CustomerSnapshotResult {

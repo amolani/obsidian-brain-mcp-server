@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { isSensitiveGeneratedSource, safeGeneratedSnippet } from './generated-surface-redaction.ts'
+import { isActiveNote } from './note-scope.ts'
 import { assertCanWriteTool, loadBrainPolicy } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -27,7 +28,7 @@ function isoNow(): string {
 
 function renderWithoutQuery(vault: Vault, maxNotes: number): { content: string; noteCount: number } {
   const notes = [...vault.notes.values()]
-    .filter(note => !note.relativePath.startsWith('Archiv/'))
+    .filter(isActiveNote)
     .sort((a, b) => b.lastModified - a.lastModified)
     .slice(0, maxNotes)
 
@@ -36,6 +37,7 @@ function renderWithoutQuery(vault: Vault, maxNotes: number): { content: string; 
     : '- Keine Notizen gefunden'
 
   const todos = [...vault.notes.values()]
+    .filter(isActiveNote)
     .flatMap(note => note.todos.filter(todo => !todo.done).map(todo => ({ note, todo })))
     .slice(0, 12)
   const todoLines = todos.length > 0

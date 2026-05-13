@@ -3,6 +3,7 @@ import { basename, join } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { classifyIntent, type ClassifiedIntent } from './intent-classifier.ts'
+import { isActiveNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
@@ -101,6 +102,7 @@ function sourceIntent(vault: Vault, sourcePath: string, manifest: ManifestEntry 
 
 function provisionalClaims(vault: Vault, sourcePath: string): string[] {
   return [...vault.notes.values()]
+    .filter(isActiveNote)
     .filter(note => note.tags.includes('claim'))
     .filter(note => note.frontmatter.quelle === sourcePath)
     .filter(note => note.frontmatter.claim_status === 'provisional')

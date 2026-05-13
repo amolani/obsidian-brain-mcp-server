@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
+import { isActiveNote } from './note-scope.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
@@ -53,6 +54,7 @@ function resolveNote(vault: Vault, pathOrTitle: string): NoteEntry | null {
 }
 
 function isEvidenceCandidate(note: NoteEntry): boolean {
+  if (!isActiveNote(note)) return false
   const tags = new Set(note.tags)
   return note.relativePath.startsWith('Knowledge/')
     || ['insight', 'decision', 'answer', 'claim', 'source'].some(tag => tags.has(tag))

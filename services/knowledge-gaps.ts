@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
+import { isActiveNote } from './note-scope.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
@@ -123,6 +124,7 @@ export function flagContradiction(vault: Vault, options: FlagContradictionOption
 
 export function listOpenQuestions(vault: Vault): OpenQuestion[] {
   return [...vault.notes.values()]
+    .filter(isActiveNote)
     .filter(note => (
       note.relativePath.startsWith('Knowledge/Gaps/')
       || note.relativePath.startsWith('Knowledge/Contradictions/')

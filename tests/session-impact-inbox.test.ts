@@ -106,6 +106,29 @@ describe('session impact and knowledge inbox', () => {
     assert.ok(!existsSync(join(vaultPath, preview.path)))
   })
 
+  test('knowledge inbox ignores archived provisional claims', async () => {
+    writeNote(vaultPath, {
+      path: 'Archiv/Auto-Build/2026-05-13/ADBK Cleanup/Knowledge/Claims/Noisy Claim.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['claim', 'evidence'],
+        quelle: 'Kunden/Schule/Firewall Capture.md',
+        claim_status: 'provisional',
+        confidence: 'medium',
+      },
+      title: 'Claim: Noisy Claim',
+      body: 'ich arbeite heute in einer linuxmuster umgebung.',
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    await vault.init()
+
+    const preview = vault.buildKnowledgeInbox({ dryRun: true })
+
+    assert.doesNotMatch(preview.content, /Noisy Claim/)
+    assert.doesNotMatch(preview.content, /Archiv\/Auto-Build/)
+  })
+
   test('inbox claim action is dry-run-first and can confirm a claim', () => {
     vault.brainAutoBuild({
       sourcePath: 'Kunden/Schule/Firewall Capture.md',

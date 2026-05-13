@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { evidenceReport } from './evidence.ts'
+import { isActiveNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -38,6 +39,7 @@ export function buildBrainDashboard(vault: Vault, options: BuildBrainDashboardOp
   const evidence = evidenceReport(vault)
   const researchPlans = [...vault.notes.keys()].filter(path => path.startsWith('Knowledge/Research/'))
   const recentCaptures = [...vault.notes.values()]
+    .filter(isActiveNote)
     .filter(note => note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester')
     .sort((a, b) => b.lastModified - a.lastModified)
     .slice(0, 10)

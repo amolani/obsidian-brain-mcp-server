@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { brainAutoBuildLearning } from './brain-feedback.ts'
 import { evidenceReport } from './evidence.ts'
+import { isActiveNote } from './note-scope.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BrainMetrics {
@@ -33,11 +34,12 @@ export function brainMetrics(vault: Vault): BrainMetrics {
     }
   } catch {}
   const questions = vault.listOpenQuestions()
+  const activeNotes = [...vault.notes.values()].filter(isActiveNote)
   return {
     notes: vault.notes.size,
-    autoCaptures: [...vault.notes.values()].filter(note => note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester').length,
-    autoPromoted: [...vault.notes.values()].filter(note => note.tags.includes('auto-promoted')).length,
-    claims: [...vault.notes.values()].filter(note => note.tags.includes('claim')).length,
+    autoCaptures: activeNotes.filter(note => note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester').length,
+    autoPromoted: activeNotes.filter(note => note.tags.includes('auto-promoted')).length,
+    claims: activeNotes.filter(note => note.tags.includes('claim')).length,
     evidenceCandidates: evidence.totalCandidates,
     evidenceIssues: evidence.issues.length,
     openQuestions: questions.filter(q => q.type === 'gap').length,

@@ -36,3 +36,4 @@
 - Knowledge Harvester now reprocesses a session when the transcript changes instead of treating the first Stop hook as final.
 - Generated Hot Cache and customer snapshots now hide snippets from credential/access-notes while keeping links visible.
 - Claim extraction now filters assistant command tips and transient operational instructions more aggressively.
+- Generated review, inbox, metrics, evidence, and customer surfaces ignore archived notes as active work, and customer snapshots avoid re-ingesting generated customer surfaces.
