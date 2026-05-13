@@ -54,8 +54,17 @@ function claimSentences(content: string, maxClaims: number): string[] {
     .filter(line => line.length >= 25 && line.length <= 260)
     .filter(line => /\b(muss|soll|sollte|ist|sind|wird|werden|braucht|benötigt|benoetigt|should|must|needs|required|requires)\b/i.test(line))
     .filter(line => !/^\s*(ich|du|wir)\s+(habe|haben|muss|müssen|muessen|soll|sollen|möchte|moechte|will|wollen)\b/i.test(line))
+    .filter(line => !isOperationalInstruction(line))
     .filter(line => !/\?$/.test(line))
   return [...new Set(candidates)].slice(0, maxClaims)
+}
+
+function isOperationalInstruction(line: string): boolean {
+  const trimmed = line.trim()
+  return /^(sobald|wenn|hier|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe|sag mir|sag bescheid)\b/i.test(trimmed)
+    || /^`[^`]+`\s+(braucht|benötigt|benoetigt|ist|soll|muss)\b/i.test(trimmed)
+    || /\b(sudo|openvpn|ping|curl|nmap|smbclient|journalctl|systemctl|docker|kubectl)\b.*\b(--?[a-z0-9-]+|\/tmp\/|dev\/tcp)\b/i.test(trimmed)
+    || /^(der|die|das)\s+befehl\b/i.test(trimmed)
 }
 
 function hasNegation(value: string): boolean {

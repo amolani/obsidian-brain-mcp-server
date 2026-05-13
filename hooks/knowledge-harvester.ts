@@ -6,8 +6,10 @@
 // Auto-places notes in correct Kunden/ folder.
 // Auto-tags from commands used.
 // Uses assistant summaries ("Erledigt:", bullet lists) as note content.
-// One capture per session, dedup by session ID.
+// Incremental per-session capture: unchanged transcript hashes are skipped,
+// changed transcripts update the generated capture instead of blocking forever.
 
+import { createHash } from 'node:crypto'
 import { writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, statSync, readFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
@@ -466,7 +468,12 @@ function yamlList(values: string[]): string {
   return values.length > 0 ? values.map(value => `  - ${value}`).join('\n') : '  - none'
 }
 
-function injectCaptureMetadata(content: string, redaction: RedactionResult, scores: ReturnType<typeof scoreCapture>): string {
+function injectCaptureMetadata(
+  content: string,
+  redaction: RedactionResult,
+  scores: ReturnType<typeof scoreCapture>,
+  session: { sessionId: string; transcriptHash: string; entryCount: number; bashCount: number },
+): string {
   const fields = [
     `sensitive: ${redaction.count > 0}`,
     `redactions: ${redaction.count}`,
@@ -474,6 +481,10 @@ function injectCaptureMetadata(content: string, redaction: RedactionResult, scor
     `capture_value: ${scores.captureValue}`,
     `runbook_readiness: ${scores.runbookReadiness}`,
     `review_need: ${scores.reviewNeed}`,
+    `session_id: ${session.sessionId}`,
+    `transcript_hash: ${session.transcriptHash}`,
+    `transcript_entries: ${session.entryCount}`,
+    `transcript_bash_commands: ${session.bashCount}`,
   ].join('\n')
   return content.replace(/^---\n/, `---\n${fields}\n`)
 }
@@ -490,21 +501,75 @@ function cwdExcluded(cwd: string, patterns: string[]): boolean {
 
 // ── Session State ──────────────────────────────────────────────────
 
-function hasSessionBeenCaptured(sessionId: string): boolean {
-  mkdirSync(STATE_DIR, { recursive: true })
-  return existsSync(join(STATE_DIR, `${sessionId}.done`))
+interface SessionCaptureState {
+  version: 2
+  sessionId: string
+  transcriptHash: string
+  entryCount: number
+  bashCount: number
+  capturePath?: string
+  updatedAt: string
+  skippedReason?: string
 }
 
-function markSessionCaptured(sessionId: string): void {
+function donePath(sessionId: string): string {
+  return join(STATE_DIR, `${sessionId}.done`)
+}
+
+function statePath(sessionId: string): string {
+  return join(STATE_DIR, `${sessionId}.json`)
+}
+
+function transcriptHash(path: string): string {
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex')
+  } catch {
+    return ''
+  }
+}
+
+function readSessionCaptureState(sessionId: string): SessionCaptureState | null {
   mkdirSync(STATE_DIR, { recursive: true })
-  writeFileSync(join(STATE_DIR, `${sessionId}.done`), new Date().toISOString())
+  try {
+    const path = statePath(sessionId)
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<SessionCaptureState>
+    if (parsed.version !== 2 || parsed.sessionId !== sessionId || typeof parsed.transcriptHash !== 'string') return null
+    return parsed as SessionCaptureState
+  } catch {
+    return null
+  }
+}
+
+function markSessionCaptured(state: SessionCaptureState): void {
+  mkdirSync(STATE_DIR, { recursive: true })
+  writeFileSync(statePath(state.sessionId), `${JSON.stringify(state, null, 2)}\n`, 'utf-8')
+  writeFileSync(donePath(state.sessionId), state.updatedAt)
   // Cleanup old state files
   try {
     const files = readdirSync(STATE_DIR)
       .map(f => ({ name: f, mtime: statSync(join(STATE_DIR, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime)
-    for (const f of files.slice(30)) unlinkSync(join(STATE_DIR, f.name))
+    for (const f of files.slice(60)) unlinkSync(join(STATE_DIR, f.name))
   } catch {}
+}
+
+function shouldSkipSession(sessionId: string, hash: string): boolean {
+  const state = readSessionCaptureState(sessionId)
+  return !!state && !!hash && state.transcriptHash === hash
+}
+
+function existingGeneratedCapture(fullPath: string): boolean {
+  if (!existsSync(fullPath)) return false
+  try {
+    const content = readFileSync(fullPath, 'utf-8')
+    return /(^|\n)tags:\n(?:  - .+\n)*  - auto-capture/m.test(content)
+      || /(^|\n)knowledge_type: capture\n/.test(content)
+      || /(^|\n)source_stage: stop_capture\n/.test(content)
+      || /Auto-Capture/.test(content)
+  } catch {
+    return false
+  }
 }
 
 // ── Main ───────────────────────────────────────────────────────────
@@ -530,10 +595,22 @@ process.stdin.on('end', async () => {
     const cwd = data.cwd || ''
 
     if (!sessionId || !transcriptPath) process.exit(0)
-    if (hasSessionBeenCaptured(sessionId)) process.exit(0)
+    const currentTranscriptHash = transcriptHash(transcriptPath)
+    if (shouldSkipSession(sessionId, currentTranscriptHash)) {
+      log(`skip ${sessionId.slice(0, 8)}: transcript hash unchanged`)
+      process.exit(0)
+    }
     if (cwdExcluded(cwd, policy.hooks.captureSafety.excludeCwdPatterns)) {
       log(`Session ${sessionId.slice(0, 8)}: CWD durch captureSafety.excludeCwdPatterns ausgeschlossen`)
-      markSessionCaptured(sessionId)
+      markSessionCaptured({
+        version: 2,
+        sessionId,
+        transcriptHash: currentTranscriptHash,
+        entryCount: 0,
+        bashCount: 0,
+        updatedAt: new Date().toISOString(),
+        skippedReason: 'cwd excluded',
+      })
       process.exit(0)
     }
 
@@ -587,10 +664,19 @@ process.stdin.on('end', async () => {
     const fullPath = join(fullDir, `${safeTitle}.md`)
     const relativeTarget = `${folder}/${safeTitle}.md`
     assertCanWriteTool('auto_capture', [relativeTarget])
-
-    if (existsSync(fullPath)) {
-      log(`Note already exists: ${fullPath}`)
-      markSessionCaptured(sessionId)
+    const previousState = readSessionCaptureState(sessionId)
+    const canUpdateExisting = previousState?.capturePath === relativeTarget || existingGeneratedCapture(fullPath)
+    if (existsSync(fullPath) && !canUpdateExisting) {
+      log(`Note already exists and is not a generated capture: ${fullPath}`)
+      markSessionCaptured({
+        version: 2,
+        sessionId,
+        transcriptHash: currentTranscriptHash,
+        entryCount: entries.length,
+        bashCount,
+        updatedAt: new Date().toISOString(),
+        skippedReason: 'target exists and is not generated capture',
+      })
       process.exit(0)
     }
 
@@ -601,7 +687,15 @@ process.stdin.on('end', async () => {
       : { content: rawNoteContent, count: 0, types: [] }
     if (redaction.count > 0 && policy.hooks.captureSafety.blockOnSecret) {
       log(`Session ${sessionId.slice(0, 8)}: Secret erkannt, Capture durch captureSafety.blockOnSecret blockiert`)
-      markSessionCaptured(sessionId)
+      markSessionCaptured({
+        version: 2,
+        sessionId,
+        transcriptHash: currentTranscriptHash,
+        entryCount: entries.length,
+        bashCount,
+        updatedAt: new Date().toISOString(),
+        skippedReason: 'secret blocked',
+      })
       process.exit(0)
     }
     const scores = scoreCapture({
@@ -611,16 +705,29 @@ process.stdin.on('end', async () => {
       clientMatchMethod: knowledge.clientMatch.method,
       redactionCount: redaction.count,
     })
-    const noteContent = injectCaptureMetadata(redaction.content, redaction, scores)
+    const noteContent = injectCaptureMetadata(redaction.content, redaction, scores, {
+      sessionId,
+      transcriptHash: currentTranscriptHash,
+      entryCount: entries.length,
+      bashCount,
+    })
     writeFileSync(fullPath, noteContent, 'utf-8')
-    markSessionCaptured(sessionId)
-    log(`Captured: ${folder}/${safeTitle}.md`)
+    markSessionCaptured({
+      version: 2,
+      sessionId,
+      transcriptHash: currentTranscriptHash,
+      entryCount: entries.length,
+      bashCount,
+      capturePath: relativeTarget,
+      updatedAt: new Date().toISOString(),
+    })
+    log(`${canUpdateExisting ? 'Updated capture' : 'Captured'}: ${folder}/${safeTitle}.md`)
 
     appendActionLog(VAULT_PATH, {
       tool: 'auto_capture',
       mode: 'apply',
       targets: [relativeTarget],
-      summary: `Session-Capture: "${knowledge.title}" (${knowledge.procedures.length} Schritte, ${knowledge.errorFixes.length} Workarounds)`,
+      summary: `${canUpdateExisting ? 'Session-Capture aktualisiert' : 'Session-Capture'}: "${knowledge.title}" (${knowledge.procedures.length} Schritte, ${knowledge.errorFixes.length} Workarounds)`,
       meta: {
         sessionId,
         tags: knowledge.tags,
@@ -635,7 +742,7 @@ process.stdin.on('end', async () => {
     // Append to daily note
     const datum = new Date().toISOString().split('T')[0]
     const dailyPath = join(VAULT_PATH, 'Daily', `${datum}.md`)
-    if (policy.hooks.appendDailyCaptureLink && existsSync(dailyPath)) {
+    if (!canUpdateExisting && policy.hooks.appendDailyCaptureLink && existsSync(dailyPath)) {
       assertCanWriteTool('daily_note', [`Daily/${datum}.md`])
       appendFileSync(dailyPath, `\n- Auto-Capture: [[${folder}/${safeTitle}|${knowledge.title}]]\n`)
       appendActionLog(VAULT_PATH, {

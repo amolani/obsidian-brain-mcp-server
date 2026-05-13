@@ -30,3 +30,6 @@
 - Brain Dashboard links to Capture Review and Evidence Dashboard.
 - Health checks include hook `VAULT_PATH` and new Public Beta surface policies.
 - Auto-captures now include intent, scoring, redaction, and review metadata.
+- Knowledge Harvester now reprocesses a session when the transcript changes instead of treating the first Stop hook as final.
+- Generated Hot Cache and customer snapshots now hide snippets from credential/access-notes while keeping links visible.
+- Claim extraction now filters assistant command tips and transient operational instructions more aggressively.
