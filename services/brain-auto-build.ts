@@ -195,6 +195,26 @@ function hasSimilarKnowledge(vault: Vault, title: string, content: string, folde
   })
 }
 
+function normalizeGapTitle(value: string): string {
+  return value
+    .replace(/^#*\s*(wissenslücke|wissensluecke)\s*:\s*/i, '')
+    .replace(/[?!.]+$/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+}
+
+function hasExistingOpenGap(vault: Vault, title: string): boolean {
+  const normalized = normalizeGapTitle(title)
+  if (!normalized) return false
+  return [...vault.notes.values()].some(note => {
+    if (!note.relativePath.startsWith('Knowledge/Gaps/') && !note.tags.includes('knowledge-gap')) return false
+    if (note.frontmatter.status === 'resolved') return false
+    const heading = note.content.match(/^#\s+(.+)$/m)?.[1] ?? ''
+    return normalizeGapTitle(note.title) === normalized || normalizeGapTitle(heading) === normalized
+  })
+}
+
 function learningGate(learning: BrainAutoBuildLearning, action: string): BrainAutoBuildLearning['categories'][string] | null {
   return learning.categories[autoBuildFeedbackCategory(action)] ?? null
 }
@@ -203,7 +223,9 @@ function gateKnowledge(vault: Vault, action: string, title: string, content: str
   const folder = action === 'save_answer' ? 'Knowledge/Answers/' : action === 'flag_knowledge_gap' ? 'Knowledge/Gaps/' : 'Knowledge/Insights/'
   const gate = learningGate(learning, action)
   const minLength = gate?.strict ? 120 : 35
-  const duplicate = hasSimilarKnowledge(vault, title, content, [folder])
+  const duplicate = action === 'flag_knowledge_gap'
+    ? hasExistingOpenGap(vault, title)
+    : hasSimilarKnowledge(vault, title, content, [folder])
   const tooShort = isBanal(content) || content.trim().length < minLength
   const blockedByFeedback = gate?.blocked === true
   const skip = tooShort || duplicate || blockedByFeedback

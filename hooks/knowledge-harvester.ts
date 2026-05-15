@@ -377,7 +377,7 @@ function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKno
       const text = cleanCaptureText(entry.content)
       if (isNoisyCaptureText(text)) continue
       // Prioritize structured summaries
-      if (/erledigt|zusammenfassung|befund|ergebnis|empfehlung|durchgelaufen|konfiguriert|installiert|eingerichtet|abgeschlossen/i.test(text)) {
+      if (/erledigt|zusammenfassung|befund|ergebnis|empfehlung|durchgelaufen|konfiguriert|installiert|eingerichtet|eingetragen|wiederhergestellt|verschoben|ersetzt|umgestellt|abgeschlossen/i.test(text)) {
         summaries.push(text.slice(0, 800))
       }
     }

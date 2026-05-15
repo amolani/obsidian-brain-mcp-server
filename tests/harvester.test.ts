@@ -314,7 +314,10 @@ describe('Harvester: incremental session updates', () => {
     }
     const first = runHarvester(vaultPath, stateDir, input)
     assert.equal(first.status, 0, first.stderr)
-    const notePath = join(vaultPath, 'Kunden', 'HUG', 'HUG — Server-Konfiguration (2026-05-13).md')
+    const hugDir = join(vaultPath, 'Kunden', 'HUG')
+    const noteFile = readdirSync(hugDir).find(file => file.startsWith('HUG — Server-Konfiguration') && file.endsWith('.md'))
+    assert.ok(noteFile)
+    const notePath = join(hugDir, noteFile)
     assert.ok(existsSync(notePath))
     assert.doesNotMatch(readFileSync(notePath, 'utf-8'), /Synology01/)
 
@@ -357,6 +360,7 @@ describe('Harvester: capture hygiene', () => {
       { type: 'user', message: { content: [{ type: 'tool_result', content: 'pulled' }] } },
       { type: 'user', message: { content: '<task-notification><task-id>abc</task-id><tool-use-id>toolu_test</tool-use-id></task-notification>' } },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'Pull durch — alle 4 Images sind lokal.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: WebUI Login wurde getestet. Passwort: `VHS-Offenbach2026!`. ISO-Testlink war https://software.download.prss.microsoft.com/dbazure/Win11_25H2_German_x64.iso?t=download-token&P1=1778913019&P4=signature.' }] } },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'Zusammenfassung: ADBK Satellite ist vorbereitet. Realm ist ADBK.LOCAL, Docker ist aktiv, Compose-Images sind lokal, und proxy.adbk.local zeigt auf 10.20.16.5.' }] } },
     ]
     writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
@@ -384,6 +388,12 @@ describe('Harvester: capture hygiene', () => {
     assert.doesNotMatch(note, /task-notification/)
     assert.doesNotMatch(note, /toolu_test/)
     assert.doesNotMatch(note, /NETWORKBOX_JWT_SECRET/)
+    assert.doesNotMatch(note, /VHS-Offenbach2026!/)
+    assert.doesNotMatch(note, /download-token/)
+    assert.doesNotMatch(note, /P4=signature/)
+    assert.match(note, /redaction_types:/)
+    assert.match(note, /credential_label/)
+    assert.match(note, /signed_download_url/)
     assert.doesNotMatch(note, /Pull durch/)
     assert.doesNotMatch(note, /samba-tool domain info/)
   })

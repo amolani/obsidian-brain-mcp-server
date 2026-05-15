@@ -115,6 +115,23 @@ describe('manual knowledge workflows', () => {
     assert.match(readFileSync(join(vaultPath, '.action-log.jsonl'), 'utf-8'), /"tool":"resolve_gap"/)
   })
 
+  test('knowledge gaps are idempotent for the same open question', () => {
+    const first = vault.flagKnowledgeGap({
+      question: 'Welche DHCP Rolle hat linuxmuster?',
+      context: 'Erster Auto-Build-Lauf.',
+      dryRun: false,
+    })
+    const second = vault.flagKnowledgeGap({
+      question: 'Welche DHCP Rolle hat linuxmuster?',
+      context: 'Aktualisierte Capture mit derselben offenen Frage.',
+      dryRun: false,
+    })
+
+    assert.equal(second.skipped, true)
+    assert.equal(second.path, first.path)
+    assert.equal(vault.listOpenQuestions().filter(item => item.type === 'gap').length, 1)
+  })
+
   test('research plan uses local context and writes only on apply', () => {
     const preview = vault.createResearchPlan({
       topic: 'DHCP Zuständigkeit',

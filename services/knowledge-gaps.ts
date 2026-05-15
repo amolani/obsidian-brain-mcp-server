@@ -33,6 +33,8 @@ export interface KnowledgeGapResult {
   path: string
   title: string
   content: string
+  skipped?: boolean
+  reason?: string
 }
 
 export interface OpenQuestion {
@@ -56,6 +58,29 @@ function renderFrontmatter(type: 'gap' | 'contradiction', tags: string[]): strin
   })}---\n\n`
 }
 
+function normalizeGapTitle(value: string): string {
+  return value
+    .replace(/^#*\s*(wissenslücke|wissensluecke)\s*:\s*/i, '')
+    .replace(/[?!.]+$/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+}
+
+function existingOpenGapPath(vault: Vault, title: string): string | null {
+  const normalized = normalizeGapTitle(title)
+  if (!normalized) return null
+  for (const note of vault.notes.values()) {
+    if (!isActiveNote(note)) continue
+    if (!note.relativePath.startsWith('Knowledge/Gaps/') && !note.tags.includes('knowledge-gap')) continue
+    if (note.frontmatter.status === 'resolved') continue
+    const noteTitle = normalizeGapTitle(note.title)
+    const heading = normalizeGapTitle(stripFrontmatter(note.content).match(/^#\s+(.+)$/m)?.[1] ?? '')
+    if (noteTitle === normalized || heading === normalized) return note.relativePath
+  }
+  return null
+}
+
 export function flagKnowledgeGap(vault: Vault, options: FlagKnowledgeGapOptions): KnowledgeGapResult {
   const dryRun = options.dryRun ?? true
   const question = options.question.trim()
@@ -63,11 +88,23 @@ export function flagKnowledgeGap(vault: Vault, options: FlagKnowledgeGapOptions)
 
   const tags = [...new Set(['knowledge-gap', 'open-question', ...(options.tags ?? [])].map(normalizeTag))]
   const title = question.endsWith('?') ? question : `${question}?`
-  const path = dryRun
+  const existingPath = existingOpenGapPath(vault, title)
+  const path = existingPath ?? (dryRun
     ? `Knowledge/Gaps/${sanitizePathSegment(title)}.md`
-    : uniqueRelativePath(vault.vaultPath, 'Knowledge/Gaps', `${sanitizePathSegment(title)}.md`)
+    : uniqueRelativePath(vault.vaultPath, 'Knowledge/Gaps', `${sanitizePathSegment(title)}.md`))
   const context = options.context?.trim() || '- Noch kein Kontext erfasst'
   const content = `${renderFrontmatter('gap', tags)}# Wissenslücke: ${title}\n\n## Frage\n\n${title}\n\n## Kontext\n\n${context}\n\n## Nächste Klärung\n\n- [ ] Recherche oder Vault-Kontext ergänzen\n`
+
+  if (existingPath) {
+    return {
+      dryRun,
+      path,
+      title,
+      content,
+      skipped: true,
+      reason: `offene Wissenslücke existiert bereits: ${existingPath}`,
+    }
+  }
 
   if (!dryRun) {
     assertCanWriteTool('flag_knowledge_gap', [path])

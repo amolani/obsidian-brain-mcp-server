@@ -26,6 +26,7 @@ const EMPTY = '- Keine belastbare Aussage erkannt'
 const DEBUG_NARRATION = /^(zwei|drei|mehrere)\s+hinweise\s+sind\s+wichtig:?$|entscheidende(?:r)?\s+hinweis|crash-files?.*ajenti\.log.*nächst\w*\s+quellen|\.bak\s+ist\s+identisch/i
 const SENSITIVE_TEXT = /\b(passw(?:ort|örter|oerter)?|password|passwd|pwd|token|secret|--newpassword|setpassword|auth-user-pass|\.env)\b/i
 const VERBOSE_COMMAND = /`[^`]*(?:&&|;|\||\b(?:ssh|samba-tool|cat|grep|find|openssl|docker|systemctl|kubectl|nmap|curl|sed|awk|tail|head)\b)[^`]*`/i
+const OUTCOME_KEYWORDS = /\b(root cause|ursache|fehler|fix|behoben|wiederhergestellt|verifiziert|validiert|active|running|lauscht|listen|eingetragen|umgestellt|angepasst|ersetzt|entfernt|route|linkdown|default-route|interfaces\.d|\.disabled|subnets\.csv|vmbr|internet)\b/i
 
 function clean(value: string): string {
   return value
@@ -71,8 +72,17 @@ function bullets(values: string[]): string {
 }
 
 function problem(input: SessionDigestInput): string[] {
-  const first = input.phases.find(phase => safe(phase.userRequest, 220))
-  return first ? [first.userRequest] : [input.title]
+  const ranked = input.phases
+    .map((phase, index) => ({
+      phase,
+      score: (phase.hadError ? 4 : 0)
+        + (OUTCOME_KEYWORDS.test(`${phase.userRequest}\n${phase.outcome}`) ? 3 : 0)
+        + (phase.outcome.length > 80 ? 1 : 0)
+        + index / Math.max(1, input.phases.length),
+    }))
+    .filter(item => safe(item.phase.userRequest, 220))
+    .sort((a, b) => b.score - a.score)
+  return ranked[0] ? [ranked[0].phase.userRequest] : [input.title]
 }
 
 function rootCause(input: SessionDigestInput, lines: string[]): string[] {
@@ -81,8 +91,17 @@ function rootCause(input: SessionDigestInput, lines: string[]): string[] {
   if (/bind\.mode|mode:\s*unix/i.test(corpus) && /bind\.socket/i.test(corpus)) {
     out.push('Ajenti-Konfiguration war widersprüchlich: `bind.mode: unix` ohne `bind.socket`, obwohl TCP/SSL konfiguriert war.')
   }
+  if (/vmbr-trunk/i.test(corpus) && /invalid network interface name|invalid format|Proxmox WebUI/i.test(corpus)) {
+    out.push('`vmbr-trunk` war als Proxmox-Interface-Name ungeeignet; die Bridge wurde auf `vmbr2` umbenannt.')
+  }
+  if (/source\s+\/etc\/network\/interfaces\.d\/\*/i.test(corpus) && /\.disabled/i.test(corpus)) {
+    out.push('`source /etc/network/interfaces.d/*` lädt auch Dateien mit `.disabled`-Suffix; dadurch wurde die Mgmt-Template-Config unbeabsichtigt aktiv.')
+  }
+  if (/default via .*vmbr2\.50/i.test(corpus) && /(linkdown|NO-CARRIER|ohne Carrier|kein Kabel)/i.test(corpus)) {
+    out.push('Die Default-Route zeigte auf `vmbr2.50`, obwohl das Interface linkdown/ohne Carrier war.')
+  }
   for (const line of lines) {
-    if (!/(root cause|ursache|keyerror|bind\.socket|bind\.mode|widerspr|fehlte|missing)/i.test(line)) continue
+    if (!/(root cause|ursache|keyerror|bind\.socket|bind\.mode|widerspr|fehlte|missing|linkdown|default-route|interfaces\.d|\.disabled|invalid network interface name)/i.test(line)) continue
     out.push(line)
   }
   return out
@@ -100,8 +119,17 @@ function changes(input: SessionDigestInput, lines: string[]): string[] {
   if (/systemctl\s+restart\s+linuxmuster-webui/i.test(corpus)) {
     out.push('`linuxmuster-webui` wurde neu gestartet.')
   }
+  if (/vmbr-trunk/i.test(corpus) && /vmbr2/i.test(corpus)) {
+    out.push('Bridge-/Doku-Referenzen wurden von `vmbr-trunk` auf `vmbr2` umgestellt.')
+  }
+  if (/\/root\/vmbr2-mgmt\.template/i.test(corpus)) {
+    out.push('Die `vmbr2`-Mgmt-Template-Datei liegt außerhalb von `/etc/network/interfaces.d/` und wird erst bei Bedarf hineinkopiert.')
+  }
+  if (/\/etc\/linuxmuster\/subnets\.csv|\/etc\/linuxmuster\/sophomorix\/default\/school\/subnets\.csv/i.test(corpus) && /10\.50\.(20|30|40|50|60|70|80)\.0/i.test(corpus)) {
+    out.push('Zusätzliche VLAN-Subnetze wurden in der linuxmuster-Subnetz-CSV vorbereitet.')
+  }
   for (const line of lines) {
-    if (!/(geändert|geaendert|umgestellt|gesetzt|neu gestartet|restart|fix erfolgreich|läuft wieder|laeuft wieder)/i.test(line)) continue
+    if (!/(geändert|geaendert|umgestellt|angepasst|ersetzt|entfernt|gesetzt|eingetragen|neu gestartet|restart|fix erfolgreich|läuft wieder|laeuft wieder|wiederhergestellt)/i.test(line)) continue
     out.push(line)
   }
   return out
@@ -116,8 +144,14 @@ function verification(input: SessionDigestInput, lines: string[]): string[] {
   if (/0\.0\.0\.0:443|LISTEN.*:443|ss\s+-tlnp.*:443/i.test(corpus)) {
     out.push('Der Dienst lauschte auf `0.0.0.0:443`.')
   }
+  if (/Internet.*wieder da|Internet-Zugriff.*wiederhergestellt|default via 10\.0\.0\.254 dev vmbr0/i.test(corpus)) {
+    out.push('Der Internet-Zugriff wurde wiederhergestellt; die Default-Route zeigte wieder über `vmbr0`.')
+  }
+  if (/keine vmbr-trunk.*Referenz|Proxmox WebUI.*vmbr2.*kein/i.test(corpus)) {
+    out.push('Die aktiven `vmbr-trunk`-Referenzen wurden bereinigt; `vmbr2` ist der gültige Proxmox-Bridge-Name.')
+  }
   for (const line of lines) {
-    if (!/(verifiziert|validiert|active|running|lauscht|laeuscht|listen|0\.0\.0\.0:443|port 443)/i.test(line)) continue
+    if (!/(verifiziert|validiert|active|running|lauscht|laeuscht|listen|0\.0\.0\.0:443|port 443|Internet.*wieder|Default-Route|sauber)/i.test(line)) continue
     out.push(line)
   }
   return out

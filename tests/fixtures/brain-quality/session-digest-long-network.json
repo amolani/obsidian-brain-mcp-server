@@ -1,0 +1,60 @@
+{
+  "id": "session-digest-long-network",
+  "type": "session_digest",
+  "description": "A long implementation/troubleshooting session should summarize late operational findings, redact signed URLs/passwords, and not anchor the digest on the first setup question.",
+  "sessionId": "quality-session-digest-long-network",
+  "cwd": "/home/amo/Documents/code/amo/offenbach",
+  "expectedDigestPatterns": [
+    "## Session Digest",
+    "vmbr-trunk.*vmbr2|vmbr2.*vmbr-trunk",
+    "interfaces\\.d/\\*.*\\.disabled|\\.disabled.*interfaces\\.d/\\*",
+    "Default-Route.*vmbr2\\.50.*linkdown|vmbr2\\.50.*linkdown.*Default-Route",
+    "Internet-Zugriff.*wiederhergestellt|Default-Route.*vmbr0",
+    "VLAN-Subnetze.*linuxmuster"
+  ],
+  "forbiddenDigestPatterns": [
+    "heute installieren wir eine linuxmuster",
+    "Passwort",
+    "software\\.download\\.prss\\.microsoft\\.com",
+    "P4=signature",
+    "ssh root@10\\.0\\.0\\.40"
+  ],
+  "forbiddenGlobalPatterns": [
+    "VHS-Offenbach2026!",
+    "download-token",
+    "P4=signature"
+  ],
+  "steps": [
+    {
+      "name": "final-stop",
+      "entries": [
+        { "type": "user", "message": { "content": "Heute installieren wir eine linuxmuster Umgebung fuer VHS Offenbach und legen die vorgegebenen VLANs an." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Ich pruefe den Plan, die VLANs und die bestehende Proxmox-Konfiguration." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'ip -br link show'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "vmbr1 UP\nnic0 DOWN" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Zusammenfassung: Fruehe Planung ist dokumentiert. Das ist noch nicht der Endbefund." }] } },
+
+        { "type": "user", "message": { "content": "Die Proxmox-WebUI meldet bei vmbr-trunk: invalid network interface name." } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'grep -R vmbr-trunk /etc/network/interfaces /root || true'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "bridge vmbr-trunk present" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'sed -i s/vmbr-trunk/vmbr2/g /etc/network/interfaces && ifreload -a'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "reload ok" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Bridge-Rename abgeschlossen und verifiziert: vmbr-trunk wurde durch vmbr2 ersetzt; vmbr2 ist der gueltige Proxmox-Bridge-Name." }] } },
+
+        { "type": "user", "message": { "content": "Der ISO-Download scheitert mit Network is unreachable. Testlink: https://software.download.prss.microsoft.com/dbazure/Win11_25H2_German_x64.iso?t=download-token&P1=1778913019&P4=signature. Das WebUI-Passwort war Passwort: `VHS-Offenbach2026!`." } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'ip route; cat /etc/network/interfaces'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "default via 10.50.50.1 dev vmbr2.50 proto kernel onlink linkdown\nsource /etc/network/interfaces.d/*\nfile /etc/network/interfaces.d/vmbr2-mgmt.disabled exists" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'mv /etc/network/interfaces.d/vmbr2-mgmt.disabled /root/vmbr2-mgmt.template && ifreload -a'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "default via 10.0.0.254 dev vmbr0\ninternet ok" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Ursache & Lehre: source /etc/network/interfaces.d/* laedt jede Datei, auch .disabled. Dadurch war vmbr2.50 aktiv und die Default-Route zeigte auf vmbr2.50 linkdown. Fix: Template nach /root/vmbr2-mgmt.template verschoben. Internet-Zugriff ist wiederhergestellt; Default-Route geht wieder ueber vmbr0." }] } },
+
+        { "type": "user", "message": { "content": "Bitte trage die VLANs in subnets.csv auf dem linuxmuster-Server ein." } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'ssh root@10.50.10.1 cat /etc/linuxmuster/subnets.csv'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "10.50.10.0/24;10.50.10.254;10.50.10.201;10.50.10.250;;;SETUP" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ssh root@10.0.0.40 'ssh root@10.50.10.1 tee -a /etc/linuxmuster/subnets.csv >/dev/null'" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "10.50.20.0/24;10.50.20.254;10.50.20.100;10.50.20.250;;;\n10.50.30.0/24;10.50.30.254;10.50.30.100;10.50.30.250;;;" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Eingetragen: Zusaetzliche VLAN-Subnetze wurden in der linuxmuster-Subnetz-CSV vorbereitet, darunter 10.50.20.0/24 und 10.50.30.0/24. Naechster Schritt ist linuxmuster-import-subnets nach Freigabe." }] } }
+      ]
+    }
+  ]
+}

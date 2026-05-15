@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
 import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
@@ -156,6 +156,50 @@ describe('brain auto-build', () => {
     assert.equal(metrics.autoBuild.archivedSources, 1)
     assert.ok(metrics.autoBuild.usefulnessScore < 1)
     assert.ok(metrics.autoBuild.learnedCategories >= 2)
+  })
+
+  test('updated captures do not create duplicate generic knowledge gaps', async () => {
+    const first = vault.brainAutoBuild({
+      sourcePath: 'Kunden/Schule/Schule Auto Capture.md',
+      client: 'Schule',
+      dryRun: false,
+    })
+    assert.ok(first.steps.some(step => step.step === 'flag_knowledge_gap' && step.applied))
+    assert.equal(readdirSync(join(vaultPath, 'Knowledge', 'Gaps')).filter(file => file.endsWith('.md')).length, 1)
+
+    writeNote(vaultPath, {
+      path: 'Kunden/Schule/Schule Auto Capture.md',
+      frontmatter: {
+        status: 'aktiv',
+        tags: ['auto-capture', 'prozedur', 'kunde/schule'],
+        quelle: 'knowledge-harvester',
+        kunde: 'Schule',
+      },
+      title: 'Schule Auto Capture',
+      body: [
+        '## Ablauf',
+        '',
+        'DHCP wurde weiter dokumentiert.',
+        '',
+        '## Zusammenfassung',
+        '',
+        'DHCP wurde fuer Schule auf Firewall-Betrieb festgelegt und dokumentiert.',
+        '',
+        'Offen: Scope pruefen.',
+      ].join('\n'),
+    })
+    vault.shutdown()
+    vault = new Vault(vaultPath)
+    await vault.init()
+
+    const second = vault.brainAutoBuild({
+      sourcePath: 'Kunden/Schule/Schule Auto Capture.md',
+      client: 'Schule',
+      dryRun: false,
+    })
+
+    assert.ok(second.plan.some(item => item.action === 'flag_knowledge_gap' && item.quality === 'skip' && /ähnliches Wissen|existiert bereits/.test(item.reason)))
+    assert.equal(readdirSync(join(vaultPath, 'Knowledge', 'Gaps')).filter(file => file.endsWith('.md')).length, 1)
   })
 
   test('auto-build gates adapt to repeated negative feedback', () => {
