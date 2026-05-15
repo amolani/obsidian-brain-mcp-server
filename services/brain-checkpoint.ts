@@ -2,6 +2,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { assertCanWriteTool } from './policy.ts'
+import { redactSecrets } from './secret-redaction.ts'
 import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface BrainCheckpointOptions {
@@ -29,10 +30,12 @@ export function brainCheckpoint(vault: Vault, options: BrainCheckpointOptions): 
   if (!options.summary?.trim()) throw new Error('summary ist erforderlich')
   const title = options.title?.trim() || `Session Checkpoint ${nowStamp()}`
   const folder = 'Knowledge/Checkpoints'
+  const redaction = redactSecrets(options.summary.trim())
+  const redactionTypes = redaction.types.length > 0 ? redaction.types : ['none']
   const path = dryRun
     ? `${folder}/${sanitizePathSegment(title)}.md`
     : uniqueRelativePath(vault.vaultPath, folder, `${sanitizePathSegment(title)}.md`)
-  const content = `---\nstatus: aktiv\ntags:\n  - checkpoint\n  - session\n${options.client ? `kunde: ${options.client}\n` : ''}aktualisiert: ${new Date().toISOString()}\nquelle: brain-checkpoint\nknowledge_type: checkpoint\nsource_stage: checkpoint\n---\n\n# ${title}\n\n${options.summary.trim()}\n${options.sourcePath ? `\nQuelle: [[${options.sourcePath}]]\n` : ''}`
+  const content = `---\nstatus: aktiv\ntags:\n  - checkpoint\n  - session\n${options.client ? `kunde: ${options.client}\n` : ''}aktualisiert: ${new Date().toISOString()}\nquelle: brain-checkpoint\nknowledge_type: checkpoint\nsource_stage: checkpoint\nsensitive: ${redaction.count > 0}\nredactions: ${redaction.count}\nredaction_types:\n${redactionTypes.map(type => `  - ${type}`).join('\n')}\n---\n\n# ${title}\n\n${redaction.content}\n${options.sourcePath ? `\nQuelle: [[${options.sourcePath}]]\n` : ''}`
   let autoBuild: unknown
 
   if (!dryRun) {
@@ -47,7 +50,7 @@ export function brainCheckpoint(vault: Vault, options: BrainCheckpointOptions): 
       mode: 'apply',
       targets: [path],
       summary: `Brain Checkpoint geschrieben: ${path}`,
-      meta: { client: options.client, sourcePath: options.sourcePath },
+      meta: { client: options.client, sourcePath: options.sourcePath, redactions: redaction.count },
     })
   }
 

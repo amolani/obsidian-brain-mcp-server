@@ -227,7 +227,7 @@ describe('brain auto-build', () => {
   test('checkpoint, customer snapshot and metrics support long-session upkeep', () => {
     const checkpoint = vault.brainCheckpoint({
       title: 'DHCP Zwischenstand',
-      summary: 'DHCP muss auf der Firewall bleiben. Offene Prüfung ist der Scope.',
+      summary: 'DHCP muss auf der Firewall bleiben. Admin-Passwort: `VHS-Offenbach2026!`. Offene Prüfung ist der Scope.',
       client: 'Schule',
       runAutoBuild: true,
       dryRun: false,
@@ -235,6 +235,9 @@ describe('brain auto-build', () => {
 
     assert.equal(checkpoint.dryRun, false)
     assert.ok(existsSync(join(vaultPath, checkpoint.path)))
+    const checkpointContent = readFileSync(join(vaultPath, checkpoint.path), 'utf-8')
+    assert.doesNotMatch(checkpointContent, /VHS-Offenbach2026!/)
+    assert.match(checkpointContent, /credential_label/)
     assert.ok(checkpoint.autoBuild)
 
     const snapshot = vault.buildCustomerSnapshot({ client: 'Schule', dryRun: false })
