@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Vault } from '../vault.ts'
 import {
+  CALIBRATION_CAPTURE_SCHEMA,
   calibrationObservationId,
   calibrationReviewToken,
   parseCalibrationCaptureBundle,
@@ -11,6 +12,12 @@ import {
   type BrainCalibrationEntry,
   type BrainCalibrationLabel,
 } from './brain-calibration.ts'
+import {
+  assertBrainCalibrationExploratoryAccess,
+  getBrainCalibrationCampaignPhase,
+  listVerifiedBrainCalibrationCampaignReviewArchives,
+  withBrainCalibrationCampaignLock,
+} from './brain-calibration-campaign.ts'
 import { isActivePath } from './note-scope.ts'
 
 const REVIEW_LABELS = ['useful', 'supported'] as const
@@ -151,7 +158,7 @@ function coverage(
  * production status, rank and numeric scores remain internal so the reviewer
  * cannot infer whether a statement was selected or sampled as a reject.
  */
-export function brainCalibrationReviewBatch(
+function brainCalibrationReviewBatchOperation(
   vault: Vault,
   options: BrainCalibrationReviewBatchOptions = {},
 ): BrainCalibrationReviewBatchResult {
@@ -160,6 +167,22 @@ export function brainCalibrationReviewBatch(
     throw new Error(`limit muss eine Ganzzahl zwischen 1 und ${MAX_REVIEW_BATCH} sein`)
   }
   const reviewer = reviewerId(options.reviewer)
+  const campaignPhase = getBrainCalibrationCampaignPhase(vault)
+  if (campaignPhase === 'unregistered') {
+    // Also checks an externally anchored registration was not rolled back
+    // locally before this service falls back to the mutable live captures.
+    assertBrainCalibrationExploratoryAccess(vault)
+  }
+  if (campaignPhase === 'closed' || campaignPhase === 'evaluated') {
+    throw new Error(
+      'Die Kalibrierungskampagne ist geschlossen; neue Review-Batches sind gesperrt',
+    )
+  }
+  if (campaignPhase === 'registered' && reviewer === null) {
+    throw new Error(
+      'Eine registrierte Kalibrierungskampagne verlangt eine registrierte Reviewer-ID',
+    )
+  }
   const errors: Array<{ path: string; message: string }> = []
   let entries: BrainCalibrationEntry[] = []
   let datasetAvailable = true
@@ -177,45 +200,76 @@ export function brainCalibrationReviewBatch(
   let validCaptures = 0
   let invalidCaptures = 0
 
-  for (const note of vault.notes.values()) {
-    if (!isActivePath(note.relativePath) || note.frontmatter.quelle !== 'knowledge-harvester') {
-      continue
+  if (campaignPhase === 'registered') {
+    const campaignArchives = listVerifiedBrainCalibrationCampaignReviewArchives(
+      vault,
+      reviewer as string,
+    )
+    if (campaignArchives.some(archive => archive.phase !== 'registered')) {
+      throw new Error(
+        'Die Kalibrierungskampagne wurde während des Batch-Aufbaus geschlossen',
+      )
     }
-    if (note.frontmatter.calibration_capture_schema === undefined) continue
-    try {
-      const bundle = parseCalibrationCaptureBundle(note.frontmatter)
-      validCaptures++
-      for (const fact of bundle.facts) {
-        if (fact.payload.evaluationSample !== true) continue
-        const generatedAt = fact.payload.generatedAt
-        if (typeof generatedAt !== 'string') {
-          throw new Error(`Evaluationssnapshot ${fact.factId} ist unvollständig`)
+    const capturePaths = new Set<string>()
+    for (const archive of campaignArchives) {
+      const sourcePath = archive.snapshot.sourcePath
+      if (typeof sourcePath !== 'string' || sourcePath.length === 0) {
+        throw new Error('Versiegeltes Review-Archiv enthält keinen Capture-Pfad')
+      }
+      capturePaths.add(sourcePath)
+      observations.push({
+        observationId: archive.observationId,
+        reviewToken: archive.reviewToken,
+        reviewReference: archive.reviewReference,
+        statement: archive.review.statement,
+        evidence: structuredClone(archive.review.evidence),
+        schema: CALIBRATION_CAPTURE_SCHEMA,
+        integrity: archive.captureIntegrity,
+        generatedAt: archive.snapshot.generatedAt,
+      })
+    }
+    validCaptures = capturePaths.size
+  } else {
+    for (const note of vault.notes.values()) {
+      if (!isActivePath(note.relativePath) || note.frontmatter.quelle !== 'knowledge-harvester') {
+        continue
+      }
+      if (note.frontmatter.calibration_capture_schema === undefined) continue
+      try {
+        const bundle = parseCalibrationCaptureBundle(note.frontmatter)
+        validCaptures++
+        for (const fact of bundle.facts) {
+          if (fact.payload.evaluationSample !== true) continue
+          const generatedAt = fact.payload.generatedAt
+          if (typeof generatedAt !== 'string') {
+            throw new Error(`Evaluationssnapshot ${fact.factId} ist unvollständig`)
+          }
+          observations.push({
+            observationId: calibrationObservationId(
+              bundle.sessionId,
+              fact.factId,
+              fact.fingerprint,
+            ),
+            reviewToken: calibrationReviewToken(
+              bundle.integrity,
+              fact.reviewReference,
+              fact.fingerprint,
+            ),
+            reviewReference: fact.reviewReference,
+            statement: fact.review.statement,
+            evidence: fact.review.evidence,
+            schema: bundle.schema,
+            integrity: bundle.integrity,
+            generatedAt,
+          })
         }
-        observations.push({
-          observationId: calibrationObservationId(
-            bundle.sessionId,
-            fact.factId,
-            fact.fingerprint,
-          ),
-          reviewToken: calibrationReviewToken(
-            bundle.integrity,
-            fact.reviewReference,
-            fact.fingerprint,
-          ),
-          reviewReference: fact.reviewReference,
-          statement: fact.review.statement,
-          evidence: fact.review.evidence,
-          schema: bundle.schema,
-          integrity: bundle.integrity,
-          generatedAt,
+      } catch (error) {
+        invalidCaptures++
+        errors.push({
+          path: note.relativePath,
+          message: error instanceof Error ? error.message : String(error),
         })
       }
-    } catch (error) {
-      invalidCaptures++
-      errors.push({
-        path: note.relativePath,
-        message: error instanceof Error ? error.message : String(error),
-      })
     }
   }
 
@@ -275,7 +329,20 @@ export function brainCalibrationReviewBatch(
       'useful bewertet den erwarteten Wiederverwendungsnutzen; supported bewertet ausschließlich die gezeigte Evidenz.',
       'useful und supported gemeinsam mit record_calibration_judgement und dem opaken review_token erfassen.',
       'Die R-Referenz verrät weder produktive Auswahl noch Rang oder Score.',
+      ...(campaignPhase === 'registered'
+        ? ['Dieser Batch stammt ausschließlich aus dem extern verankerten Campaign-Archiv.']
+        : []),
       'Die Reviewer-Rolle darf während der Bewertung keinen Zugriff auf Produktionsnotizen, Vault-Suche, semantische Suche oder den Evaluator haben.',
     ],
   }
+}
+
+export function brainCalibrationReviewBatch(
+  vault: Vault,
+  options: BrainCalibrationReviewBatchOptions = {},
+): BrainCalibrationReviewBatchResult {
+  return withBrainCalibrationCampaignLock(
+    vault,
+    () => brainCalibrationReviewBatchOperation(vault, options),
+  )
 }

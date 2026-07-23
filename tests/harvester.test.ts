@@ -72,6 +72,7 @@ function assertTypedDigest(content: string): void {
   assert.doesNotMatch(content, /^## Zusammenfassung$/m)
   const frontmatter = parseFrontmatter(content)
   assert.ok(Array.isArray(frontmatter.knowledge_fact_ids))
+  assert.ok(Array.isArray(frontmatter.calibration_candidate_universe_fact_ids))
   assert.ok(Array.isArray(frontmatter.calibration_fact_map))
   assert.ok(Array.isArray(frontmatter.calibration_snapshot_fingerprints))
   assert.ok(Array.isArray(frontmatter.calibration_snapshot_payloads))
@@ -82,6 +83,20 @@ function assertTypedDigest(content: string): void {
   assert.equal(frontmatter.calibration_capture_schema, CALIBRATION_CAPTURE_SCHEMA)
   const bundle = parseCalibrationCaptureBundle(frontmatter)
   assert.deepEqual(bundle.selectedFactIds, frontmatter.knowledge_fact_ids)
+  assert.ok(bundle.candidateUniverseFactIds)
+  assert.deepEqual(
+    bundle.candidateUniverseFactIds,
+    [...bundle.candidateUniverseFactIds].sort((left, right) =>
+      Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))),
+  )
+  assert.equal(
+    new Set(bundle.candidateUniverseFactIds).size,
+    bundle.candidateUniverseFactIds.length,
+  )
+  assert.ok(
+    bundle.selectedFactIds.every(factId =>
+      bundle.candidateUniverseFactIds?.includes(factId)),
+  )
   assert.ok(bundle.facts.length >= bundle.selectedFactIds.length)
   assert.equal(frontmatter.calibration_fact_map.length, bundle.facts.length)
   assert.equal(frontmatter.calibration_snapshot_payloads.length, bundle.facts.length)
@@ -105,6 +120,10 @@ function assertTypedDigest(content: string): void {
     assert.equal(typeof payload.samplingProbability, 'number')
     assert.equal(Object.hasOwn(payload, 'statement'), false)
     assert.equal(Object.hasOwn(payload, 'excerpt'), false)
+    assert.equal(
+      payload.candidatePopulationCount,
+      bundle.candidateUniverseFactIds.length,
+    )
   }
 }
 

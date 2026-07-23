@@ -7,6 +7,7 @@ import {
 } from './knowledge-salience.ts'
 import {
   calibrationObservationId,
+  calibrationProjectGroupId,
   parseCalibrationCaptureBundle,
 } from './calibration-capture.ts'
 import {
@@ -16,6 +17,10 @@ import {
   type BrainCalibrationLabel,
   type BrainCalibrationTargetSnapshot,
 } from './brain-calibration.ts'
+import {
+  assertBrainCalibrationExploratoryAccess,
+  withBrainCalibrationCampaignLock,
+} from './brain-calibration-campaign.ts'
 
 export const BRAIN_CALIBRATION_EVALUATION_VERSION = 'brain-calibration-evaluation-v2'
 export const BRAIN_CALIBRATION_HOLDOUT_POLICY = {
@@ -55,6 +60,13 @@ export interface BrainCalibrationEvaluationOptions {
   label?: BrainCalibrationEvaluationLabel | 'all'
   groupBy?: BrainCalibrationEvaluationGroupBy
   bootstrapSamples?: number
+}
+
+export interface NormalizedBrainCalibrationEvaluationOptions {
+  label: BrainCalibrationEvaluationLabel | 'all'
+  labels: BrainCalibrationEvaluationLabel[]
+  groupBy: BrainCalibrationEvaluationGroupBy
+  bootstrapSamples: number
 }
 
 export interface ProbabilityInterval {
@@ -321,8 +333,14 @@ interface AggregatedSamples {
   excludedOtherModelVersions: number
 }
 
-interface EvaluationFrameTarget {
+/**
+ * Serializable, prose-free response-frame target. Every field that can affect
+ * sampling, chronology, leakage grouping, or capture attestation is bound here
+ * so a sealed evaluator never has to consult the live vault.
+ */
+export interface BrainCalibrationEvaluationFrameTarget {
   observationId: string
+  factId: string
   selectionStatus: 'selected' | 'sampled_unselected'
   samplingProbability: number
   samplingWeight: number
@@ -330,11 +348,41 @@ interface EvaluationFrameTarget {
   salienceScore: number
   evidenceScore: number
   candidatePopulationCount: number
+  sourcePath: string
+  sessionId: string
+  projectGroupId: string
+  captureIntegrity: string
+  snapshotFingerprint: string
 }
 
-interface EvaluationResponseFrame {
-  targets: Map<string, EvaluationFrameTarget>
+export interface BrainCalibrationEvaluationFrameSnapshot {
+  targets: BrainCalibrationEvaluationFrameTarget[]
   invalidCaptureBundles: number
+}
+
+export const BRAIN_CALIBRATION_SPLIT_PLAN_SCHEMA =
+  'brain-calibration-split-plan-v1' as const
+
+export type BrainCalibrationEvaluationSplitAssignment =
+  | 'train'
+  | 'test'
+  | 'embargoed'
+
+export interface BrainCalibrationEvaluationSplitPlanTarget {
+  observationId: string
+  groupId: string
+  assignment: BrainCalibrationEvaluationSplitAssignment
+}
+
+/**
+ * Frozen, label-independent leakage partition. It is derived from the complete
+ * enrollment frame before review and is bijective to that frame.
+ */
+export interface BrainCalibrationEvaluationSplitPlan {
+  schema: typeof BRAIN_CALIBRATION_SPLIT_PLAN_SCHEMA
+  groupBy: BrainCalibrationEvaluationGroupBy
+  cutoffAt: string | null
+  targets: BrainCalibrationEvaluationSplitPlanTarget[]
 }
 
 interface ChronologicalSplit {
@@ -380,9 +428,41 @@ export const BRAIN_CALIBRATION_SHADOW_MODEL_REGISTRY = {
   },
 } as const
 
+function compareUtf8Bytes(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+}
+
 function round(value: number, digits = 6): number {
   const factor = 10 ** digits
   return Math.round(value * factor) / factor
+}
+
+export function normalizeBrainCalibrationEvaluationOptions(
+  options: BrainCalibrationEvaluationOptions = {},
+): NormalizedBrainCalibrationEvaluationOptions {
+  const groupBy = options.groupBy ?? 'session'
+  if (groupBy !== 'session' && groupBy !== 'project') {
+    throw new Error('groupBy muss session oder project sein')
+  }
+  const bootstrapSamples = options.bootstrapSamples
+    ?? BRAIN_CALIBRATION_HOLDOUT_POLICY.defaultBootstrapSamples
+  if (
+    !Number.isInteger(bootstrapSamples)
+    || bootstrapSamples < 100
+    || bootstrapSamples > 5_000
+  ) {
+    throw new Error('bootstrapSamples muss eine Ganzzahl zwischen 100 und 5000 sein')
+  }
+  const label = options.label ?? 'all'
+  if (label !== 'all' && label !== 'useful' && label !== 'supported') {
+    throw new Error('label muss all, useful oder supported sein')
+  }
+  return {
+    label,
+    labels: label === 'all' ? ['useful', 'supported'] : [label],
+    groupBy,
+    bootstrapSamples,
+  }
 }
 
 function samplingWeight(value: number | undefined): number {
@@ -1086,7 +1166,12 @@ function leakageGroups(
   const groups = new Map<string, GoldSample[]>()
   for (const component of components.values()) {
     const id = `lg-${createHash('sha256')
-      .update(component.map(sample => sample.observationId).sort().join('\0'))
+      .update(
+        component
+          .map(sample => sample.observationId)
+          .sort(compareUtf8Bytes)
+          .join('\0'),
+      )
       .digest('hex')
       .slice(0, 20)}`
     for (const sample of component) sample.groupId = id
@@ -1095,82 +1180,133 @@ function leakageGroups(
   return groups
 }
 
-function chronologicalSplit(
-  samples: GoldSample[],
+function frameLeakageGroups(
+  targets: readonly BrainCalibrationEvaluationFrameTarget[],
   groupBy: BrainCalibrationEvaluationGroupBy,
-): ChronologicalSplit {
-  const groups = leakageGroups(samples, groupBy)
-  if (groups.size < 2) {
-    return {
-      train: [],
-      test: [],
-      embargoed: [...samples],
-      trainGroups: 0,
-      testGroups: 0,
-      embargoedGroups: groups.size,
-      cutoffAt: null,
-      trainLatestAt: null,
-      testEarliestAt: null,
-      strictTemporalOrder: false,
+): Map<string, BrainCalibrationEvaluationFrameTarget[]> {
+  const unionFind = new UnionFind(targets.length)
+  const seen = new Map<string, number>()
+  for (const [index, target] of targets.entries()) {
+    const keys = [
+      `fact:${target.factId}`,
+      `session:${target.sessionId}`,
+      `source:${target.sourcePath}`,
+    ]
+    if (groupBy === 'project') keys.push(`project:${target.projectGroupId}`)
+    for (const key of keys) {
+      const previous = seen.get(key)
+      if (previous === undefined) seen.set(key, index)
+      else unionFind.union(previous, index)
     }
   }
+  const components = new Map<number, BrainCalibrationEvaluationFrameTarget[]>()
+  for (const [index, target] of targets.entries()) {
+    const root = unionFind.find(index)
+    const component = components.get(root) ?? []
+    component.push(target)
+    components.set(root, component)
+  }
+  const groups = new Map<string, BrainCalibrationEvaluationFrameTarget[]>()
+  for (const component of components.values()) {
+    const id = `lg-${createHash('sha256')
+      .update(
+        component
+          .map(target => target.observationId)
+          .sort(compareUtf8Bytes)
+          .join('\0'),
+      )
+      .digest('hex')
+      .slice(0, 20)}`
+    groups.set(id, component)
+  }
+  return groups
+}
 
-  const windows = [...groups.entries()].map(([id, groupSamples]) => {
-    const timestamps = groupSamples.map(sample => Date.parse(sample.snapshot.generatedAt))
+interface TemporalWindow<T> {
+  id: string
+  items: T[]
+  min: number
+  max: number
+  weight: number
+}
+
+interface CutoffPartition {
+  cutoff: number
+  trainIds: Set<string>
+  testIds: Set<string>
+  embargoIds: Set<string>
+  testWeight: number
+  embargoWeight: number
+}
+
+function temporalWindows<T>(
+  groups: ReadonlyMap<string, T[]>,
+  generatedAt: (item: T) => string,
+  itemWeight: (item: T) => number,
+): TemporalWindow<T>[] {
+  return [...groups.entries()].map(([id, items]) => {
+    const timestamps = items.map(item => Date.parse(generatedAt(item)))
     if (timestamps.some(timestamp => !Number.isFinite(timestamp))) {
       throw new Error('generatedAt enthält einen ungültigen Zeitstempel')
     }
+    const weight = items.reduce((sum, item) => sum + itemWeight(item), 0)
+    if (!Number.isFinite(weight) || weight <= 0) {
+      throw new Error('Zeitfenster enthält kein gültiges positives Stichprobengewicht')
+    }
     return {
       id,
-      samples: groupSamples,
+      items,
       min: Math.min(...timestamps),
       max: Math.max(...timestamps),
-      weight: groupSamples.reduce((sum, sample) => sum + sample.samplingWeight, 0),
+      weight,
     }
   })
-  const uniqueTimestamps = [...new Set(
-    samples.map(sample => Date.parse(sample.snapshot.generatedAt)),
-  )].sort((left, right) => left - right)
-  const targetTestWeight = samples.reduce(
-    (sum, sample) => sum + sample.samplingWeight,
-    0,
-  ) * BRAIN_CALIBRATION_HOLDOUT_POLICY.holdoutFraction
-  let best: {
-    cutoff: number
-    trainIds: Set<string>
-    testIds: Set<string>
-    embargoIds: Set<string>
-    distance: number
-    embargoWeight: number
-  } | null = null
+}
 
-  // A cutoff is the earliest permitted test timestamp. Components spanning
-  // that boundary are embargoed instead of contaminating either partition.
-  for (const cutoff of uniqueTimestamps.slice(1)) {
-    const trainIds = new Set<string>()
-    const testIds = new Set<string>()
-    const embargoIds = new Set<string>()
-    let testWeight = 0
-    let embargoWeight = 0
-    for (const window of windows) {
-      if (window.max < cutoff) {
-        trainIds.add(window.id)
-      } else if (window.min >= cutoff) {
-        testIds.add(window.id)
-        testWeight += window.weight
-      } else {
-        embargoIds.add(window.id)
-        embargoWeight += window.weight
-      }
+function partitionAtCutoff<T>(
+  windows: readonly TemporalWindow<T>[],
+  cutoff: number,
+): CutoffPartition {
+  const trainIds = new Set<string>()
+  const testIds = new Set<string>()
+  const embargoIds = new Set<string>()
+  let testWeight = 0
+  let embargoWeight = 0
+  for (const window of windows) {
+    if (window.max < cutoff) {
+      trainIds.add(window.id)
+    } else if (window.min >= cutoff) {
+      testIds.add(window.id)
+      testWeight += window.weight
+    } else {
+      embargoIds.add(window.id)
+      embargoWeight += window.weight
     }
-    if (trainIds.size === 0 || testIds.size === 0) continue
+  }
+  return {
+    cutoff,
+    trainIds,
+    testIds,
+    embargoIds,
+    testWeight,
+    embargoWeight,
+  }
+}
+
+function chooseChronologicalCutoff<T>(
+  windows: readonly TemporalWindow<T>[],
+  timestamps: readonly number[],
+  totalWeight: number,
+): CutoffPartition | null {
+  const targetTestWeight =
+    totalWeight * BRAIN_CALIBRATION_HOLDOUT_POLICY.holdoutFraction
+  let best: (CutoffPartition & { distance: number }) | null = null
+  for (const cutoff of [...new Set(timestamps)].sort((left, right) => left - right).slice(1)) {
+    const partition = partitionAtCutoff(windows, cutoff)
+    if (partition.trainIds.size === 0 || partition.testIds.size === 0) continue
     const candidate = {
-      cutoff,
-      trainIds,
-      testIds,
-      embargoIds,
-      distance: Math.abs(testWeight - targetTestWeight),
-      embargoWeight,
+      ...partition,
+      distance: Math.abs(partition.testWeight - targetTestWeight),
     }
     if (
       best === null
@@ -1188,6 +1324,355 @@ function chronologicalSplit(
       best = candidate
     }
   }
+  return best
+}
+
+export function deriveBrainCalibrationCutoff(
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+  groupBy: BrainCalibrationEvaluationGroupBy,
+): string | null {
+  if (groupBy !== 'session' && groupBy !== 'project') {
+    throw new Error('groupBy muss session oder project sein')
+  }
+  const canonical = canonicalEvaluationFrame(frame)
+  if (canonical.invalidCaptureBundles > 0) {
+    throw new Error(
+      'Cutoff kann bei ungültigen oder duplizierten Capture-Bundles nicht versiegelt werden',
+    )
+  }
+  const groups = frameLeakageGroups(canonical.targets, groupBy)
+  if (groups.size < 2) return null
+  const windows = temporalWindows(
+    groups,
+    target => target.generatedAt,
+    target => target.samplingWeight,
+  )
+  const partition = chooseChronologicalCutoff(
+    windows,
+    canonical.targets.map(target => Date.parse(target.generatedAt)),
+    canonical.targets.reduce((sum, target) => sum + target.samplingWeight, 0),
+  )
+  return partition === null ? null : new Date(partition.cutoff).toISOString()
+}
+
+function canonicalFixedCutoff(value: string | null): string | null {
+  if (value === null) return null
+  const milliseconds = Date.parse(value)
+  if (
+    !Number.isFinite(milliseconds)
+    || new Date(milliseconds).toISOString() !== value
+  ) {
+    throw new Error('fixedCutoffAt muss ein kanonischer UTC-Zeitstempel sein')
+  }
+  return value
+}
+
+function assertExactObjectKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  field: string,
+): void {
+  const actual = Object.keys(value).sort(compareUtf8Bytes)
+  const canonicalExpected = [...expected].sort(compareUtf8Bytes)
+  if (
+    actual.length !== canonicalExpected.length
+    || actual.some((key, index) => key !== canonicalExpected[index])
+  ) {
+    throw new Error(`${field} enthält unerwartete oder fehlende Felder`)
+  }
+}
+
+/**
+ * Strictly parses the serializable shape. Frame-bijection and reproducibility
+ * are checked separately by validateBrainCalibrationSplitPlan.
+ */
+export function parseBrainCalibrationEvaluationSplitPlan(
+  value: unknown,
+): BrainCalibrationEvaluationSplitPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Split-Plan muss ein Objekt sein')
+  }
+  const plan = value as Record<string, unknown>
+  assertExactObjectKeys(plan, ['schema', 'groupBy', 'cutoffAt', 'targets'], 'Split-Plan')
+  if (plan.schema !== BRAIN_CALIBRATION_SPLIT_PLAN_SCHEMA) {
+    throw new Error('Split-Plan-Schema ist ungültig')
+  }
+  if (plan.groupBy !== 'session' && plan.groupBy !== 'project') {
+    throw new Error('Split-Plan.groupBy muss session oder project sein')
+  }
+  const cutoffAt = plan.cutoffAt === null
+    ? null
+    : typeof plan.cutoffAt === 'string'
+      ? canonicalFixedCutoff(plan.cutoffAt)
+      : (() => { throw new Error('Split-Plan.cutoffAt ist ungültig') })()
+  if (!Array.isArray(plan.targets)) {
+    throw new Error('Split-Plan.targets muss ein Array sein')
+  }
+  const targets = plan.targets.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(`Split-Plan.targets[${index}] muss ein Objekt sein`)
+    }
+    const target = raw as Record<string, unknown>
+    assertExactObjectKeys(
+      target,
+      ['observationId', 'groupId', 'assignment'],
+      `Split-Plan.targets[${index}]`,
+    )
+    if (
+      typeof target.observationId !== 'string'
+      || !/^ko-[a-f0-9]{24}$/.test(target.observationId)
+    ) {
+      throw new Error(`Split-Plan.targets[${index}].observationId ist ungültig`)
+    }
+    if (
+      typeof target.groupId !== 'string'
+      || !/^lg-[a-f0-9]{20}$/.test(target.groupId)
+    ) {
+      throw new Error(`Split-Plan.targets[${index}].groupId ist ungültig`)
+    }
+    if (
+      target.assignment !== 'train'
+      && target.assignment !== 'test'
+      && target.assignment !== 'embargoed'
+    ) {
+      throw new Error(`Split-Plan.targets[${index}].assignment ist ungültig`)
+    }
+    return {
+      observationId: target.observationId,
+      groupId: target.groupId,
+      assignment: target.assignment as BrainCalibrationEvaluationSplitAssignment,
+    }
+  })
+  const sorted = [...targets].sort((left, right) =>
+    compareUtf8Bytes(left.observationId, right.observationId))
+  if (targets.some((target, index) =>
+    target.observationId !== sorted[index]?.observationId)) {
+    throw new Error('Split-Plan.targets muss nach observationId sortiert sein')
+  }
+  if (new Set(targets.map(target => target.observationId)).size !== targets.length) {
+    throw new Error('Split-Plan.targets enthält doppelte observationIds')
+  }
+  return {
+    schema: BRAIN_CALIBRATION_SPLIT_PLAN_SCHEMA,
+    groupBy: plan.groupBy,
+    cutoffAt,
+    targets,
+  }
+}
+
+function splitPlanForCutoff(
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+  groupBy: BrainCalibrationEvaluationGroupBy,
+  cutoffAt: string | null,
+): BrainCalibrationEvaluationSplitPlan {
+  const canonical = canonicalEvaluationFrame(frame)
+  if (canonical.invalidCaptureBundles > 0) {
+    throw new Error(
+      'Split-Plan kann bei ungültigen oder duplizierten Capture-Bundles nicht versiegelt werden',
+    )
+  }
+  const groups = frameLeakageGroups(canonical.targets, groupBy)
+  const assignmentByGroup = new Map<
+    string,
+    BrainCalibrationEvaluationSplitAssignment
+  >()
+  if (cutoffAt === null) {
+    for (const groupId of groups.keys()) assignmentByGroup.set(groupId, 'embargoed')
+  } else {
+    const windows = temporalWindows(
+      groups,
+      target => target.generatedAt,
+      target => target.samplingWeight,
+    )
+    const partition = partitionAtCutoff(windows, Date.parse(cutoffAt))
+    for (const groupId of groups.keys()) {
+      assignmentByGroup.set(
+        groupId,
+        partition.trainIds.has(groupId)
+          ? 'train'
+          : partition.testIds.has(groupId)
+            ? 'test'
+            : 'embargoed',
+      )
+    }
+  }
+  const groupByObservation = new Map<string, string>()
+  for (const [groupId, targets] of groups) {
+    for (const target of targets) groupByObservation.set(target.observationId, groupId)
+  }
+  return {
+    schema: BRAIN_CALIBRATION_SPLIT_PLAN_SCHEMA,
+    groupBy,
+    cutoffAt,
+    targets: canonical.targets.map(target => {
+      const groupId = groupByObservation.get(target.observationId)
+      if (groupId === undefined) {
+        throw new Error('Interner Fehler: Leakage-Gruppe fehlt im Split-Plan')
+      }
+      const assignment = assignmentByGroup.get(groupId)
+      if (assignment === undefined) {
+        throw new Error('Interner Fehler: Assignment fehlt im Split-Plan')
+      }
+      return { observationId: target.observationId, groupId, assignment }
+    }),
+  }
+}
+
+/**
+ * Derives the complete label-independent partition from the enrollment frame.
+ * A supplied cutoff is useful for validating an externally preregistered time
+ * boundary; omitted means the deterministic holdout policy chooses it.
+ */
+export function deriveBrainCalibrationSplitPlan(
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+  groupBy: BrainCalibrationEvaluationGroupBy,
+  fixedCutoffAt?: string | null,
+): BrainCalibrationEvaluationSplitPlan {
+  if (groupBy !== 'session' && groupBy !== 'project') {
+    throw new Error('groupBy muss session oder project sein')
+  }
+  const cutoffAt = fixedCutoffAt === undefined
+    ? deriveBrainCalibrationCutoff(frame, groupBy)
+    : canonicalFixedCutoff(fixedCutoffAt)
+  return splitPlanForCutoff(frame, groupBy, cutoffAt)
+}
+
+/**
+ * Validates syntax, exact frame bijection, leakage components and temporal
+ * assignments. The returned object has one canonical ordering.
+ */
+export function validateBrainCalibrationSplitPlan(
+  value: unknown,
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+  expectedGroupBy?: BrainCalibrationEvaluationGroupBy,
+  expectedCutoffAt?: string | null,
+): BrainCalibrationEvaluationSplitPlan {
+  const plan = parseBrainCalibrationEvaluationSplitPlan(value)
+  if (expectedGroupBy !== undefined && plan.groupBy !== expectedGroupBy) {
+    throw new Error('Split-Plan.groupBy weicht vom Analyseplan ab')
+  }
+  if (
+    expectedCutoffAt !== undefined
+    && plan.cutoffAt !== canonicalFixedCutoff(expectedCutoffAt)
+  ) {
+    throw new Error('Split-Plan.cutoffAt weicht vom Analyseplan ab')
+  }
+  const expected = splitPlanForCutoff(frame, plan.groupBy, plan.cutoffAt)
+  if (JSON.stringify(plan) !== JSON.stringify(expected)) {
+    throw new Error(
+      'Split-Plan ist nicht vollständig und bijektiv aus dem Evaluationsframe reproduzierbar',
+    )
+  }
+  return expected
+}
+
+export function computeBrainCalibrationSplitPlanFingerprint(
+  value: unknown,
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+): string {
+  const plan = validateBrainCalibrationSplitPlan(value, frame)
+  return createHash('sha256').update(JSON.stringify({
+    domain: 'brain-calibration-split-plan-fingerprint-v1',
+    plan,
+  })).digest('hex')
+}
+
+function chronologicalSplit(
+  samples: GoldSample[],
+  groupBy: BrainCalibrationEvaluationGroupBy,
+  fixedCutoffAt?: string | null,
+  frozenPlan?: BrainCalibrationEvaluationSplitPlan,
+): ChronologicalSplit {
+  if (frozenPlan !== undefined) {
+    if (frozenPlan.groupBy !== groupBy) {
+      throw new Error('Eingefrorener Split-Plan verwendet eine andere Gruppierung')
+    }
+    const normalizedFixed = fixedCutoffAt === undefined
+      ? frozenPlan.cutoffAt
+      : canonicalFixedCutoff(fixedCutoffAt)
+    if (normalizedFixed !== frozenPlan.cutoffAt) {
+      throw new Error('Eingefrorener Split-Plan verwendet einen anderen Cutoff')
+    }
+    const plannedByObservation = new Map(
+      frozenPlan.targets.map(target => [target.observationId, target]),
+    )
+    const train: GoldSample[] = []
+    const test: GoldSample[] = []
+    const embargoed: GoldSample[] = []
+    for (const sample of samples) {
+      const planned = plannedByObservation.get(sample.observationId)
+      if (planned === undefined) {
+        throw new Error(
+          `Gelabelte Beobachtung ${sample.observationId} fehlt im eingefrorenen Split-Plan`,
+        )
+      }
+      sample.groupId = planned.groupId
+      if (planned.assignment === 'train') train.push(sample)
+      else if (planned.assignment === 'test') test.push(sample)
+      else embargoed.push(sample)
+    }
+    const trainLatest = train.length === 0
+      ? null
+      : Math.max(...train.map(sample => Date.parse(sample.snapshot.generatedAt)))
+    const testEarliest = test.length === 0
+      ? null
+      : Math.min(...test.map(sample => Date.parse(sample.snapshot.generatedAt)))
+    const strictTemporalOrder = trainLatest !== null
+      && testEarliest !== null
+      && trainLatest < testEarliest
+    if (
+      train.length > 0
+      && test.length > 0
+      && !strictTemporalOrder
+    ) {
+      throw new Error('Eingefrorener Split-Plan verletzt die strikte Zeitordnung')
+    }
+    return {
+      train,
+      test,
+      embargoed,
+      trainGroups: new Set(train.map(sample => sample.groupId)).size,
+      testGroups: new Set(test.map(sample => sample.groupId)).size,
+      embargoedGroups: new Set(embargoed.map(sample => sample.groupId)).size,
+      cutoffAt: frozenPlan.cutoffAt,
+      trainLatestAt: trainLatest === null ? null : new Date(trainLatest).toISOString(),
+      testEarliestAt: testEarliest === null ? null : new Date(testEarliest).toISOString(),
+      strictTemporalOrder,
+    }
+  }
+  const groups = leakageGroups(samples, groupBy)
+  if (groups.size < 2 && fixedCutoffAt === undefined) {
+    return {
+      train: [],
+      test: [],
+      embargoed: [...samples],
+      trainGroups: 0,
+      testGroups: 0,
+      embargoedGroups: groups.size,
+      cutoffAt: null,
+      trainLatestAt: null,
+      testEarliestAt: null,
+      strictTemporalOrder: false,
+    }
+  }
+
+  const windows = temporalWindows(
+    groups,
+    sample => sample.snapshot.generatedAt,
+    sample => sample.samplingWeight,
+  )
+  const normalizedFixed = fixedCutoffAt === undefined
+    ? undefined
+    : canonicalFixedCutoff(fixedCutoffAt)
+  const best = normalizedFixed === undefined
+    ? chooseChronologicalCutoff(
+      windows,
+      samples.map(sample => Date.parse(sample.snapshot.generatedAt)),
+      samples.reduce((sum, sample) => sum + sample.samplingWeight, 0),
+    )
+    : normalizedFixed === null
+      ? null
+      : partitionAtCutoff(windows, Date.parse(normalizedFixed))
 
   if (best === null) {
     return {
@@ -1197,7 +1682,7 @@ function chronologicalSplit(
       trainGroups: 0,
       testGroups: 0,
       embargoedGroups: groups.size,
-      cutoffAt: null,
+      cutoffAt: normalizedFixed ?? null,
       trainLatestAt: null,
       testEarliestAt: null,
       strictTemporalOrder: false,
@@ -1218,8 +1703,9 @@ function chronologicalSplit(
   const testEarliest = Math.min(
     ...test.map(sample => Date.parse(sample.snapshot.generatedAt)),
   )
-  const strictTemporalOrder = trainLatest < testEarliest
-  if (!strictTemporalOrder) {
+  const hasTrainAndTest = train.length > 0 && test.length > 0
+  const strictTemporalOrder = hasTrainAndTest && trainLatest < testEarliest
+  if (hasTrainAndTest && !strictTemporalOrder) {
     throw new Error('Interner Fehler: strikter chronologischer Split wurde verletzt')
   }
   return {
@@ -1230,8 +1716,8 @@ function chronologicalSplit(
     testGroups: best.testIds.size,
     embargoedGroups: best.embargoIds.size,
     cutoffAt: new Date(best.cutoff).toISOString(),
-    trainLatestAt: new Date(trainLatest).toISOString(),
-    testEarliestAt: new Date(testEarliest).toISOString(),
+    trainLatestAt: train.length === 0 ? null : new Date(trainLatest).toISOString(),
+    testEarliestAt: test.length === 0 ? null : new Date(testEarliest).toISOString(),
     strictTemporalOrder,
   }
 }
@@ -1311,9 +1797,164 @@ function counts(samples: readonly GoldSample[]): { positive: number; negative: n
   return { positive, negative: samples.length - positive }
 }
 
-function collectEvaluationResponseFrame(vault: Vault): EvaluationResponseFrame {
-  const targets = new Map<string, EvaluationFrameTarget>()
+interface CollectedEvaluationBundle {
+  key: string
+  integrity: string
+  targets: BrainCalibrationEvaluationFrameTarget[]
+}
+
+function canonicalFrameTarget(
+  target: BrainCalibrationEvaluationFrameTarget,
+  field: string,
+): BrainCalibrationEvaluationFrameTarget {
+  if (!/^ko-[a-f0-9]{24}$/.test(target.observationId)) {
+    throw new Error(`${field}.observationId ist ungültig`)
+  }
+  if (!/^ks-[a-f0-9]{20}$/.test(target.factId)) {
+    throw new Error(`${field}.factId ist ungültig`)
+  }
+  if (
+    target.selectionStatus !== 'selected'
+    && target.selectionStatus !== 'sampled_unselected'
+  ) {
+    throw new Error(`${field}.selectionStatus ist ungültig`)
+  }
+  if (
+    !Number.isFinite(target.samplingProbability)
+    || target.samplingProbability <= 0
+    || target.samplingProbability > 1
+  ) {
+    throw new Error(`${field}.samplingProbability ist ungültig`)
+  }
+  const expectedWeight = 1 / target.samplingProbability
+  if (
+    !Number.isFinite(target.samplingWeight)
+    || target.samplingWeight <= 0
+    || Math.abs(target.samplingWeight - expectedWeight)
+      > 1e-12 * Math.max(1, expectedWeight)
+  ) {
+    throw new Error(`${field}.samplingWeight ist nicht reproduzierbar`)
+  }
+  if (
+    typeof target.generatedAt !== 'string'
+    || !Number.isFinite(Date.parse(target.generatedAt))
+    || new Date(Date.parse(target.generatedAt)).toISOString() !== target.generatedAt
+  ) {
+    throw new Error(`${field}.generatedAt ist kein kanonischer UTC-Zeitstempel`)
+  }
+  if (
+    !Number.isFinite(target.salienceScore)
+    || !Number.isFinite(target.evidenceScore)
+  ) {
+    throw new Error(`${field} enthält einen ungültigen Score`)
+  }
+  if (
+    !Number.isInteger(target.candidatePopulationCount)
+    || target.candidatePopulationCount < 1
+    || target.candidatePopulationCount > 10_000
+  ) {
+    throw new Error(`${field}.candidatePopulationCount ist ungültig`)
+  }
+  const boundedText = (value: string, name: string, maximum: number): string => {
+    if (
+      typeof value !== 'string'
+      || value.length < 1
+      || value.length > maximum
+      || value.normalize('NFC') !== value
+      || /[\u0000-\u001f\u007f]/u.test(value)
+    ) {
+      throw new Error(`${field}.${name} ist ungültig`)
+    }
+    return value
+  }
+  const sourcePath = boundedText(target.sourcePath, 'sourcePath', 1_000)
+  if (
+    sourcePath.startsWith('/')
+    || sourcePath.includes('\\')
+    || sourcePath.split('/').some(part => part === '' || part === '.' || part === '..')
+  ) {
+    throw new Error(`${field}.sourcePath ist kein sicherer relativer Pfad`)
+  }
+  const sessionId = boundedText(target.sessionId, 'sessionId', 180)
+  const projectGroupId = boundedText(target.projectGroupId, 'projectGroupId', 23)
+  if (
+    !/^pg-[a-f0-9]{20}$/.test(projectGroupId)
+    || projectGroupId !== calibrationProjectGroupId(sourcePath)
+  ) {
+    throw new Error(`${field}.projectGroupId ist nicht aus sourcePath reproduzierbar`)
+  }
+  if (!/^[a-f0-9]{64}$/.test(target.captureIntegrity)) {
+    throw new Error(`${field}.captureIntegrity ist ungültig`)
+  }
+  if (!/^[a-f0-9]{64}$/.test(target.snapshotFingerprint)) {
+    throw new Error(`${field}.snapshotFingerprint ist ungültig`)
+  }
+  const expectedObservationId = calibrationObservationId(
+    sessionId,
+    target.factId,
+    target.snapshotFingerprint,
+  )
+  if (target.observationId !== expectedObservationId) {
+    throw new Error(`${field}.observationId ist nicht reproduzierbar`)
+  }
+  return {
+    observationId: target.observationId,
+    factId: target.factId,
+    selectionStatus: target.selectionStatus,
+    samplingProbability: target.samplingProbability,
+    samplingWeight: expectedWeight,
+    generatedAt: target.generatedAt,
+    salienceScore: target.salienceScore,
+    evidenceScore: target.evidenceScore,
+    candidatePopulationCount: target.candidatePopulationCount,
+    sourcePath,
+    sessionId,
+    projectGroupId,
+    captureIntegrity: target.captureIntegrity,
+    snapshotFingerprint: target.snapshotFingerprint,
+  }
+}
+
+function canonicalEvaluationFrame(
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+): BrainCalibrationEvaluationFrameSnapshot {
+  if (
+    !frame
+    || !Array.isArray(frame.targets)
+    || !Number.isInteger(frame.invalidCaptureBundles)
+    || frame.invalidCaptureBundles < 0
+  ) {
+    throw new Error('Evaluationsframe ist ungültig')
+  }
+  const targets = frame.targets.map((target, index) =>
+    canonicalFrameTarget(target, `frame.targets[${index}]`))
+  const seen = new Set<string>()
+  for (const target of targets) {
+    if (seen.has(target.observationId)) {
+      throw new Error(
+        `Evaluationsframe enthält observationId ${target.observationId} mehrfach`,
+      )
+    }
+    seen.add(target.observationId)
+  }
+  targets.sort((left, right) =>
+    compareUtf8Bytes(left.observationId, right.observationId)
+    || compareUtf8Bytes(left.captureIntegrity, right.captureIntegrity)
+    || compareUtf8Bytes(left.sourcePath, right.sourcePath))
+  return { targets, invalidCaptureBundles: frame.invalidCaptureBundles }
+}
+
+function frameTargetsByObservation(
+  frame: BrainCalibrationEvaluationFrameSnapshot,
+): Map<string, BrainCalibrationEvaluationFrameTarget> {
+  return new Map(frame.targets.map(target => [target.observationId, target]))
+}
+
+export function collectBrainCalibrationEvaluationFrame(
+  vault: Vault,
+): BrainCalibrationEvaluationFrameSnapshot {
   let invalidCaptureBundles = 0
+  const bundles: CollectedEvaluationBundle[] = []
   for (const note of vault.notes.values()) {
     if (note.frontmatter.calibration_capture_schema === undefined) continue
     let bundle
@@ -1323,13 +1964,19 @@ function collectEvaluationResponseFrame(vault: Vault): EvaluationResponseFrame {
       invalidCaptureBundles++
       continue
     }
+    const bundleTargets: BrainCalibrationEvaluationFrameTarget[] = []
+    let invalidBundle = false
     for (const fact of bundle.facts) {
       const payload = fact.payload
+      if (payload.evaluationSample !== true) continue
       if (
-        payload.evaluationSample !== true
-        || payload.modelVersion !== KNOWLEDGE_SALIENCE_MODEL.version
+        payload.modelVersion !== KNOWLEDGE_SALIENCE_MODEL.version
         || payload.evidenceModelVersion !== KNOWLEDGE_SALIENCE_MODEL.evidenceModelVersion
-        || (
+      ) {
+        continue
+      }
+      if (
+        (
           payload.selectionStatus !== 'selected'
           && payload.selectionStatus !== 'sampled_unselected'
         )
@@ -1347,15 +1994,17 @@ function collectEvaluationResponseFrame(vault: Vault): EvaluationResponseFrame {
         || !Number.isInteger(payload.candidatePopulationCount)
         || payload.candidatePopulationCount < 1
       ) {
-        continue
+        invalidBundle = true
+        break
       }
       const observationId = calibrationObservationId(
         bundle.sessionId,
         fact.factId,
         fact.fingerprint,
       )
-      const target: EvaluationFrameTarget = {
+      const target: BrainCalibrationEvaluationFrameTarget = {
         observationId,
+        factId: fact.factId,
         selectionStatus: payload.selectionStatus,
         samplingProbability: payload.samplingProbability,
         samplingWeight: 1 / payload.samplingProbability,
@@ -1363,31 +2012,69 @@ function collectEvaluationResponseFrame(vault: Vault): EvaluationResponseFrame {
         salienceScore: payload.salienceScore,
         evidenceScore: payload.evidenceScore,
         candidatePopulationCount: payload.candidatePopulationCount,
+        sourcePath: note.relativePath,
+        sessionId: bundle.sessionId,
+        projectGroupId: calibrationProjectGroupId(note.relativePath),
+        captureIntegrity: bundle.integrity,
+        snapshotFingerprint: fact.fingerprint,
       }
-      const previous = targets.get(observationId)
-      if (
-        previous
-        && (
-          previous.selectionStatus !== target.selectionStatus
-          || Math.abs(previous.samplingProbability - target.samplingProbability) > 1e-12
-        )
-      ) {
-        invalidCaptureBundles++
-        targets.delete(observationId)
-        continue
+      try {
+        bundleTargets.push(canonicalFrameTarget(
+          target,
+          `Capture ${bundle.integrity}`,
+        ))
+      } catch {
+        invalidBundle = true
+        break
       }
-      targets.set(observationId, target)
+    }
+    if (invalidBundle) {
+      invalidCaptureBundles++
+      continue
+    }
+    if (bundleTargets.length > 0) {
+      bundles.push({
+        key: `${note.relativePath}\0${bundle.integrity}`,
+        integrity: bundle.integrity,
+        targets: bundleTargets,
+      })
     }
   }
-  return { targets, invalidCaptureBundles }
+
+  // A copied attested bundle is still a duplicate response-frame source.
+  // Invalidate every involved bundle rather than letting iteration order pick
+  // one copy, even when all bytes are identical.
+  const invalidBundleKeys = new Set<string>()
+  const byIntegrity = new Map<string, CollectedEvaluationBundle[]>()
+  const byObservation = new Map<string, CollectedEvaluationBundle[]>()
+  for (const bundle of bundles) {
+    const sameIntegrity = byIntegrity.get(bundle.integrity) ?? []
+    sameIntegrity.push(bundle)
+    byIntegrity.set(bundle.integrity, sameIntegrity)
+    for (const target of bundle.targets) {
+      const sameObservation = byObservation.get(target.observationId) ?? []
+      sameObservation.push(bundle)
+      byObservation.set(target.observationId, sameObservation)
+    }
+  }
+  for (const duplicates of [...byIntegrity.values(), ...byObservation.values()]) {
+    if (duplicates.length < 2) continue
+    for (const duplicate of duplicates) invalidBundleKeys.add(duplicate.key)
+  }
+  invalidCaptureBundles += invalidBundleKeys.size
+  const targets = bundles
+    .filter(bundle => !invalidBundleKeys.has(bundle.key))
+    .flatMap(bundle => bundle.targets)
+  return canonicalEvaluationFrame({ targets, invalidCaptureBundles })
 }
 
 function responseCoverageForLabel(
   entries: readonly BrainCalibrationEntry[],
   label: BrainCalibrationEvaluationLabel,
-  frame: EvaluationResponseFrame,
+  frame: BrainCalibrationEvaluationFrameSnapshot,
   holdoutStartsAt: string | null,
 ): BrainCalibrationResponseCoverage {
+  const targetsByObservation = frameTargetsByObservation(frame)
   const labelsByObservation = new Map<string, Set<BrainCalibrationLabel>>()
   const generatedAtByObservation = new Map<string, string>()
   for (const entry of entries) {
@@ -1414,7 +2101,7 @@ function responseCoverageForLabel(
       .filter(([, labels]) => labels.has('useful') && labels.has('supported'))
       .map(([observationId]) => observationId),
   )
-  const frameTargets = [...frame.targets.values()]
+  const frameTargets = frame.targets
   const completeTargets = frameTargets.filter(
     target => completeUsefulSupported.has(target.observationId),
   ).length
@@ -1427,7 +2114,7 @@ function responseCoverageForLabel(
       sum + (completeUsefulSupported.has(target.observationId) ? target.samplingWeight : 0),
     0,
   )
-  const stratum = (eligible: EvaluationFrameTarget[]) => {
+  const stratum = (eligible: BrainCalibrationEvaluationFrameTarget[]) => {
     const labeled = eligible.filter(
       target => labeledForTarget.has(target.observationId),
     ).length
@@ -1451,7 +2138,7 @@ function responseCoverageForLabel(
         : round(stratumLabeledWeight / eligibleWeight),
     }
   }
-  const slice = (targets: EvaluationFrameTarget[]) => {
+  const slice = (targets: BrainCalibrationEvaluationFrameTarget[]) => {
     const summary = stratum(targets)
     return {
       ...summary,
@@ -1463,14 +2150,14 @@ function responseCoverageForLabel(
   }
   const band = (
     name: string,
-    targets: EvaluationFrameTarget[],
+    targets: BrainCalibrationEvaluationFrameTarget[],
   ): BrainCalibrationCoverageBand => ({
     band: name,
     ...stratum(targets),
   })
   const overall = slice(frameTargets)
   const labelsOutsideFrame = [...labeledForTarget].filter(
-    observationId => !frame.targets.has(observationId),
+    observationId => !targetsByObservation.has(observationId),
   ).length
   const cutoff = holdoutStartsAt === null ? null : Date.parse(holdoutStartsAt)
   const holdoutTargets = cutoff === null
@@ -1480,7 +2167,7 @@ function responseCoverageForLabel(
   const holdoutLabelsOutsideFrame = cutoff === null
     ? 0
     : [...labeledForTarget].filter(observationId => {
-      if (frame.targets.has(observationId)) return false
+      if (targetsByObservation.has(observationId)) return false
       const generatedAt = generatedAtByObservation.get(observationId)
       return generatedAt !== undefined && Date.parse(generatedAt) >= cutoff
     }).length
@@ -1505,7 +2192,7 @@ function responseCoverageForLabel(
         ? 'coverage_gate_met_mnar_unresolved'
         : 'coverage_below_validation_gate'
   }
-  const score = (target: EvaluationFrameTarget) => label === 'useful'
+  const score = (target: BrainCalibrationEvaluationFrameTarget) => label === 'useful'
     ? target.salienceScore
     : target.evidenceScore
   const scoreBands = [
@@ -1658,27 +2345,54 @@ function evaluateLabel(
   label: BrainCalibrationEvaluationLabel,
   groupBy: BrainCalibrationEvaluationGroupBy,
   bootstrapSamples: number,
-  responseFrame: EvaluationResponseFrame,
+  responseFrame: BrainCalibrationEvaluationFrameSnapshot,
   bootstrapSeed: string,
+  fixedCutoffAt?: string | null,
+  frozenSplitPlan?: BrainCalibrationEvaluationSplitPlan,
 ): BrainCalibrationLabelEvaluation {
   const aggregate = aggregateGoldSamples(entries, label)
+  const split = chronologicalSplit(
+    aggregate.samples,
+    groupBy,
+    fixedCutoffAt,
+    frozenSplitPlan,
+  )
   if (aggregate.samples.length < 2) {
     const responseCoverage = responseCoverageForLabel(
       entries,
       label,
       responseFrame,
-      null,
+      split.cutoffAt,
     )
-    return emptyEvaluation(label, groupBy, aggregate, responseCoverage, [
+    const result = emptyEvaluation(label, groupBy, aggregate, responseCoverage, [
       'Mindestens zwei unabhängige, nicht unentschiedene Evaluationsbeobachtungen sind nötig.',
     ])
+    const trainCounts = counts(split.train)
+    const testCounts = counts(split.test)
+    result.split = {
+      ...result.split,
+      trainTargets: split.train.length,
+      testTargets: split.test.length,
+      trainGroups: split.trainGroups,
+      testGroups: split.testGroups,
+      trainPositive: trainCounts.positive,
+      trainNegative: trainCounts.negative,
+      testPositive: testCounts.positive,
+      testNegative: testCounts.negative,
+      cutoffAt: split.cutoffAt,
+      trainLatestAt: split.trainLatestAt,
+      testEarliestAt: split.testEarliestAt,
+      strictTemporalOrder: split.strictTemporalOrder,
+      embargoedTargets: split.embargoed.length,
+      embargoedGroups: split.embargoedGroups,
+    }
+    return result
   }
-  const split = chronologicalSplit(aggregate.samples, groupBy)
   const responseCoverage = responseCoverageForLabel(
     entries,
     label,
     responseFrame,
-    split.testEarliestAt,
+    split.cutoffAt,
   )
   const trainCounts = counts(split.train)
   const testCounts = counts(split.test)
@@ -1945,10 +2659,11 @@ function validityDiagnostic(
   }
 }
 
-function dataFingerprint(
+export function computeBrainCalibrationDataFingerprint(
   entries: readonly BrainCalibrationEntry[],
-  responseFrame: EvaluationResponseFrame,
+  frame: BrainCalibrationEvaluationFrameSnapshot,
 ): string {
+  const responseFrame = canonicalEvaluationFrame(frame)
   const labelPayload = entries
     .map(entry => ({
       observationId: entry.observationId,
@@ -1956,24 +2671,44 @@ function dataFingerprint(
       label: entry.label,
       value: entry.value,
       recordedAt: entry.recordedAt,
-      reviewerHash: createHash('sha256').update(entry.reviewer).digest('hex').slice(0, 16),
-      snapshot: serializeCalibrationSnapshotCore(entry.snapshot),
+      reviewerHash: createHash('sha256').update(entry.reviewer).digest('hex'),
+      snapshot: {
+        core: serializeCalibrationSnapshotCore(entry.snapshot),
+        sourcePath: entry.snapshot.sourcePath ?? null,
+        sessionId: entry.snapshot.sessionId ?? null,
+        projectGroupId: entry.snapshot.projectGroupId ?? null,
+        clientId: entry.snapshot.clientId ?? null,
+        observedAt: entry.snapshot.observedAt ?? null,
+        validityClass: entry.snapshot.validityClass ?? null,
+      },
     }))
-    .sort((left, right) =>
-      JSON.stringify(left).localeCompare(JSON.stringify(right), 'en'))
-  const responseFramePayload = [...responseFrame.targets.values()]
+    .sort((left, right) => compareUtf8Bytes(
+      JSON.stringify(left),
+      JSON.stringify(right),
+    ))
+  const responseFramePayload = responseFrame.targets
     .map(target => ({
       observationId: target.observationId,
+      factId: target.factId,
       selectionStatus: target.selectionStatus,
       samplingProbability: target.samplingProbability,
+      samplingWeight: target.samplingWeight,
       generatedAt: target.generatedAt,
       salienceScore: target.salienceScore,
       evidenceScore: target.evidenceScore,
       candidatePopulationCount: target.candidatePopulationCount,
+      sourcePath: target.sourcePath,
+      sessionId: target.sessionId,
+      projectGroupId: target.projectGroupId,
+      captureIntegrity: target.captureIntegrity,
+      snapshotFingerprint: target.snapshotFingerprint,
     }))
-    .sort((left, right) =>
-      left.observationId.localeCompare(right.observationId, 'en'))
+    .sort((left, right) => compareUtf8Bytes(
+      JSON.stringify(left),
+      JSON.stringify(right),
+    ))
   return createHash('sha256').update(JSON.stringify({
+    schema: 'brain-calibration-data-fingerprint-v3',
     labels: labelPayload,
     responseFrame: {
       targets: responseFramePayload,
@@ -1982,48 +2717,60 @@ function dataFingerprint(
   })).digest('hex')
 }
 
-export function evaluateBrainCalibration(
-  vault: Vault,
+/**
+ * Pure snapshot evaluator: all labels and every response-frame denominator are
+ * supplied by the caller. It never reads the vault or calibration dataset.
+ */
+export function evaluateBrainCalibrationSnapshot(
+  entries: readonly BrainCalibrationEntry[],
+  frame: BrainCalibrationEvaluationFrameSnapshot,
   options: BrainCalibrationEvaluationOptions = {},
+  fixedCutoffAt?: string | null,
+  splitPlan?: BrainCalibrationEvaluationSplitPlan,
 ): BrainCalibrationEvaluationResult {
-  const dataset = readBrainCalibrationDataset(vault)
-  const groupBy = options.groupBy ?? 'session'
-  if (groupBy !== 'session' && groupBy !== 'project') {
-    throw new Error('groupBy muss session oder project sein')
-  }
-  const bootstrapSamples = options.bootstrapSamples
-    ?? BRAIN_CALIBRATION_HOLDOUT_POLICY.defaultBootstrapSamples
-  if (
-    !Number.isInteger(bootstrapSamples)
-    || bootstrapSamples < 100
-    || bootstrapSamples > 5_000
-  ) {
-    throw new Error('bootstrapSamples muss eine Ganzzahl zwischen 100 und 5000 sein')
-  }
-  const requested = options.label ?? 'all'
-  if (!['all', 'useful', 'supported'].includes(requested)) {
-    throw new Error('label muss all, useful oder supported sein')
-  }
-  const labels: BrainCalibrationEvaluationLabel[] = requested === 'all'
-    ? ['useful', 'supported']
-    : [requested]
-  const responseFrame = collectEvaluationResponseFrame(vault)
-  const fingerprint = dataFingerprint(dataset.entries, responseFrame)
-  const reports = labels.map(label =>
-    evaluateLabel(
-      dataset.entries,
-      label,
-      groupBy,
-      bootstrapSamples,
+  const normalized = normalizeBrainCalibrationEvaluationOptions(options)
+  const responseFrame = canonicalEvaluationFrame(frame)
+  const requestedFixedCutoff = fixedCutoffAt === undefined
+    ? undefined
+    : canonicalFixedCutoff(fixedCutoffAt)
+  const frozenSplitPlan = splitPlan === undefined
+    ? undefined
+    : validateBrainCalibrationSplitPlan(
+      splitPlan,
       responseFrame,
-      fingerprint,
+      normalized.groupBy,
+      requestedFixedCutoff,
+    )
+  const normalizedFixedCutoff = frozenSplitPlan === undefined
+    ? requestedFixedCutoff
+    : frozenSplitPlan.cutoffAt
+  const splitPlanFingerprint = frozenSplitPlan === undefined
+    ? null
+    : computeBrainCalibrationSplitPlanFingerprint(frozenSplitPlan, responseFrame)
+  const fingerprint = computeBrainCalibrationDataFingerprint(entries, responseFrame)
+  const reports = normalized.labels.map(label =>
+    evaluateLabel(
+      entries,
+      label,
+      normalized.groupBy,
+      normalized.bootstrapSamples,
+      responseFrame,
+      splitPlanFingerprint === null
+        ? fingerprint
+        : `${fingerprint}:${splitPlanFingerprint}`,
+      normalizedFixedCutoff,
+      frozenSplitPlan,
     ))
   const runId = `ce-${createHash('sha256').update(JSON.stringify({
     evaluationVersion: BRAIN_CALIBRATION_EVALUATION_VERSION,
     fingerprint,
-    groupBy,
-    bootstrapSamples,
-    labels,
+    groupBy: normalized.groupBy,
+    bootstrapSamples: normalized.bootstrapSamples,
+    labels: normalized.labels,
+    cutoffPolicy: normalizedFixedCutoff === undefined
+      ? 'adaptive-from-labeled-sample'
+      : normalizedFixedCutoff,
+    splitPlanFingerprint,
   })).digest('hex').slice(0, 24)}`
   return {
     evaluationVersion: BRAIN_CALIBRATION_EVALUATION_VERSION,
@@ -2031,12 +2778,12 @@ export function evaluateBrainCalibration(
     generatedAt: new Date().toISOString(),
     dataFingerprint: fingerprint,
     reports,
-    stillValid: requested === 'all' ? validityDiagnostic(dataset.entries) : null,
+    stillValid: normalized.label === 'all' ? validityDiagnostic(entries) : null,
     activeWeightsChanged: false,
     releaseDecisionAllowed: false,
     limitations: [
       'Nur menschlich gelabelte Evaluationsstichproben gehen in den Fit ein; inverse Ziehungswahrscheinlichkeiten werden als Hájek-IPW berücksichtigt.',
-      'Response-Coverage wird insgesamt, in der Holdout-Ära und nach Auswahl-, Score- und Kandidatenpopulations-Strata IPW-gewichtet gegen aktuell indexierte, attestierte Captures geprüft; gelöschte oder nicht indexierte Captures bleiben außerhalb dieses Denominators.',
+      'Response-Coverage wird insgesamt, in der Holdout-Ära und nach Auswahl-, Score- und Kandidatenpopulations-Strata IPW-gewichtet gegen den übergebenen attestierten Capture-Frame geprüft.',
       'MNAR ist nicht punktidentifizierbar; ΔBrier erhält deshalb zusätzlich eine konservative Worst-Case-Identifikationsgrenze für alle fehlenden Holdout-Labels.',
       'Ordinale Produktionsscores werden ausschließlich auf Trainingsdaten monoton in Wahrscheinlichkeiten kalibriert.',
       'Leakage-Gruppen, die den zeitlichen Cutoff überspannen, werden embargoed; Train liegt garantiert strikt vor Test.',
@@ -2046,4 +2793,16 @@ export function evaluateBrainCalibration(
       'still_valid ist wegen intervallzensierter Invalidierungszeiten noch kein Survival-Modell.',
     ],
   }
+}
+
+export function evaluateBrainCalibration(
+  vault: Vault,
+  options: BrainCalibrationEvaluationOptions = {},
+): BrainCalibrationEvaluationResult {
+  return withBrainCalibrationCampaignLock(vault, () => {
+    assertBrainCalibrationExploratoryAccess(vault)
+    const dataset = readBrainCalibrationDataset(vault)
+    const responseFrame = collectBrainCalibrationEvaluationFrame(vault)
+    return evaluateBrainCalibrationSnapshot(dataset.entries, responseFrame, options)
+  })
 }

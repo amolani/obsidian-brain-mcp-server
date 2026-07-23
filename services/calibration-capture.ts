@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
 
-export const CALIBRATION_CAPTURE_SCHEMA = 'calibration-capture-v2'
+export const CALIBRATION_CAPTURE_SCHEMA = 'calibration-capture-v3'
+export const LEGACY_CALIBRATION_CAPTURE_SCHEMA = 'calibration-capture-v2'
 export const CALIBRATION_CAPTURE_PRODUCER = 'knowledge-harvester'
 export const CALIBRATION_EVALUATION_SAMPLE_SIZE = 6
 
 const MAX_CAPTURE_FACTS = 64
+const MAX_CANDIDATE_UNIVERSE_FACTS = 10_000
 const FACT_ID = /^ks-[a-f0-9]{20}$/
 const FACT_REF = /^(F|C)([1-9]\d*):(ks-[a-f0-9]{20})$/
 const FINGERPRINT = /^(ks-[a-f0-9]{20}):([a-f0-9]{64})$/
@@ -28,6 +30,12 @@ export interface CalibrationCaptureBundleInput {
   modelVersion: string
   /** Random per-session seed, persisted across incremental capture updates. */
   sampleSeed: string
+  /**
+   * Complete safe pre-selection population, deduplicated and sorted by its
+   * UTF-8 bytes. IDs bind the sampling frame without persisting candidate
+   * prose.
+   */
+  candidateUniverseFactIds: string[]
   /** Selected facts rendered as F1, F2, ... in the Session Digest. */
   selectedFactIds: string[]
   /** Union of selected facts and the seeded uniform evaluation sample. */
@@ -50,12 +58,16 @@ export interface ParsedCalibrationCaptureFact {
 }
 
 export interface ParsedCalibrationCaptureBundle {
-  schema: typeof CALIBRATION_CAPTURE_SCHEMA
+  schema:
+    | typeof CALIBRATION_CAPTURE_SCHEMA
+    | typeof LEGACY_CALIBRATION_CAPTURE_SCHEMA
   producer: typeof CALIBRATION_CAPTURE_PRODUCER
   sessionId: string
   modelVersion: string
   sampleSeed: string
   integrity: string
+  /** Null only for legacy V2 captures, whose sampling frame was not bound. */
+  candidateUniverseFactIds: string[] | null
   selectedFactIds: string[]
   facts: ParsedCalibrationCaptureFact[]
 }
@@ -79,12 +91,13 @@ function boundedOpaque(value: unknown, field: string, maxLength = 180): string {
 function stringArray(
   value: unknown,
   field: string,
-  options: { min?: number; maxItemLength?: number } = {},
+  options: { min?: number; max?: number; maxItemLength?: number } = {},
 ): string[] {
   if (!Array.isArray(value)) throw new Error(`${field} muss ein Array sein`)
   const minimum = options.min ?? 0
-  if (value.length < minimum || value.length > MAX_CAPTURE_FACTS) {
-    throw new Error(`${field} muss ${minimum} bis ${MAX_CAPTURE_FACTS} Einträge enthalten`)
+  const maximum = options.max ?? MAX_CAPTURE_FACTS
+  if (value.length < minimum || value.length > maximum) {
+    throw new Error(`${field} muss ${minimum} bis ${maximum} Einträge enthalten`)
   }
   return value.map((item, index) => {
     if (typeof item !== 'string') throw new Error(`${field}[${index}] muss ein String sein`)
@@ -102,6 +115,7 @@ function canonicalPayload(input: CalibrationCaptureBundleInput): string {
     sessionId: input.sessionId,
     modelVersion: input.modelVersion,
     sampleSeed: input.sampleSeed,
+    candidateUniverseFactIds: input.candidateUniverseFactIds,
     selectedFactIds: input.selectedFactIds,
     factMap: input.factMap,
     snapshotFingerprints: input.snapshotFingerprints,
@@ -109,6 +123,54 @@ function canonicalPayload(input: CalibrationCaptureBundleInput): string {
     reviewMap: input.reviewMap,
     reviewPayloads: input.reviewPayloads,
   })
+}
+
+export interface LegacyCalibrationCaptureBundleInput {
+  sessionId: string
+  modelVersion: string
+  sampleSeed: string
+  selectedFactIds: string[]
+  factMap: string[]
+  snapshotFingerprints: string[]
+  snapshotPayloads: string[]
+  reviewMap: string[]
+  reviewPayloads: string[]
+}
+
+function legacyCanonicalPayload(input: LegacyCalibrationCaptureBundleInput): string {
+  return JSON.stringify({
+    schema: LEGACY_CALIBRATION_CAPTURE_SCHEMA,
+    producer: CALIBRATION_CAPTURE_PRODUCER,
+    sessionId: input.sessionId,
+    modelVersion: input.modelVersion,
+    sampleSeed: input.sampleSeed,
+    selectedFactIds: input.selectedFactIds,
+    factMap: input.factMap,
+    snapshotFingerprints: input.snapshotFingerprints,
+    snapshotPayloads: input.snapshotPayloads,
+    reviewMap: input.reviewMap,
+    reviewPayloads: input.reviewPayloads,
+  })
+}
+
+/**
+ * Reproduces the V2 attestation for read-only migration and exploratory
+ * evaluation. New captures must use calibrationCaptureIntegrity (V3).
+ */
+export function legacyCalibrationCaptureIntegrityV2(
+  input: LegacyCalibrationCaptureBundleInput,
+): string {
+  return createHash('sha256').update(legacyCanonicalPayload(input)).digest('hex')
+}
+
+function compareUtf8Bytes(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+}
+
+function calibrationSampleOrder(sampleSeed: string, factId: string): string {
+  return createHash('sha256')
+    .update(`${sampleSeed}\0${factId}\0calibration-evaluation-v1`)
+    .digest('hex')
 }
 
 function boundedReviewText(value: unknown, field: string, maxLength: number): string {
@@ -233,9 +295,14 @@ export function parseCalibrationCaptureBundle(
   if (frontmatter.quelle !== CALIBRATION_CAPTURE_PRODUCER) {
     throw new Error('Quelle ist kein Knowledge-Harvester-Capture')
   }
-  if (frontmatter.calibration_capture_schema !== CALIBRATION_CAPTURE_SCHEMA) {
+  const schema = frontmatter.calibration_capture_schema
+  if (
+    schema !== CALIBRATION_CAPTURE_SCHEMA
+    && schema !== LEGACY_CALIBRATION_CAPTURE_SCHEMA
+  ) {
     throw new Error(
-      `calibration_capture_schema muss ${CALIBRATION_CAPTURE_SCHEMA} sein`,
+      `calibration_capture_schema muss ${CALIBRATION_CAPTURE_SCHEMA} oder `
+        + `${LEGACY_CALIBRATION_CAPTURE_SCHEMA} sein`,
     )
   }
   const producer = frontmatter.calibration_capture_producer
@@ -262,6 +329,59 @@ export function parseCalibrationCaptureBundle(
   }
   if (new Set(selectedFactIds).size !== selectedFactIds.length) {
     throw new Error('capture.knowledge_fact_ids darf keine Duplikate enthalten')
+  }
+
+  let candidateUniverseFactIds: string[] | null = null
+  let candidateUniverseSet: Set<string> | null = null
+  let expectedEvaluationSample = new Set<string>()
+  if (schema === CALIBRATION_CAPTURE_SCHEMA) {
+    candidateUniverseFactIds = stringArray(
+      frontmatter.calibration_candidate_universe_fact_ids,
+      'capture.calibration_candidate_universe_fact_ids',
+      {
+        min: 1,
+        max: MAX_CANDIDATE_UNIVERSE_FACTS,
+        maxItemLength: 24,
+      },
+    )
+    if (candidateUniverseFactIds.some(id => !FACT_ID.test(id))) {
+      throw new Error(
+        'capture.calibration_candidate_universe_fact_ids enthält eine ungültige Fakt-ID',
+      )
+    }
+    if (new Set(candidateUniverseFactIds).size !== candidateUniverseFactIds.length) {
+      throw new Error(
+        'capture.calibration_candidate_universe_fact_ids darf keine Duplikate enthalten',
+      )
+    }
+    const sortedUniverse = [...candidateUniverseFactIds].sort(compareUtf8Bytes)
+    if (
+      candidateUniverseFactIds.some((factId, index) => factId !== sortedUniverse[index])
+    ) {
+      throw new Error(
+        'capture.calibration_candidate_universe_fact_ids muss byteweise sortiert sein',
+      )
+    }
+    const universe = new Set(candidateUniverseFactIds)
+    candidateUniverseSet = universe
+    if (selectedFactIds.some(factId => !universe.has(factId))) {
+      throw new Error(
+        'capture.knowledge_fact_ids muss eine Teilmenge des Kandidatenuniversums sein',
+      )
+    }
+    const expectedSampleSize = Math.min(
+      CALIBRATION_EVALUATION_SAMPLE_SIZE,
+      candidateUniverseFactIds.length,
+    )
+    expectedEvaluationSample = new Set(
+      [...candidateUniverseFactIds]
+        .sort((left, right) =>
+          compareUtf8Bytes(
+            calibrationSampleOrder(sampleSeed, left),
+            calibrationSampleOrder(sampleSeed, right),
+          ) || compareUtf8Bytes(left, right))
+        .slice(0, expectedSampleSize),
+    )
   }
 
   const factMap = stringArray(frontmatter.calibration_fact_map, 'capture.calibration_fact_map', {
@@ -338,6 +458,14 @@ export function parseCalibrationCaptureBundle(
     }
     seenFactIds.add(factId)
     seenReferences.add(reference)
+    if (
+      candidateUniverseSet !== null
+      && !candidateUniverseSet.has(factId)
+    ) {
+      throw new Error(
+        `capture.calibration_fact_map[${index}] liegt außerhalb des Kandidatenuniversums`,
+      )
+    }
 
     const fingerprintMatch = snapshotFingerprints[index].match(FINGERPRINT)
     if (!fingerprintMatch || fingerprintMatch[1] !== factId) {
@@ -399,11 +527,20 @@ export function parseCalibrationCaptureBundle(
       throw new Error('Alle Payloads eines Bundles müssen dieselbe Kandidatenpopulation tragen')
     }
     const evaluationSample = payload.evaluationSample === true
+    if (
+      candidateUniverseFactIds !== null
+      && evaluationSample !== expectedEvaluationSample.has(factId)
+    ) {
+      throw new Error(
+        `evaluationSample ist für ${factId} nicht aus Seed und Kandidatenuniversum reproduzierbar`,
+      )
+    }
     const expectedSampleSize = Math.min(
       CALIBRATION_EVALUATION_SAMPLE_SIZE,
-      payload.candidatePopulationCount,
+      candidateUniverseFactIds?.length ?? payload.candidatePopulationCount,
     )
-    const expectedProbability = expectedSampleSize / payload.candidatePopulationCount
+    const expectedProbability = expectedSampleSize
+      / (candidateUniverseFactIds?.length ?? payload.candidatePopulationCount)
     if (evaluationSample) evaluationSampleCount++
     if (
       typeof payload.samplingProbability !== 'number'
@@ -434,6 +571,24 @@ export function parseCalibrationCaptureBundle(
   }
   if (selectedIndex !== selectedFactIds.length) {
     throw new Error('Nicht jede ausgewählte Fakt-ID besitzt genau eine F-Referenz')
+  }
+  if (
+    candidateUniverseFactIds !== null
+    && sharedPopulationCount !== candidateUniverseFactIds.length
+  ) {
+    throw new Error(
+      'candidatePopulationCount stimmt nicht mit dem attestierten Kandidatenuniversum überein',
+    )
+  }
+  if (candidateUniverseFactIds !== null) {
+    const selected = new Set(selectedFactIds)
+    for (const factId of expectedEvaluationSample) {
+      if (!selected.has(factId) && !seenFactIds.has(factId)) {
+        throw new Error(
+          `Gesampelter nicht ausgewählter Fakt ${factId} fehlt in calibration_fact_map`,
+        )
+      }
+    }
   }
   if (
     sharedPopulationCount === null
@@ -490,7 +645,7 @@ export function parseCalibrationCaptureBundle(
   if (typeof integrity !== 'string' || !/^[a-f0-9]{64}$/.test(integrity)) {
     throw new Error('calibration_capture_integrity ist ungültig')
   }
-  const expected = calibrationCaptureIntegrity({
+  const commonIntegrityInput = {
     sessionId,
     modelVersion,
     sampleSeed,
@@ -500,18 +655,25 @@ export function parseCalibrationCaptureBundle(
     snapshotPayloads,
     reviewMap,
     reviewPayloads,
-  })
+  }
+  const expected = schema === CALIBRATION_CAPTURE_SCHEMA
+    ? calibrationCaptureIntegrity({
+        ...commonIntegrityInput,
+        candidateUniverseFactIds: candidateUniverseFactIds ?? [],
+      })
+    : legacyCalibrationCaptureIntegrityV2(commonIntegrityInput)
   if (integrity !== expected) {
     throw new Error('Kalibrierungs-Capture-Bundle stimmt nicht mit seiner Attestation überein')
   }
 
   return {
-    schema: CALIBRATION_CAPTURE_SCHEMA,
+    schema,
     producer: CALIBRATION_CAPTURE_PRODUCER,
     sessionId,
     modelVersion,
     sampleSeed,
     integrity,
+    candidateUniverseFactIds,
     selectedFactIds,
     facts,
   }

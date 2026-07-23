@@ -21,6 +21,10 @@ import {
   serializeCalibrationSnapshotCore,
 } from '../services/brain-calibration.ts'
 import {
+  assertBrainCalibrationCampaignCaptureWriteAccess,
+  withBrainCalibrationCampaignLock,
+} from '../services/brain-calibration-campaign.ts'
+import {
   CALIBRATION_EVALUATION_SAMPLE_SIZE,
   CALIBRATION_CAPTURE_PRODUCER,
   CALIBRATION_CAPTURE_SCHEMA,
@@ -555,6 +559,10 @@ interface CalibrationCaptureMaterial {
   bundle: CalibrationCaptureBundleInput
 }
 
+function compareUtf8Bytes(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+}
+
 function calibrationReviewEvidence(
   fact: Omit<KnowledgeSalienceFact, 'selectionScore'>,
   sourceTypes: readonly string[],
@@ -586,7 +594,23 @@ function calibrationCaptureMaterial(
   generatedAt: string,
   sampleSeed: string,
 ): CalibrationCaptureMaterial {
-  const population = selection.calibrationCandidates ?? selection.facts
+  const rawPopulation = selection.calibrationCandidates ?? selection.facts
+  const populationByFactId = new Map<string, (typeof rawPopulation)[number]>()
+  for (const fact of rawPopulation) {
+    if (!populationByFactId.has(fact.id)) populationByFactId.set(fact.id, fact)
+  }
+  const candidateUniverseFactIds = [...populationByFactId.keys()].sort(compareUtf8Bytes)
+  if (new Set(selection.facts.map(fact => fact.id)).size !== selection.facts.length) {
+    throw new Error('Ausgewählte Kalibrierungsfakten dürfen keine Duplikate enthalten')
+  }
+  const population = candidateUniverseFactIds.map(factId => {
+    const fact = populationByFactId.get(factId)
+    if (!fact) throw new Error(`Kandidat ${factId} fehlt im deduplizierten Universum`)
+    return fact
+  })
+  if (selection.facts.some(fact => !populationByFactId.has(fact.id))) {
+    throw new Error('Ausgewählte Fakten müssen Teil des Kalibrierungsuniversums sein')
+  }
   const selectedRank = new Map(selection.facts.map((fact, index) => [fact.id, index + 1]))
   const sampleSize = Math.min(CALIBRATION_EVALUATION_SAMPLE_SIZE, population.length)
   const sampled = [...population]
@@ -597,7 +621,7 @@ function calibrationCaptureMaterial(
       const rightHash = createHash('sha256')
         .update(`${sampleSeed}\0${right.id}\0calibration-evaluation-v1`)
         .digest('hex')
-      return leftHash.localeCompare(rightHash, 'en') || left.id.localeCompare(right.id, 'en')
+      return compareUtf8Bytes(leftHash, rightHash) || compareUtf8Bytes(left.id, right.id)
     })
     .slice(0, sampleSize)
   const sampledIds = new Set(sampled.map(fact => fact.id))
@@ -658,6 +682,7 @@ function calibrationCaptureMaterial(
       sessionId: selection.sessionId,
       modelVersion: selection.modelVersion,
       sampleSeed,
+      candidateUniverseFactIds,
       selectedFactIds: selection.facts.map(fact => fact.id),
       factMap,
       snapshotFingerprints,
@@ -704,6 +729,8 @@ function generateNote(
     calibration_capture_producer: CALIBRATION_CAPTURE_PRODUCER,
     calibration_capture_integrity: calibrationCaptureIntegrity(calibration.bundle),
     calibration_sample_seed: calibration.bundle.sampleSeed,
+    calibration_candidate_universe_fact_ids:
+      calibration.bundle.candidateUniverseFactIds,
     calibration_fact_map: calibration.bundle.factMap,
     calibration_snapshot_fingerprints: calibration.bundle.snapshotFingerprints,
     calibration_snapshot_payloads: calibration.bundle.snapshotPayloads,
@@ -1061,7 +1088,11 @@ process.stdin.on('end', async () => {
       bashCount,
       generatedAt: captureGeneratedAt,
     })
-    writeAtomic(fullPath, noteContent)
+    const campaignVault = new Vault(VAULT_PATH)
+    withBrainCalibrationCampaignLock(campaignVault, () => {
+      assertBrainCalibrationCampaignCaptureWriteAccess(campaignVault)
+      writeAtomic(fullPath, noteContent)
+    })
     markSessionCaptured({
       version: 2,
       sessionId,

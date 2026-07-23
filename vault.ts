@@ -44,6 +44,18 @@ import { brainFeedbackSummary as brainFeedbackSummaryService, recordBrainFeedbac
 import { brainCalibrationSummary as brainCalibrationSummaryService, recordCalibrationJudgement as recordCalibrationJudgementService, recordCalibrationLabel as recordCalibrationLabelService, type BrainCalibrationLabel, type BrainCalibrationSummary, type BrainCalibrationTargetSnapshot, type BrainCalibrationValidityClass, type RecordCalibrationJudgementOptions, type RecordCalibrationJudgementResult, type RecordCalibrationLabelOptions, type RecordCalibrationLabelResult } from './services/brain-calibration.ts'
 import { evaluateBrainCalibration as evaluateBrainCalibrationService, type BrainCalibrationEvaluationOptions, type BrainCalibrationEvaluationResult } from './services/brain-calibration-evaluation.ts'
 import { brainCalibrationReviewBatch as brainCalibrationReviewBatchService, type BrainCalibrationReviewBatchOptions, type BrainCalibrationReviewBatchResult } from './services/brain-calibration-review.ts'
+import {
+  closeBrainCalibrationCampaign as closeBrainCalibrationCampaignService,
+  evaluateSealedBrainCalibrationCampaign as evaluateSealedBrainCalibrationCampaignService,
+  registerBrainCalibrationCampaign as registerBrainCalibrationCampaignService,
+  type BrainCalibrationCampaignClosure,
+  type BrainCalibrationCampaignMutationResult,
+  type BrainCalibrationCampaignRegistration,
+  type BrainCalibrationCampaignResult,
+  type CloseBrainCalibrationCampaignOptions,
+  type EvaluateSealedBrainCalibrationCampaignOptions,
+  type RegisterBrainCalibrationCampaignOptions,
+} from './services/brain-calibration-campaign.ts'
 import { buildMemoryTimeline as buildMemoryTimelineService, type BuildMemoryTimelineOptions, type MemoryTimelineEvent, type MemoryTimelineResult } from './services/memory-timeline.ts'
 import { proposeBrainSchedule as proposeBrainScheduleService, type BrainScheduleItem, type BrainScheduleOptions, type BrainScheduleResult } from './services/brain-scheduler.ts'
 import { brainAutoBuild as brainAutoBuildService, type BrainAutoBuildOptions, type BrainAutoBuildResult, type BrainAutoBuildStep } from './services/brain-auto-build.ts'
@@ -64,7 +76,7 @@ import { repairGeneratedSurfaces as repairGeneratedSurfacesService, type RepairG
 import { assertSafeRelativePath, vaultJoin } from './services/vault-paths.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
-export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookOptions, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, BuildCaptureReviewOptions, CaptureReviewResult, BuildEvidenceDashboardOptions, EvidenceDashboardResult, BuildSessionImpactReportOptions, SessionImpactReportResult, BuildKnowledgeInboxOptions, KnowledgeInboxResult, BrainApplyInboxItemOptions, BrainApplyInboxItemResult, BrainReviewInboxItemsOptions, BrainReviewInboxItemsResult, KnowledgeInboxItem, KnowledgeInboxItemStatus, MigrateBrainMetadataOptions, BrainMetadataMigrationResult, BuildChangeLedgerOptions, ChangeLedgerResult, BackgroundRunOptions, BackgroundRunResult, BackgroundJobResult, RepairGeneratedSurfacesOptions, RepairGeneratedSurfacesResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BrainCalibrationLabel, BrainCalibrationTargetSnapshot, BrainCalibrationValidityClass, RecordCalibrationLabelOptions, RecordCalibrationLabelResult, BrainCalibrationSummary, BrainCalibrationEvaluationOptions, BrainCalibrationEvaluationResult, BrainCalibrationReviewBatchOptions, BrainCalibrationReviewBatchResult, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult, BrainHealthOptions, BrainHealthResult }
+export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookOptions, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, BuildCaptureReviewOptions, CaptureReviewResult, BuildEvidenceDashboardOptions, EvidenceDashboardResult, BuildSessionImpactReportOptions, SessionImpactReportResult, BuildKnowledgeInboxOptions, KnowledgeInboxResult, BrainApplyInboxItemOptions, BrainApplyInboxItemResult, BrainReviewInboxItemsOptions, BrainReviewInboxItemsResult, KnowledgeInboxItem, KnowledgeInboxItemStatus, MigrateBrainMetadataOptions, BrainMetadataMigrationResult, BuildChangeLedgerOptions, ChangeLedgerResult, BackgroundRunOptions, BackgroundRunResult, BackgroundJobResult, RepairGeneratedSurfacesOptions, RepairGeneratedSurfacesResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BrainCalibrationLabel, BrainCalibrationTargetSnapshot, BrainCalibrationValidityClass, RecordCalibrationLabelOptions, RecordCalibrationLabelResult, BrainCalibrationSummary, BrainCalibrationEvaluationOptions, BrainCalibrationEvaluationResult, BrainCalibrationReviewBatchOptions, BrainCalibrationReviewBatchResult, RegisterBrainCalibrationCampaignOptions, CloseBrainCalibrationCampaignOptions, EvaluateSealedBrainCalibrationCampaignOptions, BrainCalibrationCampaignRegistration, BrainCalibrationCampaignClosure, BrainCalibrationCampaignResult, BrainCalibrationCampaignMutationResult, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult, BrainHealthOptions, BrainHealthResult }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -476,6 +488,24 @@ export class Vault {
     options: BrainCalibrationEvaluationOptions = {},
   ): BrainCalibrationEvaluationResult {
     return evaluateBrainCalibrationService(this, options)
+  }
+
+  registerBrainCalibrationCampaign(
+    options: RegisterBrainCalibrationCampaignOptions,
+  ): BrainCalibrationCampaignMutationResult<BrainCalibrationCampaignRegistration> {
+    return registerBrainCalibrationCampaignService(this, options)
+  }
+
+  closeBrainCalibrationCampaign(
+    options: CloseBrainCalibrationCampaignOptions = {},
+  ): BrainCalibrationCampaignMutationResult<BrainCalibrationCampaignClosure> {
+    return closeBrainCalibrationCampaignService(this, options)
+  }
+
+  evaluateSealedBrainCalibrationCampaign(
+    options: EvaluateSealedBrainCalibrationCampaignOptions,
+  ): BrainCalibrationCampaignMutationResult<BrainCalibrationCampaignResult> {
+    return evaluateSealedBrainCalibrationCampaignService(this, options)
   }
 
   buildMemoryTimeline(options: BuildMemoryTimelineOptions): MemoryTimelineResult {

@@ -108,6 +108,10 @@ function writeSnapshotSource(
     .map(item => `${item.factId}:${calibrationSnapshotFingerprint(item)}`)
   const payloadValues = snapshots.map(item => serializeCalibrationSnapshotCore(item))
   const sampleSeed = `cs-${'a'.repeat(32)}`
+  const candidateUniverseFactIds = snapshots
+    .map(item => item.factId)
+    .sort((left, right) =>
+      Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')))
   const reviewMapValues = snapshots.map((item, index) => `R${index + 1}:${item.factId}`)
   const reviewPayloadValues = snapshots.map((item, index) =>
     serializeCalibrationReviewPayload({
@@ -123,6 +127,7 @@ function writeSnapshotSource(
     sessionId: first.sessionId,
     modelVersion: first.modelVersion,
     sampleSeed,
+    candidateUniverseFactIds,
     selectedFactIds: factIdValues,
     factMap: factMapValues,
     snapshotFingerprints: fingerprintValues,
@@ -151,6 +156,10 @@ function writeSnapshotSource(
     `calibration_capture_producer: ${CALIBRATION_CAPTURE_PRODUCER}`,
     `calibration_capture_integrity: ${integrity}`,
     `calibration_sample_seed: ${sampleSeed}`,
+    'calibration_candidate_universe_fact_ids:',
+    candidateUniverseFactIds
+      .map(item => `  - ${JSON.stringify(item)}`)
+      .join('\n'),
     'knowledge_fact_ids:',
     factIds,
     'calibration_fact_map:',
@@ -471,6 +480,9 @@ describe('brain calibration dataset', () => {
     const log = readFileSync(join(vaultPath, '.action-log.jsonl'), 'utf-8')
     assert.match(log, /"tool":"record_calibration_judgement"/)
     assert.equal(log.includes('"snapshot"'), false)
+    assert.equal(log.includes('"useful":true'), false)
+    assert.equal(log.includes('"supported":true'), false)
+    assert.equal(log.includes('"reviewer":"amo"'), false)
   })
 
   test('retains independent frozen judgement pairs from separate reviewers', async () => {

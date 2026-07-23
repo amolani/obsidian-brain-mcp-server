@@ -9,6 +9,7 @@ import { isActivePath } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 import { brainCalibrationReviewBatch } from './brain-calibration-review.ts'
+import { getBrainCalibrationCampaignPhase } from './brain-calibration-campaign.ts'
 
 export type BrainReviewSeverity = 'critical' | 'high' | 'medium' | 'low'
 export type BrainReviewActionKind =
@@ -132,45 +133,49 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
   const includeLow = options.includeLow === true
   const items: BrainReviewItem[] = []
 
-  const calibrationBatch = brainCalibrationReviewBatch(vault, {
-    limit: MAX_CALIBRATION_REVIEW_ITEMS,
-  })
-  for (const error of calibrationBatch.integrity.errors) {
-    items.push({
-      id: error.path === '.brain-calibration.json'
-        ? itemId('calibration_dataset', 'quarantine')
-        : itemId('calibration_integrity', error.path),
-      severity: 'high',
-      category: 'calibration_integrity',
-      title: error.path === '.brain-calibration.json'
-        ? 'Kalibrierungsdataset quarantänisiert'
-        : 'Kalibrierungs-Capture quarantänisiert',
-      detail: error.message,
-      targets: [error.path],
-      confidence: 'high',
-      action: { kind: 'none' },
+  // The general analyst queue must neither enter the frozen reviewer archive
+  // nor become unusable after the one-shot campaign has been consumed.
+  if (getBrainCalibrationCampaignPhase(vault) === 'unregistered') {
+    const calibrationBatch = brainCalibrationReviewBatch(vault, {
+      limit: MAX_CALIBRATION_REVIEW_ITEMS,
     })
-  }
-  for (const review of calibrationBatch.items) {
-    items.push({
-      id: itemId(
-        'calibration',
-        review.recordArgs.review_token,
-      ),
-      severity: 'low',
-      category: 'calibration',
-      title: `Verblindete Kalibrierung · ${review.reviewReference}`,
-      detail:
-        `Fehlende Labels: ${review.missingLabels.join(', ')}. `
-        + 'Aussage und Evidenz ausschließlich über brain_calibration_review_batch lesen.',
-      targets: [],
-      confidence: 'high',
-      action: {
-        kind: 'none',
-        tool: 'record_calibration_judgement',
-        args: review.recordArgs,
-      },
-    })
+    for (const error of calibrationBatch.integrity.errors) {
+      items.push({
+        id: error.path === '.brain-calibration.json'
+          ? itemId('calibration_dataset', 'quarantine')
+          : itemId('calibration_integrity', error.path),
+        severity: 'high',
+        category: 'calibration_integrity',
+        title: error.path === '.brain-calibration.json'
+          ? 'Kalibrierungsdataset quarantänisiert'
+          : 'Kalibrierungs-Capture quarantänisiert',
+        detail: error.message,
+        targets: [error.path],
+        confidence: 'high',
+        action: { kind: 'none' },
+      })
+    }
+    for (const review of calibrationBatch.items) {
+      items.push({
+        id: itemId(
+          'calibration',
+          review.recordArgs.review_token,
+        ),
+        severity: 'low',
+        category: 'calibration',
+        title: `Verblindete Kalibrierung · ${review.reviewReference}`,
+        detail:
+          `Fehlende Labels: ${review.missingLabels.join(', ')}. `
+          + 'Aussage und Evidenz ausschließlich über brain_calibration_review_batch lesen.',
+        targets: [],
+        confidence: 'high',
+        action: {
+          kind: 'none',
+          tool: 'record_calibration_judgement',
+          args: review.recordArgs,
+        },
+      })
+    }
   }
 
   const duplicates = findDuplicates(vault, 60, { maxResults: 20 })

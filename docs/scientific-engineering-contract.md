@@ -148,15 +148,19 @@ model registry before calibration files using that version can be read.
 The knowledge harvester embeds each text-free numeric snapshot plus its SHA-256
 fingerprint in the source capture. A separate bounded review payload binds the exact
 statement and redacted evidence references, hashes, and excerpts to an opaque `R…`
-reference. The complete ordered numeric map, payloads, fingerprints, random sample seed,
-randomized review map, review payloads, producer, session, and model are covered by
-`calibration-capture-v2`.
+reference. The complete deduplicated candidate universe, ordered numeric map, payloads,
+fingerprints, random sample seed, randomized review map, review payloads, producer,
+session, and model are covered by `calibration-capture-v3`. Legacy V2 captures remain
+read-only parseable but are ineligible for sealed enrollment because they did not bind
+the full sampling frame.
 
 The parser requires an exact semantic bijection. Internal `F1..Fn` entries must be selected
 facts with the matching one-based production rank. Internal `C1..Cm` entries must be
 sampled non-selections with no production rank. All payloads must agree on generation
 time, model versions, and candidate-population size; exactly `min(6, N)` entries must carry
-the reproducible inclusion probability. The review evidence classes must agree with the
+the reproducible inclusion probability. V3 reconstructs the seeded uniform sample from
+the complete UTF-8-bytewise-sorted universe and rejects missing, substituted, duplicated,
+or inconsistently marked candidates. The review evidence classes must agree with the
 numeric provenance classes.
 
 `brain_calibration_review_batch` exposes only the attested `R…` reference, statement,
@@ -167,6 +171,14 @@ registered payload, and verifies the whole bundle, review association, model for
 fingerprint. Callers cannot submit replacement weights, scores, provenance counts, sample
 membership, or production rank. The attestation is tamper-evident rather than a keyed
 proof; capture and executable code remain inside the same local trust boundary.
+
+Reviewer identity is process-bound rather than caller-selectable. Every isolated
+`calibration-review` server must start with one fixed registered
+`BRAIN_CALIBRATION_REVIEWER_ID`; it injects that identity into both review operations and
+binds `recordedAt` to the current server UTC time for each judgement. It rejects
+caller-supplied alternatives. The public review schemas expose neither reviewer identity
+nor recording time, while default MCP mode neither exposes nor permits the blind batch or
+judgement writer.
 
 The primary `useful` and `supported` judgements are one atomic append-only transaction per
 observation and reviewer. A complete pair is its own freeze marker: an identical retry is
@@ -320,12 +332,69 @@ nominate a model specification for a later one-shot, preregistered future/extern
 validation bound to the implementation and data cutoff. Repeated inspection of the
 current holdout is not a release test.
 
-The current exploratory shadow loop deliberately has no irreversible campaign seal.
-Therefore an analyst could inspect a report and later add previously missing
-observations. Any confirmatory or publishable comparison must first add a one-way study
-seal binding the complete capture-frame and label-event fingerprints, code/model version,
-cutoff, grouping, gates, and bootstrap configuration; post-seal changes must start a new
-unseen epoch. Until then, results remain exploratory even when all shadow gates pass.
+The exploratory shadow loop remains separate from confirmatory campaigns. A campaign
+starts with `brain_calibration_register_campaign` before any enrolled judgement is
+visible. Enrollment freezes the explicit observation set, complete attested capture
+archive, reviewer roster, grouping, gates, model/runtime/implementation versions, and
+bootstrap plan. Its chronological cutoff is derived from the complete response frame
+without using labels and is then immutable. Registration also freezes every full-frame
+leakage-component ID and each observation's `train`, `test`, or `embargoed` assignment.
+Reviewer ties may remove an outcome from fitting, but they cannot reconnect the remaining
+observations or move them across partitions. The evaluator must not optimize a new cutoff
+or reconstruct groups from answered samples.
+
+Registration apply is bound to the exact reviewed preview. The analyst must return both
+its `registrationRoot` and `registeredAt`; apply rebuilds the enrollment using that same
+timestamp and fails if any frame, source binding, cutoff, split, roster, or plan byte has
+changed between preview and confirmation.
+
+After every enrolled observation has one simultaneous `useful`+`supported` judgement
+from every registered reviewer, `brain_calibration_close_campaign` freezes the exact
+label events and links the closure root to enrollment. Partial pairs, labels predating
+enrollment, unknown reviewers, duplicate observations, invalid captures, or missing
+assignments fail closed. The protected campaign cannot be inspected through the
+exploratory summary/evaluator while it is open.
+
+A single campaign lock serializes registration, capture, primary-label writes, temporal
+labels, closure, and sealed evaluation. The Harvester pauses calibration-capture writes
+while the campaign is registered or closed, preventing a late session from silently
+changing the enrolled frame. Capture and exploratory diagnostics resume only after the
+result receipt has consumed the campaign; later captures remain outside that epoch.
+
+`brain_calibration_evaluate_sealed` accepts no label, grouping, cutoff, gate, model, or
+bootstrap override. It reads only the frozen frame and closure snapshot, persists the
+first aggregate result, and links a result root to the two earlier roots. An exact retry
+returns that persisted receipt rather than recomputing another analysis. Every outcome,
+including an underpowered or negative one, consumes the V1 campaign; there is no unseal,
+overwrite, or abandon transition. The result still has `releaseDecisionAllowed=false`
+and cannot change active weights.
+
+Enrollment, closure, and result roots are additionally written with exclusive-create
+semantics to an anchor directory outside the vault. This detects deletion or rollback of
+the local campaign files only while the external receipts have independent retention.
+A normal user-writable directory is not physically irreversible: publishable claims
+require append-only/WORM storage, immutable backups, or an equivalent external
+transparency service. Campaign V1 deliberately supports one active epoch; later data
+needs a separately designed, disjoint successor epoch.
+
+The chain proves the frozen bytes and their order, not the legal identity of a human
+reviewer. The fixed reviewer ID is bound to an isolated MCP process but is not a digital
+signature. Regulated or externally published multi-reviewer work additionally requires
+reviewer-specific credentials/signatures and an independently operated timestamp or
+transparency service.
+
+The registration binds every executable TypeScript file in the project source tree,
+relevant root configuration/lock files, the Node executable hash, Node/V8/platform/arch,
+`execArgv`, and `NODE_OPTIONS`. These are reproducibility and on-disk drift checks, not
+remote runtime attestation. The host, Node process, installed dependency bytes, loader,
+and executable memory remain trusted. Published claims should execute the bound revision
+in a freshly started, isolated, externally attested build/container without custom
+loaders.
+
+These limits are also frozen inside the campaign's `assuranceProfile`: external storage
+must enforce retention, reviewer identities are process-bound pseudonyms without digital
+signatures, and source/runtime hashes assume a trusted host. The receipt must not be
+presented as proving stronger guarantees.
 
 `still_valid` remains descriptive. A false state discovered at review time gives an
 interval-censored invalidation time, not an exact failure timestamp; survival/decay

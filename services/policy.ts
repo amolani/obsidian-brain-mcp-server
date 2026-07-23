@@ -82,6 +82,8 @@ const REQUIRED_NEVER_AUTO_APPLY = [
 const REQUIRED_DRY_RUN_TOOLS = [
   'brain_review_inbox_items',
   'repair_generated_surfaces',
+  'brain_calibration_register_campaign',
+  'brain_calibration_close_campaign',
   'record_calibration_label',
   'record_calibration_judgement',
   'promote_suggestion',
@@ -217,6 +219,21 @@ const DEFAULT_POLICY: BrainPolicy = {
     record_calibration_judgement: { write: true, risk: 'low', requiresDryRunDefault: true },
     brain_calibration_summary: { write: false, risk: 'low' },
     brain_calibration_evaluate: { write: false, risk: 'low' },
+    brain_calibration_register_campaign: {
+      write: true,
+      risk: 'medium',
+      requiresDryRunDefault: true,
+    },
+    brain_calibration_close_campaign: {
+      write: true,
+      risk: 'medium',
+      requiresDryRunDefault: true,
+    },
+    brain_calibration_evaluate_sealed: {
+      write: true,
+      risk: 'medium',
+      requiresDryRunDefault: false,
+    },
     build_memory_timeline: { write: true, risk: 'low', requiresDryRunDefault: true },
     brain_schedule: { write: false, risk: 'low' },
     build_customer_snapshot: { write: true, risk: 'low', requiresDryRunDefault: true },

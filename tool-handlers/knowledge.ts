@@ -1,5 +1,5 @@
 import { listSuggestions, promoteClientSuggestion, promoteTechnikSuggestion } from '../suggestions.ts'
-import type { SaveKnowledgeResult } from '../vault.ts'
+import type { BrainCalibrationEvaluationResult, SaveKnowledgeResult } from '../vault.ts'
 import { appendActionLog } from '../services/action-log.ts'
 import type {
   BrainCalibrationLabel,
@@ -29,6 +29,60 @@ function renderKnowledgeSave(result: SaveKnowledgeResult) {
       ].filter(Boolean).join('\n'),
     }],
   }
+}
+
+function renderBrainCalibrationReports(result: BrainCalibrationEvaluationResult): string {
+  return result.reports.map(report => {
+    const percent = (value: number | null) =>
+      value === null ? 'n/a' : `${(value * 100).toFixed(1)} %`
+    const interval = (value: { low: number; high: number } | null) =>
+      value === null ? 'n/a' : `${value.low.toFixed(4)} bis ${value.high.toFixed(4)}`
+    const scoreBands = report.responseCoverage.scoreBands
+      .map(band => `${band.band}: ${percent(band.weightedResponseRate)}`)
+      .join('; ')
+    const populationBands = report.responseCoverage.candidatePopulationBands
+      .map(band => `${band.band}: ${percent(band.weightedResponseRate)}`)
+      .join('; ')
+    const lines = [
+      `## ${report.label}`,
+      '',
+      `Status: ${report.status}`,
+      `Empfehlung: ${report.recommendation}`,
+      `Split: train ${report.split.trainTargets} Targets/${report.split.trainGroups} Gruppen; test ${report.split.testTargets} Targets/${report.split.testGroups} Gruppen`,
+      `Klassen: train +${report.split.trainPositive}/-${report.split.trainNegative}; test +${report.split.testPositive}/-${report.split.testNegative}`,
+      `Zeitordnung: ${report.split.strictTemporalOrder ? 'strikt' : 'nicht verfügbar'}; Cutoff ${report.split.cutoffAt ?? 'n/a'}; embargoed ${report.split.embargoedTargets} Targets/${report.split.embargoedGroups} Gruppen`,
+      `Abstentions: ${report.split.abstainedTies}`,
+      '',
+      'Response-Coverage:',
+      `- Gesamt IPW: ${percent(report.responseCoverage.weightedResponseRate)} (${report.responseCoverage.labeledTargets}/${report.responseCoverage.eligibleTargets} roh)`,
+      `- selected / sampled_unselected IPW: ${percent(report.responseCoverage.selected.weightedResponseRate)} / ${percent(report.responseCoverage.sampledUnselected.weightedResponseRate)}`,
+      `- Holdout-Ära ab ${report.responseCoverage.holdoutEra.startsAt ?? 'n/a'}: ${percent(report.responseCoverage.holdoutEra.weightedResponseRate)}`,
+      `- Score-Bänder: ${scoreBands || 'n/a'}`,
+      `- Populationsgrößen: ${populationBands || 'n/a'}`,
+      `- Ungültige Captures / Labels außerhalb Frame: ${report.responseCoverage.invalidCaptureBundles} / ${report.responseCoverage.labelsOutsideFrame}`,
+    ]
+    if (report.calibratedProductionScore && report.shadowCandidate && report.comparison) {
+      lines.push(
+        '',
+        `Kalibrierter Produktionsscore: Brier ${report.calibratedProductionScore.metrics.brier.toFixed(4)}, Log-Loss ${report.calibratedProductionScore.metrics.logLoss.toFixed(4)}, eff. n ${report.calibratedProductionScore.metrics.effectiveSampleSize.toFixed(1)}, monoton ${report.calibratedProductionScore.monotonicOrdinalScore}`,
+        `Shadow-Kandidat: Brier ${report.shadowCandidate.metrics.brier.toFixed(4)}, Log-Loss ${report.shadowCandidate.metrics.logLoss.toFixed(4)}, eff. n ${report.shadowCandidate.metrics.effectiveSampleSize.toFixed(1)}`,
+        `ΔBrier: ${report.comparison.deltaBrier.toFixed(4)} (95 % ${report.comparison.brier95.low.toFixed(4)} bis ${report.comparison.brier95.high.toFixed(4)})`,
+        `MNAR-ΔBrier: ${interval(report.comparison.mnarBrier95)}`,
+        `ΔLog-Loss: ${report.comparison.deltaLogLoss.toFixed(4)} (95 % ${report.comparison.logLoss95.low.toFixed(4)} bis ${report.comparison.logLoss95.high.toFixed(4)})`,
+        `ΔFalse-Promotion / ΔFPR 95 %: ${interval(report.comparison.falsePromotion95)} / ${interval(report.comparison.falsePositiveRate95)}`,
+        `Promoted baseline/shadow: ${report.comparison.baselinePromotedCount}/${report.comparison.candidatePromotedCount}`,
+        `Gepaarte Coverage: ${(report.comparison.pairedCoverage * 100).toFixed(1)} %`,
+        '',
+        'Shadow-Koeffizienten (standardisiert, diagnostisch):',
+        ...report.shadowCandidate.featureNames.map((feature, index) =>
+          `- ${feature}: ${report.shadowCandidate?.standardizedCoefficients[index]?.toFixed(4) ?? 'n/a'}`),
+      )
+    }
+    if (report.reasons.length > 0) {
+      lines.push('', 'Gründe/Grenzen:', ...report.reasons.map(reason => `- ${reason}`))
+    }
+    return lines.join('\n')
+  }).join('\n\n')
 }
 
 export const knowledgeHandlers: ToolHandlerRegistry = {
@@ -865,57 +919,7 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
         ? args.bootstrap_samples
         : undefined,
     })
-    const reports = result.reports.map(report => {
-      const percent = (value: number | null) =>
-        value === null ? 'n/a' : `${(value * 100).toFixed(1)} %`
-      const interval = (value: { low: number; high: number } | null) =>
-        value === null ? 'n/a' : `${value.low.toFixed(4)} bis ${value.high.toFixed(4)}`
-      const scoreBands = report.responseCoverage.scoreBands
-        .map(band => `${band.band}: ${percent(band.weightedResponseRate)}`)
-        .join('; ')
-      const populationBands = report.responseCoverage.candidatePopulationBands
-        .map(band => `${band.band}: ${percent(band.weightedResponseRate)}`)
-        .join('; ')
-      const lines = [
-        `## ${report.label}`,
-        '',
-        `Status: ${report.status}`,
-        `Empfehlung: ${report.recommendation}`,
-        `Split: train ${report.split.trainTargets} Targets/${report.split.trainGroups} Gruppen; test ${report.split.testTargets} Targets/${report.split.testGroups} Gruppen`,
-        `Klassen: train +${report.split.trainPositive}/-${report.split.trainNegative}; test +${report.split.testPositive}/-${report.split.testNegative}`,
-        `Zeitordnung: ${report.split.strictTemporalOrder ? 'strikt' : 'nicht verfügbar'}; Cutoff ${report.split.cutoffAt ?? 'n/a'}; embargoed ${report.split.embargoedTargets} Targets/${report.split.embargoedGroups} Gruppen`,
-        `Abstentions: ${report.split.abstainedTies}`,
-        '',
-        'Response-Coverage:',
-        `- Gesamt IPW: ${percent(report.responseCoverage.weightedResponseRate)} (${report.responseCoverage.labeledTargets}/${report.responseCoverage.eligibleTargets} roh)`,
-        `- selected / sampled_unselected IPW: ${percent(report.responseCoverage.selected.weightedResponseRate)} / ${percent(report.responseCoverage.sampledUnselected.weightedResponseRate)}`,
-        `- Holdout-Ära ab ${report.responseCoverage.holdoutEra.startsAt ?? 'n/a'}: ${percent(report.responseCoverage.holdoutEra.weightedResponseRate)}`,
-        `- Score-Bänder: ${scoreBands || 'n/a'}`,
-        `- Populationsgrößen: ${populationBands || 'n/a'}`,
-        `- Ungültige Captures / Labels außerhalb Frame: ${report.responseCoverage.invalidCaptureBundles} / ${report.responseCoverage.labelsOutsideFrame}`,
-      ]
-      if (report.calibratedProductionScore && report.shadowCandidate && report.comparison) {
-        lines.push(
-          '',
-          `Kalibrierter Produktionsscore: Brier ${report.calibratedProductionScore.metrics.brier.toFixed(4)}, Log-Loss ${report.calibratedProductionScore.metrics.logLoss.toFixed(4)}, eff. n ${report.calibratedProductionScore.metrics.effectiveSampleSize.toFixed(1)}, monoton ${report.calibratedProductionScore.monotonicOrdinalScore}`,
-          `Shadow-Kandidat: Brier ${report.shadowCandidate.metrics.brier.toFixed(4)}, Log-Loss ${report.shadowCandidate.metrics.logLoss.toFixed(4)}, eff. n ${report.shadowCandidate.metrics.effectiveSampleSize.toFixed(1)}`,
-          `ΔBrier: ${report.comparison.deltaBrier.toFixed(4)} (95 % ${report.comparison.brier95.low.toFixed(4)} bis ${report.comparison.brier95.high.toFixed(4)})`,
-          `MNAR-ΔBrier: ${interval(report.comparison.mnarBrier95)}`,
-          `ΔLog-Loss: ${report.comparison.deltaLogLoss.toFixed(4)} (95 % ${report.comparison.logLoss95.low.toFixed(4)} bis ${report.comparison.logLoss95.high.toFixed(4)})`,
-          `ΔFalse-Promotion / ΔFPR 95 %: ${interval(report.comparison.falsePromotion95)} / ${interval(report.comparison.falsePositiveRate95)}`,
-          `Promoted baseline/shadow: ${report.comparison.baselinePromotedCount}/${report.comparison.candidatePromotedCount}`,
-          `Gepaarte Coverage: ${(report.comparison.pairedCoverage * 100).toFixed(1)} %`,
-          '',
-          'Shadow-Koeffizienten (standardisiert, diagnostisch):',
-          ...report.shadowCandidate.featureNames.map((feature, index) =>
-            `- ${feature}: ${report.shadowCandidate?.standardizedCoefficients[index]?.toFixed(4) ?? 'n/a'}`),
-        )
-      }
-      if (report.reasons.length > 0) {
-        lines.push('', 'Gründe/Grenzen:', ...report.reasons.map(reason => `- ${reason}`))
-      }
-      return lines.join('\n')
-    }).join('\n\n')
+    const reports = renderBrainCalibrationReports(result)
     return {
       content: [{
         type: 'text',
@@ -936,6 +940,123 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           ...result.limitations.map(limitation => `- ${limitation}`),
           '',
           'Die Ausgabe enthält ausschließlich aggregierte Metriken und ändert weder Modell, Policy noch Release-Status.',
+        ].filter(Boolean).join('\n'),
+      }],
+    }
+  },
+
+  brain_calibration_register_campaign(vault, args) {
+    const result = vault.registerBrainCalibrationCampaign({
+      campaignId: args.campaign_id as string,
+      reviewers: strings(args.reviewers) ?? [],
+      groupBy: (args.group_by ?? 'project') as 'session' | 'project',
+      bootstrapSamples: typeof args.bootstrap_samples === 'number'
+        ? args.bootstrap_samples
+        : undefined,
+      expectedRegistrationRoot: typeof args.expected_registration_root === 'string'
+        ? args.expected_registration_root
+        : undefined,
+      expectedRegisteredAt: typeof args.expected_registered_at === 'string'
+        ? args.expected_registered_at
+        : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    const campaign = result.artifact
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun
+            ? '# Kampagnen-Registrierung – Vorschau'
+            : '# Kampagne irreversibel registriert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Operation: ${result.operation}`,
+          `Externer Anchor: ${result.externalAnchor}`,
+          `Campaign: \`${campaign.campaignId}\``,
+          `Registration-Root: \`${campaign.registrationRoot}\``,
+          `Registrierungszeit: \`${campaign.registeredAt}\``,
+          `Reviewer-Anzahl: ${campaign.reviewers.length}`,
+          `Eingefrorene Targets: ${campaign.frame.targets.length}`,
+          `Capture-Bundles: ${campaign.captureArchives.length}`,
+          `Gruppierung: ${campaign.plan.groupBy}`,
+          `Fester Cutoff: ${campaign.plan.cutoffAt ?? 'n/a'}`,
+          `Bootstrap-Samples: ${campaign.plan.bootstrapSamples}`,
+          `Gebundene Implementierungsdateien: ${campaign.plan.sourceBindings.length}`,
+          `Node/V8: ${campaign.plan.runtime.node} / ${campaign.plan.runtime.v8}`,
+          'Assurance: externe Append-only/WORM-Retention und vertrauenswürdiger Host sind Voraussetzungen; Reviewer-IDs sind prozessgebundene Pseudonyme, keine digitalen Signaturen.',
+          '',
+          result.dryRun
+            ? 'Noch wurde nichts versiegelt. Prüfe Plan und Zählwerte und wiederhole mit dry_run=false, expected_registration_root und expected_registered_at exakt aus dieser Vorschau.'
+            : 'Der Enrollment-Frame ist jetzt eingefroren. Reviewer erhalten ausschließlich das registrierte Blind-Review-Archiv.',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_calibration_close_campaign(vault, args) {
+    const result = vault.closeBrainCalibrationCampaign({
+      dryRun: args.dry_run !== false,
+    })
+    const closure = result.artifact
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun
+            ? '# Kampagnen-Closure – Vorschau'
+            : '# Kampagnendaten irreversibel geschlossen',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Operation: ${result.operation}`,
+          `Externer Anchor: ${result.externalAnchor}`,
+          `Campaign: \`${closure.campaignId}\``,
+          `Registration-Root: \`${closure.registrationRoot}\``,
+          `Closure-Root: \`${closure.closureRoot}\``,
+          `Eingefrorene Label-Einträge: ${closure.entries.length}`,
+          '',
+          result.dryRun
+            ? 'Noch wurde keine Closure geschrieben. Eine unvollständige Reviewer-Matrix wird fail-closed abgewiesen.'
+            : 'Die exakten Label-Ereignisse sind geschlossen. Es sind nur noch identische Review-Retries und die versiegelte Evaluation zulässig.',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_calibration_evaluate_sealed(vault, args) {
+    if (args.confirm !== true) {
+      throw new Error('confirm muss für die irreversible versiegelte Evaluation true sein')
+    }
+    const result = vault.evaluateSealedBrainCalibrationCampaign({ confirm: true })
+    const sealed = result.artifact
+    const evaluation = sealed.evaluation
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Versiegelte Brain-Calibration-Evaluation',
+          '',
+          `Operation: ${result.operation}`,
+          `Externer Anchor: ${result.externalAnchor}`,
+          `Campaign: \`${sealed.campaignId}\``,
+          `Result-Root: \`${sealed.resultRoot}\``,
+          `Version: ${evaluation.evaluationVersion}`,
+          `Run: \`${evaluation.runId}\``,
+          `Aktive Gewichte geändert: ${evaluation.activeWeightsChanged}`,
+          `Release-Entscheidung erlaubt: ${evaluation.releaseDecisionAllowed}`,
+          '',
+          renderBrainCalibrationReports(evaluation),
+          evaluation.stillValid
+            ? `\n## still_valid\n\nStatus: ${evaluation.stillValid.status}; ${evaluation.stillValid.reason}`
+            : '',
+          '',
+          'Methodische Grenzen:',
+          ...evaluation.limitations.map(limitation => `- ${limitation}`),
+          '- Die Receipt-Kette ist nur bei unabhängig erzwungener Append-only/WORM-Retention irreversibel.',
+          '- Reviewer-IDs sind prozessgebundene Pseudonyme ohne kryptografische Personensignatur.',
+          '- Source-/Runtime-Hashes prüfen Reproduzierbarkeit und Disk-Drift, attestieren aber keinen kompromittierten Hostprozess.',
+          '',
+          'Das Ergebnis wurde vor dieser Ausgabe lokal gespeichert und extern verkettet. Ein identischer Retry liefert exakt denselben Receipt.',
         ].filter(Boolean).join('\n'),
       }],
     }

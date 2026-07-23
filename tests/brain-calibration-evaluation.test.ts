@@ -14,16 +14,24 @@ import {
 } from '../services/brain-calibration.ts'
 import {
   clusterBootstrapComparison,
+  collectBrainCalibrationEvaluationFrame,
+  computeBrainCalibrationDataFingerprint,
+  deriveBrainCalibrationCutoff,
+  deriveBrainCalibrationSplitPlan,
   evaluateBrainCalibration,
+  evaluateBrainCalibrationSnapshot,
   evaluateProbabilityPredictions,
   mnarBrierIdentificationInterval,
+  type BrainCalibrationEvaluationFrameSnapshot,
+  type BrainCalibrationEvaluationFrameTarget,
 } from '../services/brain-calibration-evaluation.ts'
 import {
   CALIBRATION_CAPTURE_PRODUCER,
   CALIBRATION_CAPTURE_SCHEMA,
-  calibrationCaptureIntegrity,
+  LEGACY_CALIBRATION_CAPTURE_SCHEMA,
   calibrationObservationId,
   calibrationProjectGroupId,
+  legacyCalibrationCaptureIntegrityV2,
   serializeCalibrationReviewPayload,
 } from '../services/calibration-capture.ts'
 import { scoreKnowledgeSalienceFactors } from '../services/knowledge-salience.ts'
@@ -105,6 +113,7 @@ function writeCaptureFrame(
   vaultPath: string,
   sourcePath: string,
   snapshots: BrainCalibrationTargetSnapshot[],
+  sampleSeed = `cs-${'b'.repeat(32)}`,
 ): void {
   const first = snapshots[0]
   assert.ok(first?.sessionId)
@@ -127,7 +136,6 @@ function writeCaptureFrame(
         excerpt: `Attested evidence ${index + 1}-${sourceIndex + 1}`,
       })),
     }))
-  const sampleSeed = `cs-${'b'.repeat(32)}`
   const bundle = {
     sessionId: first.sessionId,
     modelVersion: first.modelVersion,
@@ -148,9 +156,9 @@ function writeCaptureFrame(
     'quelle: knowledge-harvester',
     `session_id: ${JSON.stringify(first.sessionId)}`,
     `importance_model: ${JSON.stringify(first.modelVersion)}`,
-    `calibration_capture_schema: ${CALIBRATION_CAPTURE_SCHEMA}`,
+    `calibration_capture_schema: ${LEGACY_CALIBRATION_CAPTURE_SCHEMA}`,
     `calibration_capture_producer: ${CALIBRATION_CAPTURE_PRODUCER}`,
-    `calibration_capture_integrity: ${calibrationCaptureIntegrity(bundle)}`,
+    `calibration_capture_integrity: ${legacyCalibrationCaptureIntegrityV2(bundle)}`,
     `calibration_sample_seed: ${sampleSeed}`,
     'knowledge_fact_ids:',
     yamlArray(bundle.selectedFactIds),
@@ -169,6 +177,47 @@ function writeCaptureFrame(
     '# Calibration frame',
     '',
   ].join('\n'), 'utf-8')
+}
+
+function evaluationFrameTarget(
+  target: BrainCalibrationTargetSnapshot,
+  captureKey = target.factId,
+): BrainCalibrationEvaluationFrameTarget {
+  assert.ok(target.sourcePath)
+  assert.ok(target.sessionId)
+  assert.ok(target.projectGroupId)
+  const snapshotFingerprint = calibrationSnapshotFingerprint(target)
+  return {
+    observationId: calibrationObservationId(
+      target.sessionId,
+      target.factId,
+      snapshotFingerprint,
+    ),
+    factId: target.factId,
+    selectionStatus: target.selectionStatus,
+    samplingProbability: target.samplingProbability,
+    samplingWeight: 1 / target.samplingProbability,
+    generatedAt: target.generatedAt,
+    salienceScore: target.salienceScore,
+    evidenceScore: target.evidenceScore,
+    candidatePopulationCount: target.candidatePopulationCount,
+    sourcePath: target.sourcePath,
+    sessionId: target.sessionId,
+    projectGroupId: target.projectGroupId,
+    captureIntegrity: createHash('sha256')
+      .update(`capture:${captureKey}`)
+      .digest('hex'),
+    snapshotFingerprint,
+  }
+}
+
+function evaluationFrame(
+  targets: readonly BrainCalibrationTargetSnapshot[],
+): BrainCalibrationEvaluationFrameSnapshot {
+  return {
+    targets: targets.map(target => evaluationFrameTarget(target)),
+    invalidCaptureBundles: 0,
+  }
 }
 
 describe('brain calibration scientific evaluation', () => {
@@ -630,5 +679,297 @@ describe('brain calibration scientific evaluation', () => {
     assert.notEqual(after.runId, before.runId)
     assert.equal(after.reports[0]?.responseCoverage.eligibleTargets, 1)
     assert.equal(after.reports[0]?.responseCoverage.labeledTargets, 0)
+  })
+
+  test('derives the preregistered cutoff deterministically from the unlabeled frame', () => {
+    const targets = Array.from({ length: 20 }, (_, index) => {
+      const generatedAt = new Date(Date.UTC(2026, 0, index + 1)).toISOString()
+      const sourcePath = `Kunden/Cutoff-${index}/Capture.md`
+      return {
+        ...snapshot(8_000 + index, generatedAt),
+        sourcePath,
+        sessionId: `cutoff-session-${index}`,
+        projectGroupId: calibrationProjectGroupId(sourcePath),
+      }
+    })
+    const frame = evaluationFrame(targets)
+
+    const cutoff = deriveBrainCalibrationCutoff(frame, 'session')
+    const reordered = deriveBrainCalibrationCutoff({
+      ...frame,
+      targets: [...frame.targets].reverse(),
+    }, 'session')
+
+    assert.equal(cutoff, '2026-01-17T00:00:00.000Z')
+    assert.equal(reordered, cutoff)
+  })
+
+  test('uses the registered fixed cutoff without adapting it to observed labels', () => {
+    const targets = Array.from({ length: 30 }, (_, index) => {
+      const generatedAt = new Date(Date.UTC(2026, 0, index + 1)).toISOString()
+      const sourcePath = `Kunden/Fixed-Cutoff-${index}/Capture.md`
+      return {
+        ...snapshot(8_100 + index, generatedAt),
+        sourcePath,
+        sessionId: `fixed-cutoff-session-${index}`,
+        projectGroupId: calibrationProjectGroupId(sourcePath),
+      }
+    })
+    const frame = evaluationFrame(targets)
+    const labels = targets
+      .slice(0, 20)
+      .map((target, index) => entryForSnapshot(target, index % 2 === 0))
+    const registeredCutoff = deriveBrainCalibrationCutoff(frame, 'session')
+    assert.equal(registeredCutoff, '2026-01-25T00:00:00.000Z')
+
+    const adaptive = evaluateBrainCalibrationSnapshot(labels, frame, {
+      label: 'useful',
+      groupBy: 'session',
+      bootstrapSamples: 100,
+    })
+    const sealed = evaluateBrainCalibrationSnapshot(labels, frame, {
+      label: 'useful',
+      groupBy: 'session',
+      bootstrapSamples: 100,
+    }, registeredCutoff)
+
+    assert.equal(adaptive.reports[0]?.split.cutoffAt, '2026-01-17T00:00:00.000Z')
+    assert.notEqual(adaptive.reports[0]?.split.cutoffAt, registeredCutoff)
+    assert.equal(sealed.reports[0]?.split.cutoffAt, registeredCutoff)
+    assert.notEqual(sealed.runId, adaptive.runId)
+  })
+
+  test('keeps full-frame leakage groups frozen when a bridging review abstains', () => {
+    const cutoffAt = '2026-01-06T00:00:00.000Z'
+    const bridgeFactId = factId(8_199)
+    const earlyBase = snapshot(8_110, '2026-01-01T00:00:00.000Z')
+    const early = {
+      ...earlyBase,
+      sessionId: 'frozen-bridge-session',
+    }
+    const bridgeBase = snapshot(8_111, '2026-01-05T00:00:00.000Z')
+    const bridge = {
+      ...bridgeBase,
+      factId: bridgeFactId,
+      sessionId: 'frozen-bridge-session',
+    }
+    const lateBase = snapshot(8_112, '2026-01-10T00:00:00.000Z')
+    const late = {
+      ...lateBase,
+      factId: bridgeFactId,
+      sessionId: 'frozen-late-session',
+    }
+    const independent = [
+      snapshot(8_113, '2026-01-02T00:00:00.000Z'),
+      snapshot(8_114, '2026-01-03T00:00:00.000Z'),
+      snapshot(8_115, '2026-01-07T00:00:00.000Z'),
+      snapshot(8_116, '2026-01-08T00:00:00.000Z'),
+    ]
+    const targets = [early, bridge, late, ...independent]
+    const frame = evaluationFrame(targets)
+    const plan = deriveBrainCalibrationSplitPlan(frame, 'session', cutoffAt)
+    const bridgingAssignments = plan.targets.filter(target =>
+      [early, bridge, late].some(item =>
+        evaluationFrameTarget(item).observationId === target.observationId))
+    assert.equal(new Set(bridgingAssignments.map(target => target.groupId)).size, 1)
+    assert.deepEqual(
+      [...new Set(bridgingAssignments.map(target => target.assignment))],
+      ['embargoed'],
+    )
+
+    const bridgePositive = entryForSnapshot(bridge, true, 'reviewer-a')
+    const entries = [
+      entryForSnapshot(early, true),
+      bridgePositive,
+      { ...bridgePositive, value: false, reviewer: 'reviewer-b' },
+      entryForSnapshot(late, false),
+      ...independent.map((target, index) =>
+        entryForSnapshot(target, index % 2 === 0)),
+    ]
+    const recomputed = evaluateBrainCalibrationSnapshot(entries, frame, {
+      label: 'useful',
+      groupBy: 'session',
+      bootstrapSamples: 100,
+    }, cutoffAt)
+    const frozen = evaluateBrainCalibrationSnapshot(entries, frame, {
+      label: 'useful',
+      groupBy: 'session',
+      bootstrapSamples: 100,
+    }, cutoffAt, plan)
+
+    assert.equal(recomputed.reports[0]?.split.abstainedTies, 1)
+    assert.equal(recomputed.reports[0]?.split.embargoedTargets, 0)
+    assert.equal(frozen.reports[0]?.split.abstainedTies, 1)
+    assert.equal(frozen.reports[0]?.split.embargoedTargets, 2)
+    assert.equal(frozen.reports[0]?.split.embargoedGroups, 1)
+    assert.notEqual(frozen.runId, recomputed.runId)
+    assert.throws(
+      () => evaluateBrainCalibrationSnapshot(entries, frame, {
+        label: 'useful',
+        groupBy: 'session',
+        bootstrapSamples: 100,
+      }, cutoffAt, {
+        ...plan,
+        targets: plan.targets.slice(1),
+      }),
+      /vollständig und bijektiv/,
+    )
+  })
+
+  test('binds every routing and attestation input into an order-stable fingerprint', () => {
+    const first = snapshot(8_200, '2026-02-01T00:00:00.000Z')
+    const second = snapshot(8_201, '2026-02-02T00:00:00.000Z')
+    const reviewerPrefix = `reviewer-${'shared-prefix-'.repeat(3)}`
+    const entries = [
+      entryForSnapshot(first, true, `${reviewerPrefix}a`),
+      entryForSnapshot(second, false, `${reviewerPrefix}b`),
+    ]
+    const frame = evaluationFrame([first, second])
+    const baseline = computeBrainCalibrationDataFingerprint(entries, frame)
+
+    assert.equal(
+      computeBrainCalibrationDataFingerprint(
+        [...entries].reverse(),
+        { ...frame, targets: [...frame.targets].reverse() },
+      ),
+      baseline,
+    )
+
+    const fingerprintWithSnapshot = (
+      changes: Partial<BrainCalibrationTargetSnapshot>,
+    ): string => {
+      const changedSnapshot = { ...entries[0].snapshot, ...changes }
+      assert.ok(changedSnapshot.sessionId)
+      const observationId = calibrationObservationId(
+        changedSnapshot.sessionId,
+        changedSnapshot.factId,
+        calibrationSnapshotFingerprint(changedSnapshot),
+      )
+      const changedEntry: BrainCalibrationEntry = {
+        ...entries[0],
+        observationId,
+        baseObservationId: observationId,
+        snapshot: changedSnapshot,
+      }
+      return computeBrainCalibrationDataFingerprint(
+        [changedEntry, entries[1]],
+        frame,
+      )
+    }
+    assert.notEqual(
+      fingerprintWithSnapshot({
+        sourcePath: 'Kunden/Projekt-8200/Other-Capture.md',
+      }),
+      baseline,
+    )
+    assert.notEqual(
+      fingerprintWithSnapshot({ sessionId: 'fingerprint-other-session' }),
+      baseline,
+    )
+    assert.notEqual(
+      fingerprintWithSnapshot({ projectGroupId: `pg-${'f'.repeat(20)}` }),
+      baseline,
+    )
+
+    const changedIntegrity: BrainCalibrationEvaluationFrameSnapshot = {
+      ...frame,
+      targets: [
+        {
+          ...frame.targets[0],
+          captureIntegrity: 'e'.repeat(64),
+        },
+        frame.targets[1],
+      ],
+    }
+    assert.notEqual(
+      computeBrainCalibrationDataFingerprint(entries, changedIntegrity),
+      baseline,
+    )
+
+    const changedSnapshotFingerprint = 'd'.repeat(64)
+    const changedObservationId = calibrationObservationId(
+      frame.targets[0].sessionId,
+      frame.targets[0].factId,
+      changedSnapshotFingerprint,
+    )
+    const changedFingerprintFrame: BrainCalibrationEvaluationFrameSnapshot = {
+      ...frame,
+      targets: [
+        {
+          ...frame.targets[0],
+          observationId: changedObservationId,
+          snapshotFingerprint: changedSnapshotFingerprint,
+        },
+        frame.targets[1],
+      ],
+    }
+    assert.notEqual(
+      computeBrainCalibrationDataFingerprint(entries, changedFingerprintFrame),
+      baseline,
+    )
+
+    const changedReviewer = [
+      {
+        ...entries[0],
+        reviewer: `${reviewerPrefix}z`,
+      },
+      entries[1],
+    ]
+    assert.notEqual(
+      computeBrainCalibrationDataFingerprint(changedReviewer, frame),
+      baseline,
+    )
+  })
+
+  test('fails closed for copied bundles and duplicate observations', async () => {
+    const copied = {
+      ...snapshot(8_300, '2026-03-01T00:00:00.000Z'),
+      sourcePath: 'Kunden/Duplicates/Copied.md',
+      sessionId: 'copied-bundle-session',
+      projectGroupId: calibrationProjectGroupId(
+        'Kunden/Duplicates/Copied.md',
+      ),
+    }
+    writeCaptureFrame(
+      vaultPath,
+      'Kunden/Duplicates/Copied.md',
+      [copied],
+    )
+    writeCaptureFrame(
+      vaultPath,
+      'Kunden/Duplicates/Copied-Again.md',
+      [copied],
+    )
+
+    const duplicateObservation = {
+      ...snapshot(8_301, '2026-03-02T00:00:00.000Z'),
+      sourcePath: 'Kunden/Duplicates/Observation.md',
+      sessionId: 'duplicate-observation-session',
+      projectGroupId: calibrationProjectGroupId(
+        'Kunden/Duplicates/Observation.md',
+      ),
+    }
+    writeCaptureFrame(
+      vaultPath,
+      'Kunden/Duplicates/Observation.md',
+      [duplicateObservation],
+      `cs-${'c'.repeat(32)}`,
+    )
+    writeCaptureFrame(
+      vaultPath,
+      'Kunden/Duplicates/Observation-Again.md',
+      [duplicateObservation],
+      `cs-${'d'.repeat(32)}`,
+    )
+    await vault.init({ quiet: true })
+
+    const frame = collectBrainCalibrationEvaluationFrame(vault)
+
+    assert.equal(frame.invalidCaptureBundles, 4)
+    assert.deepEqual(frame.targets, [])
+    assert.throws(
+      () => deriveBrainCalibrationCutoff(frame, 'session'),
+      /ungültigen oder duplizierten Capture-Bundles/,
+    )
   })
 })

@@ -15,6 +15,12 @@ import {
   type BrainCalibrationSelectionStatus,
   type BrainCalibrationTargetSnapshot,
 } from '../services/brain-calibration.ts'
+import {
+  BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV,
+  BRAIN_CALIBRATION_VAULT_ID_ENV,
+  closeBrainCalibrationCampaign,
+  registerBrainCalibrationCampaign,
+} from '../services/brain-calibration-campaign.ts'
 import { brainCalibrationReviewBatch } from '../services/brain-calibration-review.ts'
 import {
   CALIBRATION_CAPTURE_PRODUCER,
@@ -77,6 +83,7 @@ function factId(sessionId: string, index: number): string {
 
 function writeCapture(vaultPath: string, options: CaptureOptions): CaptureFixture {
   const outsideSample = options.selectedOutsideSampleCount ?? 0
+  const sampleSeed = `cs-${options.seedCharacter.repeat(32)}`
   const expectedSampleSize = Math.min(
     CALIBRATION_EVALUATION_SAMPLE_SIZE,
     options.populationCount,
@@ -86,16 +93,52 @@ function writeCapture(vaultPath: string, options: CaptureOptions): CaptureFixtur
     expectedSampleSize,
     'Fixture muss die vollständige Evaluationsstichprobe enthalten',
   )
-  const selectedCount = options.selectedEvaluationCount + outsideSample
+  const candidateUniverseFactIds = Array.from(
+    { length: options.populationCount },
+    (_, index) => factId(options.sessionId, index),
+  ).sort((left, right) =>
+    Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')))
+  const sampledFactIds = [...candidateUniverseFactIds]
+    .sort((left, right) => {
+      const leftKey = createHash('sha256')
+        .update(`${sampleSeed}\0${left}\0calibration-evaluation-v1`)
+        .digest('hex')
+      const rightKey = createHash('sha256')
+        .update(`${sampleSeed}\0${right}\0calibration-evaluation-v1`)
+        .digest('hex')
+      return leftKey.localeCompare(rightKey, 'en')
+        || left.localeCompare(right, 'en')
+    })
+    .slice(0, expectedSampleSize)
+  const sampled = new Set(sampledFactIds)
+  const selectedSampleFactIds = sampledFactIds.slice(
+    0,
+    options.selectedEvaluationCount,
+  )
+  const unselectedSampleFactIds = sampledFactIds.slice(
+    options.selectedEvaluationCount,
+  )
+  const outsideSampleFactIds = candidateUniverseFactIds
+    .filter(id => !sampled.has(id))
+    .slice(0, outsideSample)
+  assert.equal(
+    outsideSampleFactIds.length,
+    outsideSample,
+    'Fixture braucht genug nicht gesampelte Kandidaten',
+  )
+  const selectedFactIds = [
+    ...selectedSampleFactIds,
+    ...outsideSampleFactIds,
+  ]
   const samplingProbability = expectedSampleSize / options.populationCount
   const snapshots: BrainCalibrationTargetSnapshot[] = []
 
-  for (let index = 0; index < selectedCount; index++) {
-    const evaluationSample = index < options.selectedEvaluationCount
+  for (const [index, selectedFactId] of selectedFactIds.entries()) {
+    const evaluationSample = sampled.has(selectedFactId)
     snapshots.push({
       modelVersion: 'knowledge-salience-v1',
       evidenceModelVersion: 'evidence-scoring-v1',
-      factId: factId(options.sessionId, index),
+      factId: selectedFactId,
       kind: 'decision',
       salienceScore: scoreKnowledgeSalienceFactors(FACTORS),
       evidenceScore: 50,
@@ -111,11 +154,11 @@ function writeCapture(vaultPath: string, options: CaptureOptions): CaptureFixtur
       samplingProbability: evaluationSample ? samplingProbability : 0,
     })
   }
-  for (let index = 0; index < options.unselectedEvaluationCount; index++) {
+  for (const unselectedFactId of unselectedSampleFactIds) {
     snapshots.push({
       modelVersion: 'knowledge-salience-v1',
       evidenceModelVersion: 'evidence-scoring-v1',
-      factId: factId(options.sessionId, selectedCount + index),
+      factId: unselectedFactId,
       kind: 'verification',
       salienceScore: scoreKnowledgeSalienceFactors(FACTORS),
       evidenceScore: 50,
@@ -140,7 +183,6 @@ function writeCapture(vaultPath: string, options: CaptureOptions): CaptureFixtur
   const snapshotFingerprints = snapshots.map(snapshot =>
     `${snapshot.factId}:${calibrationSnapshotFingerprint(snapshot)}`)
   const snapshotPayloads = snapshots.map(serializeCalibrationSnapshotCore)
-  const sampleSeed = `cs-${options.seedCharacter.repeat(32)}`
   const reviewOrder = [...snapshots].sort((left, right) => {
     const leftKey = createHash('sha256')
       .update(`${sampleSeed}\0${left.factId}\0calibration-review-test-v1`)
@@ -180,6 +222,7 @@ function writeCapture(vaultPath: string, options: CaptureOptions): CaptureFixtur
     sessionId: options.sessionId,
     modelVersion: 'knowledge-salience-v1',
     sampleSeed,
+    candidateUniverseFactIds,
     selectedFactIds: selected.map(snapshot => snapshot.factId),
     factMap,
     snapshotFingerprints,
@@ -201,6 +244,8 @@ function writeCapture(vaultPath: string, options: CaptureOptions): CaptureFixtur
     `calibration_capture_producer: ${CALIBRATION_CAPTURE_PRODUCER}`,
     `calibration_capture_integrity: ${integrity}`,
     `calibration_sample_seed: ${sampleSeed}`,
+    'calibration_candidate_universe_fact_ids:',
+    yamlArray(candidateUniverseFactIds),
     'knowledge_fact_ids:',
     yamlArray(bundle.selectedFactIds),
     'calibration_fact_map:',
@@ -241,16 +286,38 @@ function assertClose(actual: number | null, expected: number): void {
 
 describe('brain calibration blinded review batch', () => {
   let vaultPath: string
+  let anchorPath: string
   let vault: Vault | null
+  let previousAnchorDirectory: string | undefined
+  let previousVaultId: string | undefined
 
   beforeEach(() => {
     vaultPath = createTempVault()
+    anchorPath = createTempVault()
     vault = null
+    previousAnchorDirectory =
+      process.env[BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV]
+    previousVaultId = process.env[BRAIN_CALIBRATION_VAULT_ID_ENV]
+    process.env[BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV] = anchorPath
+    process.env[BRAIN_CALIBRATION_VAULT_ID_ENV] =
+      `review-test-${createHash('sha256').update(vaultPath).digest('hex').slice(0, 16)}`
   })
 
   afterEach(() => {
     vault?.shutdown()
     cleanupVault(vaultPath)
+    cleanupVault(anchorPath)
+    if (previousAnchorDirectory === undefined) {
+      delete process.env[BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV]
+    } else {
+      process.env[BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV] =
+        previousAnchorDirectory
+    }
+    if (previousVaultId === undefined) {
+      delete process.env[BRAIN_CALIBRATION_VAULT_ID_ENV]
+    } else {
+      process.env[BRAIN_CALIBRATION_VAULT_ID_ENV] = previousVaultId
+    }
   })
 
   async function initializeVault(): Promise<Vault> {
@@ -280,6 +347,51 @@ describe('brain calibration blinded review batch', () => {
       recordedAt,
       dryRun: false,
     })
+  }
+
+  function writeCampaignFrame(): CaptureFixture[] {
+    return [
+      writeCapture(vaultPath, {
+        path: 'Kunden/Review Campaign/Capture A.md',
+        sessionId: 'review-campaign-a',
+        generatedAt: '2026-07-20T08:00:00.000Z',
+        populationCount: 6,
+        selectedEvaluationCount: 3,
+        unselectedEvaluationCount: 3,
+        seedCharacter: 'a',
+      }),
+      writeCapture(vaultPath, {
+        path: 'Kunden/Review Campaign/Capture B.md',
+        sessionId: 'review-campaign-b',
+        generatedAt: '2026-07-21T08:00:00.000Z',
+        populationCount: 6,
+        selectedEvaluationCount: 3,
+        unselectedEvaluationCount: 3,
+        seedCharacter: 'b',
+      }),
+    ]
+  }
+
+  function registerConfirmedCampaign(
+    targetVault: Vault,
+    campaignId: string,
+  ) {
+    const options = {
+      campaignId,
+      reviewers: ['alice'],
+      groupBy: 'session' as const,
+      bootstrapSamples: 100,
+    }
+    const preview = registerBrainCalibrationCampaign(targetVault, {
+      ...options,
+      dryRun: true,
+    })
+    return registerBrainCalibrationCampaign(targetVault, {
+      ...options,
+      expectedRegistrationRoot: preview.artifact.registrationRoot,
+      expectedRegisteredAt: preview.artifact.registeredAt,
+      dryRun: false,
+    }).artifact
   }
 
   test('shows only evaluation-sample observations with individually blinded attested R payloads', async () => {
@@ -353,6 +465,92 @@ describe('brain calibration blinded review batch', () => {
         integrity: capture.integrity,
       })
     }
+  })
+
+  test('uses only the externally anchored archive during a registered campaign', async () => {
+    const captures = writeCampaignFrame()
+    const targetVault = await initializeVault()
+    const registration = registerConfirmedCampaign(
+      targetVault,
+      'review-archive-fixture',
+    )
+
+    assert.throws(
+      () => brainCalibrationReviewBatch(targetVault, { limit: 200 }),
+      /Reviewer-ID/,
+    )
+    assert.throws(
+      () => brainCalibrationReviewBatch(targetVault, {
+        reviewer: 'mallory',
+        limit: 200,
+      }),
+      /nicht registriert/,
+    )
+
+    const beforeMutation = brainCalibrationReviewBatch(targetVault, {
+      reviewer: 'alice',
+      limit: 200,
+    })
+    assert.equal(beforeMutation.items.length, registration.reviewArchive.length)
+    assert.equal(beforeMutation.integrity.validCaptures, captures.length)
+    assert.equal(beforeMutation.integrity.invalidCaptures, 0)
+    assert.deepEqual(
+      new Set(beforeMutation.items.map(item => item.statement)),
+      new Set(registration.reviewArchive.map(item => item.review.statement)),
+    )
+
+    const livePath = join(vaultPath, captures[0].path)
+    writeFileSync(
+      livePath,
+      readFileSync(livePath, 'utf8').replaceAll(
+        'Verblindete Aussage',
+        'Nach Registrierung manipulierte Aussage',
+      ),
+      'utf8',
+    )
+    targetVault.refreshIndex()
+
+    const afterMutation = brainCalibrationReviewBatch(targetVault, {
+      reviewer: 'alice',
+      limit: 200,
+    })
+    assert.deepEqual(afterMutation, beforeMutation)
+    assert.doesNotMatch(
+      JSON.stringify(afterMutation.items),
+      /Nach Registrierung manipulierte Aussage/,
+    )
+  })
+
+  test('blocks new review batches after campaign closure', async () => {
+    writeCampaignFrame()
+    const targetVault = await initializeVault()
+    const registration = registerConfirmedCampaign(
+      targetVault,
+      'review-closure-fixture',
+    )
+    const recordedAt = new Date(Math.max(
+      Date.now(),
+      Date.parse(registration.registeredAt),
+    )).toISOString()
+    for (const target of registration.reviewArchive) {
+      targetVault.recordCalibrationJudgement({
+        reviewToken: target.reviewToken,
+        reviewer: 'alice',
+        useful: true,
+        supported: true,
+        recordedAt,
+        dryRun: false,
+      })
+    }
+    closeBrainCalibrationCampaign(targetVault, { dryRun: false })
+
+    assert.throws(
+      () => brainCalibrationReviewBatch(targetVault, {
+        reviewer: 'alice',
+        limit: 200,
+      }),
+      /geschlossen/,
+    )
   })
 
   test('computes pair-level pending work and response coverage for the requested reviewer', async () => {
@@ -588,9 +786,21 @@ describe('brain calibration blinded review batch', () => {
     assert.ok(definition)
     assert.deepEqual(
       Object.keys(definition.inputSchema.properties).sort(),
-      ['limit', 'reviewer'],
+      ['limit'],
     )
-    assert.deepEqual(definition.inputSchema.required, ['reviewer'])
+    assert.equal('required' in definition.inputSchema, false)
+
+    const judgementDefinition = TOOL_DEFINITIONS.find(tool =>
+      tool.name === 'record_calibration_judgement')
+    assert.ok(judgementDefinition)
+    assert.deepEqual(
+      Object.keys(judgementDefinition.inputSchema.properties).sort(),
+      ['dry_run', 'review_token', 'supported', 'useful'],
+    )
+    assert.deepEqual(
+      judgementDefinition.inputSchema.required,
+      ['review_token', 'useful', 'supported'],
+    )
 
     const handler = createToolHandler(targetVault)
     const response = await handler({

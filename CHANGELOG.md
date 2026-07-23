@@ -31,10 +31,13 @@
 - Explicit multi-signal adoption for recognizable pre-marker generated surfaces while foreign/manual files remain blocked.
 - Checked-in 5k-note benchmark baseline, deterministic work limits, and comparable-machine regression enforcement.
 - Hard per-job background timeouts in isolated workers and richer unattended-run health signals.
-- Attested calibration-capture V2 bundles with persisted random sample seeds, blinded R-reference/evidence payloads, stable base IDs, temporal recheck IDs, and stale-review protection.
+- Attested calibration-capture V3 bundles with a complete candidate-ID universe, exactly reproducible seeded sampling, blinded R-reference/evidence payloads, stable base IDs, temporal recheck IDs, and stale-review protection. Legacy V2 stays read-only and cannot enter a sealed campaign.
 - `brain_calibration_review_batch` for role-separated, selection-blind human labels with opaque record tokens and unweighted overall progress; weighted/stratified diagnostics remain exclusive to the later evaluator, while calibration payloads stay out of generic knowledge surfaces and action logs.
 - `record_calibration_judgement` for one-lock, one-write useful/supported pairs that become immutable after submission; identical retries are idempotent and divergent retries fail closed.
 - `brain_calibration_evaluate` for IPW-weighted, strictly chronological leakage-group shadow evaluation with boundary embargo, monotone train-only probability calibration, Brier/log-loss/reliability/FPR diagnostics, MNAR bounds, and paired cluster-bootstrap intervals. It can never authorize a release.
+- Two-phase `brain_calibration_register_campaign` and `brain_calibration_close_campaign` seals that bind the complete response frame, reviewer roster, label-independent cutoff, full-frame leakage components and train/test/embargo assignments, analysis plan, whole source/runtime hashes, and atomic label events to create-only external receipts. Apply is bound to the exact reviewed registration preview, while closure commits externally before its recoverable local copy.
+- `brain_calibration_evaluate_sealed` for a one-shot, option-free evaluation over only the frozen campaign snapshot; exact retries replay the persisted, externally anchored result and never authorize a release or change weights.
+- A global campaign lock that freezes Harvester calibration writes, temporal labels, and exploratory diagnostics between registration and sealed evaluation; normal capture resumes after the persisted result receipt.
 
 ### Changed
 

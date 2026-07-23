@@ -2,7 +2,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { createReadStream, createWriteStream, fstatSync } from 'node:fs'
+import { createReadStream, createWriteStream, fstatSync, writeSync } from 'node:fs'
 import { Socket } from 'node:net'
 import type { Readable, Writable } from 'node:stream'
 import {
@@ -12,6 +12,7 @@ import {
 import { Vault } from './vault.ts'
 import {
   isToolAllowedInMode,
+  parseCalibrationReviewerId,
   parseMcpToolMode,
   toolDefinitionsForMode,
 } from './server-tools.ts'
@@ -32,6 +33,20 @@ try {
     `obsidian-brain: ${error instanceof Error ? error.message : String(error)}\n`,
   )
   process.exit(1)
+}
+let calibrationReviewerId: string | null = null
+if (toolMode === 'calibration-review') {
+  try {
+    calibrationReviewerId = parseCalibrationReviewerId(
+      process.env.BRAIN_CALIBRATION_REVIEWER_ID,
+    )
+  } catch (error) {
+    writeSync(
+      process.stderr.fd,
+      `obsidian-brain: ${error instanceof Error ? error.message : String(error)}\n`,
+    )
+    process.exit(1)
+  }
 }
 const exposedToolDefinitions = toolDefinitionsForMode(toolMode)
 
@@ -117,11 +132,68 @@ mcp.setRequestHandler(CallToolRequestSchema, async request => {
       content: [{
         type: 'text',
         text:
-          `Tool ${request.params.name} ist im MCP-Modus calibration-review nicht verfügbar`,
+          `Tool ${request.params.name} ist im MCP-Modus ${toolMode} nicht verfügbar`,
       }],
     }
   }
-  return toolHandler(request)
+
+  if (toolMode !== 'calibration-review' || calibrationReviewerId === null) {
+    return toolHandler(request)
+  }
+
+  const callerArguments = request.params.arguments ?? {}
+  if (callerArguments.reviewer !== undefined) {
+    let suppliedReviewerId: string
+    try {
+      suppliedReviewerId = parseCalibrationReviewerId(callerArguments.reviewer)
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: error instanceof Error ? error.message : String(error),
+        }],
+      }
+    }
+    if (suppliedReviewerId !== calibrationReviewerId) {
+      return {
+        isError: true,
+        content: [{
+          type: 'text',
+          text:
+            'Caller-supplied reviewer stimmt nicht mit der servergebundenen Reviewer-ID überein',
+        }],
+      }
+    }
+  }
+
+  if (
+    request.params.name === 'record_calibration_judgement'
+    && callerArguments.recorded_at !== undefined
+  ) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text',
+        text:
+          'Caller-supplied recorded_at ist nicht erlaubt; die Urteilszeit wird serverseitig gebunden',
+      }],
+    }
+  }
+
+  return toolHandler({
+    ...request,
+    params: {
+      ...request.params,
+      arguments: {
+        ...callerArguments,
+        reviewer: calibrationReviewerId,
+        ...(request.params.name === 'record_calibration_judgement'
+          ? { recorded_at: new Date().toISOString() }
+          : {}),
+      },
+    },
+  })
 })
 
 // ── Graceful Shutdown ──────────────────────────────────────────────────

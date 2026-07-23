@@ -1,6 +1,9 @@
 import {
   closeSync,
   existsSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
   openSync,
   readFileSync,
   unlinkSync,
@@ -30,6 +33,14 @@ import {
 } from './calibration-capture.ts'
 import { appendActionLog } from './action-log.ts'
 import { atomicWriteJsonSync } from './atomic-file.ts'
+import {
+  assertBrainCalibrationCampaignTemporalLabelWriteAccess,
+  assertBrainCalibrationExploratoryAccess,
+  BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH,
+  resolveBrainCalibrationCampaignReviewTarget,
+  withBrainCalibrationCampaignLock,
+  type BrainCalibrationCampaignResolvedReviewTarget,
+} from './brain-calibration-campaign.ts'
 import { parseFrontmatter } from './note-parser.ts'
 import { isActivePath } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
@@ -286,6 +297,8 @@ const MAX_ENTRIES = 100_000
 interface CalibrationLock {
   descriptor: number
   path: string
+  device: number
+  inode: number
 }
 
 function acquireCalibrationLock(vault: Vault): CalibrationLock {
@@ -297,7 +310,14 @@ function acquireCalibrationLock(vault: Vault): CalibrationLock {
       pid: process.pid,
       acquiredAt: new Date().toISOString(),
     })}\n`, 'utf-8')
-    return { descriptor, path }
+    fsyncSync(descriptor)
+    const info = fstatSync(descriptor)
+    return {
+      descriptor,
+      path,
+      device: info.dev,
+      inode: info.ino,
+    }
   } catch (error) {
     if (descriptor !== null) {
       try {
@@ -305,11 +325,8 @@ function acquireCalibrationLock(vault: Vault): CalibrationLock {
       } catch {
         // Preserve the acquisition error.
       }
-      try {
-        unlinkSync(path)
-      } catch {
-        // The incomplete lock may already be gone.
-      }
+      // Preserve a partial lock fail-closed. Unlinking by path here could
+      // remove a replacement lock acquired by another writer.
     }
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       throw new Error(
@@ -322,14 +339,20 @@ function acquireCalibrationLock(vault: Vault): CalibrationLock {
 }
 
 function releaseCalibrationLock(lock: CalibrationLock): void {
+  let ownsPath = false
   try {
-    closeSync(lock.descriptor)
-  } finally {
-    try {
-      unlinkSync(lock.path)
-    } catch {
-      // Preserve a successful data write even if external cleanup removed the lock.
+    const current = lstatSync(lock.path)
+    ownsPath = current.dev === lock.device && current.ino === lock.inode
+    if (!ownsPath) {
+      throw new Error('Kalibrierungs-Lock wurde während des Schreibens ersetzt')
     }
+    closeSync(lock.descriptor)
+  } catch (error) {
+    try { closeSync(lock.descriptor) } catch {}
+    throw error
+  }
+  if (ownsPath) {
+    unlinkSync(lock.path)
   }
 }
 
@@ -606,6 +629,17 @@ function parseSnapshot(value: unknown): BrainCalibrationTargetSnapshot {
   return parsed
 }
 
+/**
+ * Strict public parser for archived campaign snapshots. Campaign enrollment
+ * and closure must validate the same model, routing, and temporal invariants
+ * as the live label writer instead of trusting a type assertion.
+ */
+export function parseBrainCalibrationTargetSnapshot(
+  value: unknown,
+): BrainCalibrationTargetSnapshot {
+  return parseSnapshot(value)
+}
+
 export interface BrainCalibrationSnapshotContext {
   generatedAt: string
   selectionStatus: BrainCalibrationSelectionStatus
@@ -721,6 +755,43 @@ function snapshotFromCapture(
       snapshot.factId,
       capturedFact.fingerprint,
     ),
+  }
+}
+
+interface PrimaryJudgementTarget {
+  snapshot: BrainCalibrationTargetSnapshot
+  observationId: string
+  campaign: BrainCalibrationCampaignResolvedReviewTarget | null
+}
+
+function primaryJudgementTarget(
+  vault: Vault,
+  options: RecordCalibrationJudgementOptions,
+  reviewer: string,
+  recordedAt: string,
+  dryRun: boolean,
+): PrimaryJudgementTarget {
+  const campaign = resolveBrainCalibrationCampaignReviewTarget(vault, {
+    reviewToken: options.reviewToken,
+    reviewer,
+  })
+  if (campaign) {
+    return {
+      snapshot: campaign.snapshot,
+      observationId: campaign.observationId,
+      campaign,
+    }
+  }
+  return {
+    ...snapshotFromCapture(vault, {
+      reviewToken: options.reviewToken,
+      label: 'useful',
+      value: options.useful,
+      reviewer,
+      recordedAt,
+      dryRun,
+    }),
+    campaign: null,
   }
 }
 
@@ -984,15 +1055,18 @@ export function readBrainCalibrationDataset(vault: Vault): BrainCalibrationDatas
 }
 
 export function brainCalibrationSummary(vault: Vault): BrainCalibrationSummary {
-  return summarize(readBrainCalibrationDataset(vault).entries)
+  return withBrainCalibrationCampaignLock(vault, () => {
+    assertBrainCalibrationExploratoryAccess(vault)
+    return summarize(readBrainCalibrationDataset(vault).entries)
+  })
 }
 
-export function recordCalibrationLabel(
+function recordCalibrationLabelOperation(
   vault: Vault,
   options: RecordCalibrationLabelOptions,
+  dryRun: boolean,
 ): RecordCalibrationLabelResult {
-  const dryRun = options.dryRun ?? true
-  if (typeof dryRun !== 'boolean') throw new Error('dryRun muss boolean sein')
+  assertBrainCalibrationCampaignTemporalLabelWriteAccess(vault)
   if (typeof options.label !== 'string' || !LABELS.includes(options.label as BrainCalibrationLabel)) {
     throw new Error('label muss useful, supported oder still_valid sein')
   }
@@ -1017,12 +1091,6 @@ export function recordCalibrationLabel(
   validateEntry(entry)
   entry.observationId = expectedEntryObservationId(entry)
 
-  if (!dryRun) {
-    assertCanWriteTool(
-      'record_calibration_label',
-      [BRAIN_CALIBRATION_PATH, BRAIN_CALIBRATION_LOCK_PATH],
-    )
-  }
   const lock = dryRun ? null : acquireCalibrationLock(vault)
   try {
     const dataset = readBrainCalibrationDataset(vault)
@@ -1092,29 +1160,42 @@ export function recordCalibrationLabel(
   }
 }
 
+export function recordCalibrationLabel(
+  vault: Vault,
+  options: RecordCalibrationLabelOptions,
+): RecordCalibrationLabelResult {
+  const dryRun = options.dryRun ?? true
+  if (typeof dryRun !== 'boolean') throw new Error('dryRun muss boolean sein')
+  if (dryRun) return recordCalibrationLabelOperation(vault, options, true)
+  assertCanWriteTool(
+    'record_calibration_label',
+    [
+      BRAIN_CALIBRATION_PATH,
+      BRAIN_CALIBRATION_LOCK_PATH,
+      BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH,
+    ],
+  )
+  return withBrainCalibrationCampaignLock(
+    vault,
+    () => recordCalibrationLabelOperation(vault, options, false),
+  )
+}
+
 /**
  * Stores the two primary review outcomes as one append-only judgement. The
  * complete (observation, reviewer) pair is the freeze marker: identical
  * retries are no-ops and a different value can never overwrite it.
  */
-export function recordCalibrationJudgement(
+function recordCalibrationJudgementOperation(
   vault: Vault,
   options: RecordCalibrationJudgementOptions,
+  dryRun: boolean,
 ): RecordCalibrationJudgementResult {
-  const dryRun = options.dryRun ?? true
-  if (typeof dryRun !== 'boolean') throw new Error('dryRun muss boolean sein')
   if (typeof options.useful !== 'boolean') throw new Error('useful muss boolean sein')
   if (typeof options.supported !== 'boolean') throw new Error('supported muss boolean sein')
   const reviewer = opaqueIdentifier(options.reviewer, 'reviewer', 64)
   const recordedAt = isoTimestamp(options.recordedAt, 'recordedAt')
-  const captured = snapshotFromCapture(vault, {
-    reviewToken: options.reviewToken,
-    label: 'useful',
-    value: options.useful,
-    reviewer,
-    recordedAt,
-    dryRun,
-  })
+  const captured = primaryJudgementTarget(vault, options, reviewer, recordedAt, dryRun)
   const proposed = ([
     ['useful', options.useful],
     ['supported', options.supported],
@@ -1133,12 +1214,6 @@ export function recordCalibrationJudgement(
     return entry
   })
 
-  if (!dryRun) {
-    assertCanWriteTool(
-      'record_calibration_judgement',
-      [BRAIN_CALIBRATION_PATH, BRAIN_CALIBRATION_LOCK_PATH],
-    )
-  }
   const lock = dryRun ? null : acquireCalibrationLock(vault)
   try {
     const dataset = readBrainCalibrationDataset(vault)
@@ -1159,6 +1234,16 @@ export function recordCalibrationJudgement(
           'Das atomare useful/supported-Urteil ist bereits eingefroren und unveränderlich',
         )
       }
+    }
+    if (
+      captured.campaign
+      && captured.campaign.phase !== 'registered'
+      && existingCount !== proposed.length
+    ) {
+      throw new Error(
+        'Campaign-Reviews sind nach der Closure gesperrt; '
+        + 'nur ein vollständig identischer Retry ist zulässig',
+      )
     }
 
     for (const entry of proposed) {
@@ -1189,11 +1274,7 @@ export function recordCalibrationJudgement(
           schemaVersion: BRAIN_CALIBRATION_SCHEMA_VERSION,
           operation,
           observationId: captured.observationId,
-          labels: {
-            useful: options.useful,
-            supported: options.supported,
-          },
-          reviewer,
+          labelSet: ['useful', 'supported'],
         },
       })
     }
@@ -1212,4 +1293,25 @@ export function recordCalibrationJudgement(
   } finally {
     if (lock) releaseCalibrationLock(lock)
   }
+}
+
+export function recordCalibrationJudgement(
+  vault: Vault,
+  options: RecordCalibrationJudgementOptions,
+): RecordCalibrationJudgementResult {
+  const dryRun = options.dryRun ?? true
+  if (typeof dryRun !== 'boolean') throw new Error('dryRun muss boolean sein')
+  if (dryRun) return recordCalibrationJudgementOperation(vault, options, true)
+  assertCanWriteTool(
+    'record_calibration_judgement',
+    [
+      BRAIN_CALIBRATION_PATH,
+      BRAIN_CALIBRATION_LOCK_PATH,
+      BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH,
+    ],
+  )
+  return withBrainCalibrationCampaignLock(
+    vault,
+    () => recordCalibrationJudgementOperation(vault, options, false),
+  )
 }
