@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
 import { KNOWLEDGE_INBOX_STATE_FILE, knowledgeInboxItemId } from '../services/knowledge-inbox-actions.ts'
-import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
+import { attestSessionDigestFixture, cleanupVault, createTempVault, writeNote } from './helpers.ts'
 
 describe('session impact and knowledge inbox', () => {
   let vaultPath: string
@@ -29,30 +29,40 @@ describe('session impact and knowledge inbox', () => {
         kunde: 'Schule',
       },
       title: 'Firewall Capture',
-      body: [
-        '## Ablauf',
+      body: attestSessionDigestFixture([
+        '## Session Digest',
         '',
-        '### 1. Firewall DHCP umsetzen',
+        '_Modell: `knowledge-salience-v1` · 4/4 Fakten ausgewählt · ordinale Scores, keine Wahrscheinlichkeiten_',
         '',
-        'DHCP muss auf der Firewall laufen. Linuxmuster sollte DHCP nicht direkt bereitstellen.',
+        '### Root Cause',
         '',
-        '### 2. Umsetzung',
+        '- [F1] Der parallel aktive Linuxmuster-DHCP verursachte den Dienstkonflikt. _(Salienz 86/100 · Evidenz 88/100 · high)_',
+        '',
+        '### Entscheidung',
+        '',
+        '- [F2] DHCP wird verbindlich auf der Firewall betrieben. _(Salienz 91/100 · Evidenz 88/100 · high)_',
+        '',
+        '### Änderung / Fix',
+        '',
+        '- [F3] Der Linuxmuster-DHCP wurde deaktiviert und der Firewall-Scope aktiviert. _(Salienz 90/100 · Evidenz 88/100 · high)_',
+        '',
+        '### Verifikation',
+        '',
+        '- [F4] Der DHCP-Scope antwortete nach der Umstellung ausschließlich über die Firewall. _(Salienz 89/100 · Evidenz 88/100 · high)_',
+        '',
+        '### Evidenz',
+        '',
+        '- [F1] `bash_pair:dhcp-cause` · Hash `aaaaaaaaaaaa` — linuxmuster dhcp active',
+        '- [F2] `bash_pair:dhcp-decision` · Hash `bbbbbbbbbbbb` — firewall scope selected',
+        '- [F3] `bash_pair:dhcp-change` · Hash `cccccccccccc` — services changed',
+        '- [F4] `bash_pair:dhcp-verify` · Hash `dddddddddddd` — firewall lease returned',
         '',
         '## Durchgeführte Befehle',
         '',
         '1. `systemctl disable isc-dhcp-server`',
         '2. `opnsense-cli dhcp scope apply`',
         '3. `systemctl restart isc-dhcp-server`',
-        '',
-        '## Zusammenfassung',
-        '',
-        'DHCP wurde fuer Schule auf Firewall-Betrieb festgelegt und umgesetzt.',
-        '',
-        '## Fehler und Workarounds',
-        '',
-        '**Fehler:** `dhcp service conflict`',
-        '**Fix:** `disable linuxmuster dhcp and use firewall scope`',
-      ].join('\n'),
+      ].join('\n')),
     })
     vault = new Vault(vaultPath)
     await vault.init()

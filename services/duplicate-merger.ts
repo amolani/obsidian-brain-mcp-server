@@ -3,7 +3,8 @@ import { basename, dirname, join, relative } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
-import { findDuplicates, type DuplicateMatch } from './duplicate-analyzer.ts'
+import { analyzeDuplicatePair, findDuplicates, type DuplicateMatch } from './duplicate-analyzer.ts'
+import { assertCanWriteTool } from './policy.ts'
 import { assertSafeRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface MergeDuplicatesOptions {
@@ -117,9 +118,7 @@ ${bodyWithoutH1(other.content)}
 }
 
 function findMatchForPair(vault: Vault, aPath: string, bPath: string): DuplicateMatch | null {
-  return findDuplicates(vault, 0).find(match =>
-    (match.noteA === aPath && match.noteB === bPath) || (match.noteA === bPath && match.noteB === aPath)
-  ) ?? null
+  return analyzeDuplicatePair(vault, aPath, bPath)
 }
 
 function planPair(vault: Vault, noteA: string, noteB: string): MergePlan | null {
@@ -164,6 +163,7 @@ function applyPlan(vault: Vault, plan: MergePlan, force: boolean = false): { tar
 
   const archiveFullPath = vaultJoin(vault.vaultPath, plan.archive)
   if (existsSync(archiveFullPath)) throw new Error(`Archivziel existiert bereits: ${plan.archive}`)
+  assertCanWriteTool('merge_duplicates', [plan.target, plan.archive])
   mkdirSync(dirname(archiveFullPath), { recursive: true })
 
   const targetRawBefore = readFileSync(target.path, 'utf-8')
@@ -176,7 +176,7 @@ function applyPlan(vault: Vault, plan: MergePlan, force: boolean = false): { tar
     throw err
   }
 
-  vault.notes.delete(archivedOriginal.relativePath)
+  vault.removeNoteFromIndex(archivedOriginal.relativePath)
   vault.indexNote(target.path, statSync(target.path).mtimeMs)
   vault.indexNote(archiveFullPath, statSync(archiveFullPath).mtimeMs)
   vault.buildLinkIndex()
@@ -229,6 +229,7 @@ function rewriteLinksToMergedNote(vault: Vault, oldPath: string, newPath: string
     })
 
     if (updated !== raw) {
+      assertCanWriteTool('merge_duplicates', [entry.relativePath])
       writeFileSync(entry.path, updated, 'utf-8')
       vault.indexNote(entry.path, statSync(entry.path).mtimeMs)
       rewritten.push(entry.relativePath)

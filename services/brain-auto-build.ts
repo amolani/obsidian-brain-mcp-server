@@ -1,13 +1,20 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, extname, join } from 'node:path'
 import type { SaveKnowledgeOptions, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { atomicWriteJsonSync } from './atomic-file.ts'
 import { autoBuildFeedbackCategory, brainAutoBuildLearning, type BrainAutoBuildLearning } from './brain-feedback.ts'
 import { classifyIntent, isMutatingCommand, performedCommands, type ClassifiedIntent } from './intent-classifier.ts'
+import { isActiveNote, isAutoCaptureNote } from './note-scope.ts'
 import { assertCanWriteTool, loadBrainPolicy } from './policy.ts'
+import {
+  hasCompleteDigestProvenance,
+  parseSessionDigestFacts,
+  type ParsedDigestFact,
+} from './session-digest-facts.ts'
 import { buildSessionImpactReport } from './session-impact-report.ts'
-import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface BrainAutoBuildOptions {
   sourcePath?: string
@@ -53,18 +60,36 @@ interface AutoBuildBudget {
   deadline: number
 }
 
-interface AutoBuildManifestEntry {
+interface ArchivedArtifactTrace {
+  from: string
+  to: string
+}
+
+interface SkippedArtifactTrace {
+  path: string
+  reason: string
+}
+
+interface AutoBuildRunRecord {
   sourcePath: string
   hash: string
   promotedAt: string
   archivedAt?: string
+  supersededAt?: string
+  supersededByHash?: string
   archiveFolder?: string
   artifacts: string[]
+  archivedArtifacts?: ArchivedArtifactTrace[]
+  archiveSkipped?: SkippedArtifactTrace[]
   reportPath?: string | null
   impactReportPath?: string | null
   intent?: ClassifiedIntent
   plan: BrainAutoBuildPlanItem[]
   steps: Array<{ step: string; applied: boolean; skipped: boolean; summary: string }>
+}
+
+interface AutoBuildManifestEntry extends AutoBuildRunRecord {
+  previousRuns?: AutoBuildRunRecord[]
 }
 
 interface AutoBuildManifest {
@@ -73,22 +98,14 @@ interface AutoBuildManifest {
 }
 
 export const AUTO_BUILD_MANIFEST_PATH = '.brain-auto-build-manifest.json'
+const AUTO_PROMOTION_MIN_EVIDENCE = 75
+const AUTO_GAP_MIN_EVIDENCE = 45
+const AUTO_PROMOTION_MIN_SALIENCE = 60
 
-function today(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
-function textSection(content: string, heading: string): string {
-  const pattern = new RegExp(`^##\\s+${heading}\\s*\\n([\\s\\S]*?)(?=^##\\s+|$)`, 'im')
-  return content.match(pattern)?.[1]?.trim() ?? ''
-}
-
-function firstUsefulParagraph(content: string): string {
-  return content
-    .split(/\n\s*\n/)
-    .map(part => part.replace(/^[-*#>\s]+/gm, '').replace(/\s+/g, ' ').trim())
-    .find(part => part.length >= 40)
-    ?.slice(0, 900) ?? ''
+function minimumPromotionSalience(fact: ParsedDigestFact): number {
+  // Stand-alone command findings are especially easy to overvalue. A result
+  // therefore needs more task utility than a decision/cause/change atom.
+  return fact.kind === 'result' ? 70 : AUTO_PROMOTION_MIN_SALIENCE
 }
 
 function sourceTitle(vault: Vault, sourcePath?: string): string {
@@ -100,6 +117,24 @@ function sourceContent(vault: Vault, sourcePath?: string): string {
   return sourcePath ? vault.notes.get(sourcePath)?.content ?? '' : ''
 }
 
+function sourceIntent(source: { content: string; tags: string[]; frontmatter: Record<string, unknown> } | null | undefined): ClassifiedIntent {
+  if (!source) return classifyIntent('', [])
+  const storedIntent = String(source.frontmatter.session_intent ?? '')
+  const storedConfidence = String(source.frontmatter.intent_confidence ?? '')
+  if (
+    ['implementation', 'troubleshooting', 'research', 'planning', 'documentation', 'meeting', 'unknown'].includes(storedIntent)
+    && ['low', 'medium', 'high'].includes(storedConfidence)
+  ) {
+    return {
+      intent: storedIntent as ClassifiedIntent['intent'],
+      confidence: storedConfidence as ClassifiedIntent['confidence'],
+      score: Number(source.frontmatter.intent_score ?? 0),
+      reasons: ['Session-Intent aus Capture-Metadaten übernommen'],
+    }
+  }
+  return classifyIntent(source.content, source.tags)
+}
+
 function sourceHash(vault: Vault, sourcePath?: string): string {
   return createHash('sha256').update(sourceContent(vault, sourcePath)).digest('hex')
 }
@@ -107,7 +142,7 @@ function sourceHash(vault: Vault, sourcePath?: string): string {
 function isAutoCapture(vault: Vault, sourcePath?: string): boolean {
   if (!sourcePath) return false
   const note = vault.notes.get(sourcePath)
-  return !!note && (note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester')
+  return !!note && isAutoCaptureNote(note)
 }
 
 function isCheckpoint(vault: Vault, sourcePath?: string): boolean {
@@ -157,18 +192,200 @@ function pushLimitedStep(steps: BrainAutoBuildStep[], step: string, budget: Auto
 }
 
 function readManifest(vault: Vault): AutoBuildManifest {
+  const path = vaultJoin(vault.vaultPath, AUTO_BUILD_MANIFEST_PATH)
+  if (!existsSync(path)) return { version: 1, sources: {} }
   try {
-    const path = vaultJoin(vault.vaultPath, AUTO_BUILD_MANIFEST_PATH)
-    if (!existsSync(path)) return { version: 1, sources: {} }
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AutoBuildManifest>
-    return { version: 1, sources: parsed.sources ?? {} }
-  } catch {
-    return { version: 1, sources: {} }
+    if (parsed.version !== 1 || !parsed.sources || typeof parsed.sources !== 'object' || Array.isArray(parsed.sources)) {
+      throw new Error('version=1 und sources-Objekt erforderlich')
+    }
+    for (const [sourcePath, entry] of Object.entries(parsed.sources)) {
+      if (!entry || typeof entry !== 'object' || typeof entry.hash !== 'string') {
+        throw new Error(`ungültiger Source-Eintrag: ${sourcePath}`)
+      }
+      if (entry.artifacts !== undefined && (!Array.isArray(entry.artifacts) || entry.artifacts.some(item => typeof item !== 'string'))) {
+        throw new Error(`ungültige Artefaktliste: ${sourcePath}`)
+      }
+      if (entry.previousRuns !== undefined && !Array.isArray(entry.previousRuns)) {
+        throw new Error(`ungültige Run-Historie: ${sourcePath}`)
+      }
+      for (const [index, run] of (entry.previousRuns ?? []).entries()) {
+        if (!run || typeof run !== 'object' || typeof run.hash !== 'string' || !Array.isArray(run.artifacts)) {
+          throw new Error(`ungültiger historischer Run: ${sourcePath}#${index}`)
+        }
+        if (run.archivedArtifacts !== undefined && (!Array.isArray(run.archivedArtifacts) || run.archivedArtifacts.some(item => (
+          !item || typeof item.from !== 'string' || typeof item.to !== 'string'
+        )))) {
+          throw new Error(`ungültige historische Archivspuren: ${sourcePath}#${index}`)
+        }
+      }
+    }
+    return { version: 1, sources: parsed.sources }
+  } catch (error) {
+    throw new Error(`Auto-Build-Manifest ist beschädigt (${AUTO_BUILD_MANIFEST_PATH}): ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
 function writeManifest(vault: Vault, manifest: AutoBuildManifest): void {
-  writeFileSync(vaultJoin(vault.vaultPath, AUTO_BUILD_MANIFEST_PATH), `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8')
+  atomicWriteJsonSync(vaultJoin(vault.vaultPath, AUTO_BUILD_MANIFEST_PATH), manifest)
+}
+
+function activeRunRecord(entry: AutoBuildManifestEntry): AutoBuildRunRecord {
+  const { previousRuns: _previousRuns, ...run } = entry
+  return {
+    ...run,
+    artifacts: [...(run.artifacts ?? [])],
+    archivedArtifacts: run.archivedArtifacts?.map(item => ({ ...item })),
+    archiveSkipped: run.archiveSkipped?.map(item => ({ ...item })),
+    plan: [...(run.plan ?? [])],
+    steps: [...(run.steps ?? [])],
+  }
+}
+
+function correctionArchiveFolder(sourcePath: string, entry: AutoBuildManifestEntry): string {
+  const source = sanitizePathSegment(basename(sourcePath, '.md')) || 'source'
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, '')
+  return assertSafeRelativePath(`Archiv/Auto-Build/Superseded/${source}/${stamp}-${entry.hash.slice(0, 12)}`)
+}
+
+function uniqueCorrectionTarget(vault: Vault, target: string, reserved: Set<string>): string {
+  const extension = extname(target)
+  const stem = extension ? target.slice(0, -extension.length) : target
+  let candidate = target
+  let counter = 2
+  while (reserved.has(candidate) || existsSync(vaultJoin(vault.vaultPath, candidate))) {
+    candidate = `${stem} (${counter})${extension}`
+    counter++
+  }
+  reserved.add(candidate)
+  return candidate
+}
+
+function artifactBelongsToSource(vault: Vault, artifact: string, sourcePath: string): boolean {
+  const note = vault.notes.get(artifact)
+  if (!note) return false
+  const declaredSource = String(note.frontmatter.source ?? '')
+  const generator = String(note.frontmatter.quelle ?? '')
+  if (declaredSource === sourcePath || generator === sourcePath) return true
+  if (generator && !['brain-auto-build', 'session-impact-report', 'runbook-generator'].includes(generator)) return false
+  const linksSource = note.outgoingLinks.includes(sourcePath)
+    || note.content.includes(`[[${sourcePath}`)
+  if (!linksSource) return false
+  return /^(?:Knowledge\/(?:Claims|Insights|Answers|Gaps)|Kunden\/[^/]+\/Runbook |Referenz\/Runbook |Maintenance\/(?:Auto-Build|Session Impact)\/)/.test(artifact)
+}
+
+interface SupersedeRunResult {
+  archiveFolder: string
+  archived: ArchivedArtifactTrace[]
+  skipped: SkippedArtifactTrace[]
+  entry: AutoBuildManifestEntry
+}
+
+/**
+ * Moves every still-active artifact of the previous source revision before a
+ * corrected revision is promoted. All moves are preflighted and rolled back
+ * if either a move or the atomic manifest commit fails.
+ */
+function supersedePreviousRun(
+  vault: Vault,
+  manifest: AutoBuildManifest,
+  sourcePath: string,
+  nextHash: string,
+  dryRun: boolean,
+): SupersedeRunResult {
+  const entry = manifest.sources[sourcePath]
+  if (!entry) throw new Error(`Kein vorheriger Auto-Build-Run für Korrektur gefunden: ${sourcePath}`)
+  const archiveFolder = correctionArchiveFolder(sourcePath, entry)
+  const archived: ArchivedArtifactTrace[] = []
+  const skipped: SkippedArtifactTrace[] = []
+  const reserved = new Set<string>()
+  const artifactPaths = [...new Set([
+    ...(entry.artifacts ?? []),
+    entry.reportPath,
+    entry.impactReportPath,
+  ].filter((value): value is string => typeof value === 'string' && value.endsWith('.md')))]
+
+  for (const rawArtifact of artifactPaths) {
+    const artifact = assertSafeRelativePath(rawArtifact)
+    if (artifact === sourcePath || artifact === AUTO_BUILD_MANIFEST_PATH || artifact.startsWith('Archiv/')) {
+      throw new Error(`Unsicheres Derived Artifact im Auto-Build-Manifest: ${artifact}`)
+    }
+    const sourceFull = vaultJoin(vault.vaultPath, artifact)
+    if (!existsSync(sourceFull)) {
+      skipped.push({ path: artifact, reason: 'vor Korrektur nicht mehr vorhanden' })
+      continue
+    }
+    if (!artifactBelongsToSource(vault, artifact, sourcePath)) {
+      throw new Error(`Derived Artifact kann der Quelle nicht sicher zugeordnet werden: ${artifact}`)
+    }
+    const target = uniqueCorrectionTarget(vault, `${archiveFolder}/${artifact}`, reserved)
+    archived.push({ from: artifact, to: target })
+  }
+
+  const now = new Date().toISOString()
+  const supersededEntry: AutoBuildManifestEntry = {
+    ...entry,
+    archivedAt: now,
+    supersededAt: now,
+    supersededByHash: nextHash,
+    archiveFolder,
+    archivedArtifacts: archived.map(item => ({ ...item })),
+    archiveSkipped: skipped.map(item => ({ ...item })),
+  }
+  if (dryRun) return { archiveFolder, archived, skipped, entry: supersededEntry }
+
+  const targets = archived.flatMap(item => [item.from, item.to])
+  assertCanWriteTool('brain_auto_build', [AUTO_BUILD_MANIFEST_PATH, ...targets])
+  for (const item of archived) mkdirSync(dirname(vaultJoin(vault.vaultPath, item.to)), { recursive: true })
+
+  const moved: ArchivedArtifactTrace[] = []
+  try {
+    for (const item of archived) {
+      const from = vaultJoin(vault.vaultPath, item.from)
+      const to = vaultJoin(vault.vaultPath, item.to)
+      if (existsSync(to)) throw new Error(`Archivziel existiert bereits: ${item.to}`)
+      renameSync(from, to)
+      moved.push(item)
+    }
+    manifest.sources[sourcePath] = supersededEntry
+    writeManifest(vault, manifest)
+  } catch (error) {
+    const rollbackErrors: string[] = []
+    for (const item of [...moved].reverse()) {
+      const from = vaultJoin(vault.vaultPath, item.from)
+      const to = vaultJoin(vault.vaultPath, item.to)
+      try {
+        if (!existsSync(to)) continue
+        if (existsSync(from)) throw new Error(`Aktiver Pfad wurde während Rollback neu angelegt: ${item.from}`)
+        mkdirSync(dirname(from), { recursive: true })
+        renameSync(to, from)
+      } catch (rollbackError) {
+        rollbackErrors.push(`${item.to}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+      }
+    }
+    manifest.sources[sourcePath] = entry
+    vault.refreshIndex()
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(rollbackErrors.length > 0
+      ? `Korrektur-Archivierung fehlgeschlagen (${detail}); Rollback unvollständig: ${rollbackErrors.join('; ')}`
+      : `Korrektur-Archivierung fehlgeschlagen; alle Moves zurückgerollt: ${detail}`)
+  }
+
+  vault.refreshIndex()
+  appendActionLog(vault.vaultPath, {
+    tool: 'brain_auto_build_supersede',
+    mode: 'apply',
+    targets: [sourcePath, AUTO_BUILD_MANIFEST_PATH, ...archived.flatMap(item => [item.from, item.to])],
+    summary: `Vorherigen Auto-Build-Run vor Korrektur superseded: ${sourcePath}`,
+    meta: {
+      previousHash: entry.hash,
+      nextHash,
+      archived: archived.length,
+      missing: skipped.length,
+      archiveFolder,
+    },
+  })
+  return { archiveFolder, archived, skipped, entry: supersededEntry }
 }
 
 function words(value: string): Set<string> {
@@ -208,6 +425,7 @@ function hasExistingOpenGap(vault: Vault, title: string): boolean {
   const normalized = normalizeGapTitle(title)
   if (!normalized) return false
   return [...vault.notes.values()].some(note => {
+    if (!isActiveNote(note)) return false
     if (!note.relativePath.startsWith('Knowledge/Gaps/') && !note.tags.includes('knowledge-gap')) return false
     if (note.frontmatter.status === 'resolved') return false
     const heading = note.content.match(/^#\s+(.+)$/m)?.[1] ?? ''
@@ -254,61 +472,125 @@ function applyKnowledgePlan(vault: Vault, item: BrainAutoBuildPlanItem, options:
   throw new Error(`Unsupported knowledge plan action: ${item.action}`)
 }
 
+const FACT_LABELS: Readonly<Record<ParsedDigestFact['kind'], string>> = {
+  cause: 'Ursache',
+  decision: 'Entscheidung',
+  change: 'Änderung',
+  verification: 'Verifikation',
+  result: 'Ergebnis',
+  problem: 'Problem',
+  open_question: 'Offene Frage',
+  constraint: 'Constraint',
+}
+
+function isDurableAutoFact(fact: ParsedDigestFact): boolean {
+  return fact.evidenceScore >= AUTO_PROMOTION_MIN_EVIDENCE
+    && fact.salienceScore >= minimumPromotionSalience(fact)
+    && hasCompleteDigestProvenance(fact)
+    && !['problem', 'open_question'].includes(fact.kind)
+}
+
+function typedFactContent(facts: ParsedDigestFact[]): string {
+  return facts
+    .map(fact => `- **${FACT_LABELS[fact.kind]}:** ${fact.statement}`)
+    .join('\n')
+}
+
+function evidenceContext(sourcePath: string, modelVersion: string | null, facts: ParsedDigestFact[]): string {
+  const references = [...new Set(facts.flatMap(fact => fact.provenance.map(item => item.ref)))].slice(0, 8)
+  return [
+    `Automatisch aus dem strukturierten Session Digest [[${sourcePath}]] übernommen.`,
+    `Modell: ${modelVersion ?? 'unbekannt'}; Evidenz-Scores: ${facts.map(fact => `${fact.id}=${fact.evidenceScore}/100`).join(', ')}.`,
+    references.length > 0 ? `Evidenzreferenzen: ${references.join(', ')}.` : '',
+  ].filter(Boolean).join(' ')
+}
+
 function promoteCapture(vault: Vault, sourcePath: string, dryRun: boolean, plan: BrainAutoBuildPlanItem[], budget: AutoBuildBudget, learning: BrainAutoBuildLearning): BrainAutoBuildStep[] {
   const steps: BrainAutoBuildStep[] = []
   const title = sourceTitle(vault, sourcePath)
   const content = sourceContent(vault, sourcePath)
-  const summary = firstUsefulParagraph(textSection(content, 'Zusammenfassung') || textSection(content, 'Ablauf') || content)
-  if (summary) {
-    const item = gateKnowledge(vault, 'save_insight', `Session Insight - ${title}`.slice(0, 100), summary, sourcePath, learning)
+  const digest = parseSessionDigestFacts(content)
+  if (!digest.hasDigest) {
+    return [{
+      step: 'promote_capture',
+      applied: false,
+      skipped: true,
+      summary: 'Auto-Capture ohne strukturierten Session Digest bleibt im Review',
+    }]
+  }
+
+  const durableFacts = digest.facts.filter(isDurableAutoFact)
+  const answerKinds = new Set<ParsedDigestFact['kind']>(['cause', 'change', 'verification'])
+  const answerCandidates = durableFacts.filter(fact => answerKinds.has(fact.kind))
+  const answerReady = answerCandidates.some(fact => fact.kind === 'change')
+    && answerCandidates.some(fact => fact.kind === 'verification')
+  const answerFacts = answerReady ? answerCandidates : []
+  const insightFacts = durableFacts.filter(fact => !answerFacts.includes(fact))
+
+  if (insightFacts.length > 0) {
+    const insight = typedFactContent(insightFacts)
+    const item = gateKnowledge(vault, 'save_insight', `Session Insight - ${title}`.slice(0, 100), insight, sourcePath, learning)
     plan.push(item)
     pushLimitedStep(steps, 'save_insight', budget, item.quality === 'pass' ? 1 : 0, () => applyKnowledgePlan(vault, item, {
       title: `Session Insight - ${title}`.slice(0, 100),
-      content: summary,
+      content: insight,
+      context: evidenceContext(sourcePath, digest.modelVersion, insightFacts),
       source: sourcePath,
-      confidence: 'medium',
-      checkedAt: today(),
-      tags: ['auto-promoted'],
+      confidence: 'high',
+      tags: ['auto-promoted', 'distilled-fact'],
     }, dryRun), dryRun)
   }
 
-  const fixes = textSection(content, 'Fehler und Workarounds')
-  if (fixes) {
-    const item = gateKnowledge(vault, 'save_answer', `Workaround - ${title}`.slice(0, 100), fixes, sourcePath, learning)
+  if (answerFacts.length > 0) {
+    const answer = typedFactContent(answerFacts)
+    const item = gateKnowledge(vault, 'save_answer', `Belegter Fix - ${title}`.slice(0, 100), answer, sourcePath, learning)
     plan.push(item)
     pushLimitedStep(steps, 'save_answer', budget, item.quality === 'pass' ? 1 : 0, () => applyKnowledgePlan(vault, item, {
-      title: `Workaround - ${title}`.slice(0, 100),
-      content: fixes.slice(0, 1400),
+      title: `Belegter Fix - ${title}`.slice(0, 100),
+      content: answer,
+      context: evidenceContext(sourcePath, digest.modelVersion, answerFacts),
       source: sourcePath,
-      confidence: 'medium',
-      checkedAt: today(),
-      tags: ['workaround', 'auto-promoted'],
+      confidence: 'high',
+      tags: ['workaround', 'auto-promoted', 'distilled-fact'],
     }, dryRun), dryRun)
   }
 
-  if (/\b(unklar|offen|prüfen|pruefen|todo|noch klären|noch klaeren)\b/i.test(content)) {
-    const question = `Welche offenen Punkte aus ${title} müssen geklärt werden?`
-    const item = gateKnowledge(vault, 'flag_knowledge_gap', question, content, sourcePath, learning)
+  const openQuestions = digest.facts
+    .filter(fact => fact.kind === 'open_question')
+    .filter(fact => fact.salienceScore >= AUTO_PROMOTION_MIN_SALIENCE)
+    .filter(fact => fact.evidenceScore >= AUTO_GAP_MIN_EVIDENCE && hasCompleteDigestProvenance(fact))
+    .slice(0, 3)
+  for (const fact of openQuestions) {
+    const context = evidenceContext(sourcePath, digest.modelVersion, [fact])
+    const item = gateKnowledge(vault, 'flag_knowledge_gap', fact.statement, context, sourcePath, learning)
     plan.push(item)
     pushLimitedStep(steps, 'flag_knowledge_gap', budget, item.quality === 'pass' ? 1 : 0, () => item.quality === 'skip' ? { skipped: true, reason: item.reason } : vault.flagKnowledgeGap({
-      question: `Welche offenen Punkte aus ${title} müssen geklärt werden?`,
-      context: `Automatisch aus Session-Capture [[${sourcePath}|${title}]] erkannt.`,
-      tags: ['auto-promoted'],
+      question: fact.statement,
+      context,
+      tags: ['auto-promoted', 'distilled-open-question'],
       dryRun,
     }), dryRun)
   }
 
+  if (steps.length === 0) {
+    steps.push({
+      step: 'promote_capture',
+      applied: false,
+      skipped: true,
+      summary: `Keine typisierte Tatsache mit Salienz >= ${AUTO_PROMOTION_MIN_SALIENCE}, Evidenz >= ${AUTO_PROMOTION_MIN_EVIDENCE} und vollständiger Provenienz`,
+    })
+  }
   return steps
 }
 
-function countRunbookSignals(content: string): number {
+function countLegacyRunbookSignals(content: string): number {
   const commands = (content.match(/^\d+\.\s+`[^`]+`/gm) ?? []).length
   const phases = (content.match(/^###\s+\d+\./gm) ?? []).length
   const fixes = content.includes('## Fehler und Workarounds') ? 2 : 0
   return commands + phases + fixes
 }
 
-function hasImplementationSignals(content: string): boolean {
+function hasLegacyImplementationSignals(content: string): boolean {
   return performedCommands(content).some(isMutatingCommand)
 }
 
@@ -347,7 +629,10 @@ function renderReport(result: Omit<BrainAutoBuildResult, 'reportPath' | 'impactR
 
 function writeReport(vault: Vault, result: Omit<BrainAutoBuildResult, 'reportPath' | 'impactReportPath'>): string | null {
   if (result.dryRun) return null
-  const path = reportPathFor(result.sourcePath)
+  const proposedPath = reportPathFor(result.sourcePath)
+  const path = existsSync(vaultJoin(vault.vaultPath, proposedPath))
+    ? uniqueRelativePath(vault.vaultPath, 'Maintenance/Auto-Build', basename(proposedPath))
+    : proposedPath
   assertCanWriteTool('brain_auto_build', [path])
   const fullPath = vaultJoin(vault.vaultPath, path)
   mkdirSync(join(vault.vaultPath, 'Maintenance', 'Auto-Build'), { recursive: true })
@@ -397,13 +682,12 @@ function runbookTopic(vault: Vault, sourcePath: string, client: string | null): 
 
 export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}): BrainAutoBuildResult {
   const policy = loadBrainPolicy()
-  const dryRun = options.dryRun ?? policy.automation.mode !== 'auto_build'
-  const sourcePath = options.sourcePath ?? null
+  // review_only and off are policy ceilings, not caller-overridable defaults.
+  const dryRun = policy.automation.mode === 'auto_build' ? options.dryRun ?? false : true
+  const sourcePath = options.sourcePath ? assertSafeRelativePath(options.sourcePath) : null
   const client = options.client ?? null
   const source = sourcePath ? vault.notes.get(sourcePath) : null
-  const intent = source
-    ? classifyIntent(source.content, source.tags)
-    : classifyIntent('', [])
+  const intent = sourceIntent(source)
   const steps: BrainAutoBuildStep[] = []
   const plan: BrainAutoBuildPlanItem[] = []
   const learning = brainAutoBuildLearning(vault)
@@ -419,28 +703,69 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
     return offResult
   }
 
+  if (sourcePath && !source) throw new Error(`Auto-Build-Quelle nicht gefunden: ${sourcePath}`)
+  if (!dryRun) assertCanWriteTool('brain_auto_build', [AUTO_BUILD_MANIFEST_PATH, ...(sourcePath ? [sourcePath] : [])])
+
   const after = policy.automation.afterSession
   const manifest = readManifest(vault)
   const hash = sourcePath ? sourceHash(vault, sourcePath) : null
   const existing = sourcePath ? manifest.sources[sourcePath] : null
   const alreadyPromoted = !!existing && !existing.archivedAt && !!hash && existing.hash === hash
+  let previousRuns: AutoBuildRunRecord[] = existing?.previousRuns?.map(run => ({ ...run })) ?? []
 
-  if (alreadyPromoted) {
-    steps.push({
+  if (alreadyPromoted && existing) {
+    const manifestStep: BrainAutoBuildStep = {
       step: 'manifest',
       applied: false,
       skipped: true,
       summary: `Quelle bereits mit identischem Hash verarbeitet: ${sourcePath}`,
       result: existing,
-    })
+    }
+    return {
+      dryRun,
+      mode: policy.automation.mode,
+      sourcePath,
+      client,
+      intent: existing.intent ?? intent,
+      plan: existing.plan ?? [],
+      manifestPath: AUTO_BUILD_MANIFEST_PATH,
+      reportPath: existing.reportPath ?? null,
+      impactReportPath: existing.impactReportPath ?? null,
+      steps: [manifestStep],
+    }
+  }
+
+  if (sourcePath && hash && existing) {
+    if (!existing.archivedAt) {
+      // A changed source is a correction, not an unrelated second promotion.
+      // Archive the complete previous run first; failures abort before any new
+      // derived artifact can be written.
+      const superseded = supersedePreviousRun(vault, manifest, sourcePath, hash, dryRun)
+      steps.push({
+        step: 'supersede_previous_run',
+        applied: !dryRun,
+        skipped: false,
+        summary: dryRun
+          ? `${superseded.archived.length} vorherige Derived Artifacts würden vor der Korrektur archiviert`
+          : `${superseded.archived.length} vorherige Derived Artifacts vor der Korrektur archiviert`,
+        result: {
+          archiveFolder: superseded.archiveFolder,
+          archived: superseded.archived,
+          missing: superseded.skipped,
+          previousHash: existing.hash,
+          nextHash: hash,
+        },
+      })
+      if (!dryRun) previousRuns = [...previousRuns, activeRunRecord(superseded.entry)]
+    } else if (!dryRun) {
+      // A manually archived run is still part of the source lineage when the
+      // source is promoted again.
+      previousRuns = [...previousRuns, activeRunRecord(existing)]
+    }
   }
 
   if (sourcePath && after.promoteCaptures && isAutoCapture(vault, sourcePath)) {
-    if (alreadyPromoted) {
-      plan.push(...(existing?.plan ?? []))
-    } else {
-      steps.push(...promoteCapture(vault, sourcePath, dryRun, plan, budget, learning))
-    }
+    steps.push(...promoteCapture(vault, sourcePath, dryRun, plan, budget, learning))
   }
 
   if (sourcePath && after.extractClaims && !alreadyPromoted) {
@@ -465,39 +790,64 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
   }
 
   if (sourcePath && after.updateEvidence && !alreadyPromoted) {
+    const extractedEvidence = String(source?.frontmatter.evidence_quality ?? 'low')
+    const evidenceConfidence = ['low', 'medium', 'high'].includes(extractedEvidence)
+      ? extractedEvidence as 'low' | 'medium' | 'high'
+      : 'low'
     pushLimitedStep(steps, 'update_evidence', budget, 0, () => vault.updateEvidence({
       path: sourcePath,
-      confidence: 'medium',
-      source: 'brain-auto-build',
-      checkedAt: today(),
+      confidence: evidenceConfidence,
+      confirmedBy: [],
+      checkedAt: null,
       dryRun,
     }), dryRun)
   }
 
   if (sourcePath && after.promoteRunbooks && !alreadyPromoted) {
     const content = sourceContent(vault, sourcePath)
-    const signals = countRunbookSignals(content)
-    const implementationSignals = hasImplementationSignals(content)
+    const digest = parseSessionDigestFacts(content)
+    const autoCapture = isAutoCapture(vault, sourcePath)
+    const strongDigestFacts = digest.facts.filter(fact => (
+      fact.salienceScore >= AUTO_PROMOTION_MIN_SALIENCE
+      && fact.evidenceScore >= AUTO_PROMOTION_MIN_EVIDENCE
+      && hasCompleteDigestProvenance(fact)
+    ))
+    const hasStrongChange = strongDigestFacts.some(fact => fact.kind === 'change')
+    const hasStrongVerification = strongDigestFacts.some(fact => fact.kind === 'verification')
+    const structuredRunbookReady = digest.hasDigest && hasStrongChange && hasStrongVerification
+    const signals = countLegacyRunbookSignals(content)
+    const implementationSignals = hasLegacyImplementationSignals(content)
     const threshold = learnedRunbookThreshold(learning)
     const blocked = !Number.isFinite(threshold)
     const allowedIntent = ['implementation', 'troubleshooting'].includes(intent.intent)
+    const evidenceGatePassed = autoCapture
+      ? structuredRunbookReady
+      : implementationSignals && signals >= threshold
     const item: BrainAutoBuildPlanItem = {
       id: `generate_runbook:${sourcePath}`.replace(/[^a-zA-Z0-9._:/-]+/g, '_'),
       action: 'generate_runbook',
       title: `Runbook aus ${sourceTitle(vault, sourcePath)}`,
       sourcePath,
-      quality: !blocked && !isCheckpoint(vault, sourcePath) && allowedIntent && implementationSignals && signals >= threshold ? 'pass' : 'skip',
+      quality: !blocked && !isCheckpoint(vault, sourcePath) && allowedIntent && evidenceGatePassed ? 'pass' : 'skip',
       reason: blocked
         ? 'feedback gate blocked'
         : isCheckpoint(vault, sourcePath)
           ? 'Runbooks aus Zwischen-Checkpoints bleiben Review-Kandidaten'
           : !allowedIntent
             ? `Intent ${intent.intent} bleibt Review-Kandidat statt Runbook; vermutlich Recherche/Analyse`
-          : !implementationSignals
-            ? 'keine umsetzenden Befehle erkannt; vermutlich Recherche/Analyse'
-            : signals >= threshold
-          ? `runbook gate passed (${signals} Signale, threshold ${threshold})`
-          : `zu wenig Runbook-Signale (${signals}/${threshold})`,
+          : autoCapture && !digest.hasDigest
+            ? 'Auto-Capture ohne strukturierten Session Digest bleibt Review-Kandidat'
+            : autoCapture && !hasStrongChange
+              ? `keine belegte Änderung mit Salienz >= ${AUTO_PROMOTION_MIN_SALIENCE} und Evidenz >= ${AUTO_PROMOTION_MIN_EVIDENCE}`
+              : autoCapture && !hasStrongVerification
+                ? `keine belegte Verifikation mit Salienz >= ${AUTO_PROMOTION_MIN_SALIENCE} und Evidenz >= ${AUTO_PROMOTION_MIN_EVIDENCE}`
+                : autoCapture
+                  ? `structured runbook gate passed (Änderung und Verifikation mit Salienz >= ${AUTO_PROMOTION_MIN_SALIENCE}, Evidenz >= ${AUTO_PROMOTION_MIN_EVIDENCE})`
+                  : !implementationSignals
+                    ? 'keine umsetzenden Befehle erkannt; vermutlich Recherche/Analyse'
+                    : signals >= threshold
+                      ? `legacy runbook gate passed (${signals} Signale, threshold ${threshold})`
+                      : `zu wenig Legacy-Runbook-Signale (${signals}/${threshold})`,
     }
     plan.push(item)
     pushLimitedStep(steps, 'generate_runbook', budget, item.quality === 'pass' ? 1 : 0, () => item.quality === 'skip'
@@ -549,7 +899,9 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
   if (!dryRun && sourcePath && hash) {
     manifest.sources[sourcePath] = {
       sourcePath,
-      hash,
+      // Earlier steps may normalize the source frontmatter/body. Persist the
+      // post-run hash so an unchanged source is not queued again next run.
+      hash: sourceHash(vault, sourcePath),
       promotedAt: new Date().toISOString(),
       artifacts: collectArtifacts(steps, sourcePath, reportPath, impactReportPath),
       reportPath,
@@ -557,6 +909,7 @@ export function brainAutoBuild(vault: Vault, options: BrainAutoBuildOptions = {}
       intent,
       plan,
       steps: steps.map(step => ({ step: step.step, applied: step.applied, skipped: step.skipped, summary: step.summary })),
+      ...(previousRuns.length > 0 ? { previousRuns } : {}),
     }
     writeManifest(vault, manifest)
   }

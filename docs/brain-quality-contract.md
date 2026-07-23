@@ -462,7 +462,7 @@ background_report_completeness == 1.00
 
 ### Action Log Completeness
 
-Every write should be represented in the action log or a generated report.
+Every write should be represented in the action log or a generated report. For orchestration tools, the entry of the delegated operation is the authoritative write record.
 
 ```text
 action_log_completeness = logged_writes / actual_writes
@@ -492,37 +492,109 @@ Default rule:
 runtime_regression <= 20 percent against baseline
 ```
 
+The implemented 5k reference profile lives in `benchmarks/large-vault-baseline.json`.
+It records the median of three runs for the expensive duplicate, dashboard, and background
+phases. A release operator on a comparable machine can enforce it with:
+
+```bash
+node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force --enforce-baseline
+```
+
+Wall-clock baselines are profile-specific. Heterogeneous CI runners therefore enforce a
+deterministic stability gate as the hard default: above 1,000 notes the duplicate analyzer
+uses stable blocking, scores at most 256 candidates per note, and retains at most 20 results
+for dashboard review. `release-check` exercises this large-vault path with 1,100 synthetic
+notes. This catches a return to quadratic work without a flaky sub-second timeout.
+
+Baseline updates are intentional performance changes: run the 5k fixture at least three
+times on the named profile, record the median, keep the default 20 percent tolerance, and
+review the deterministic work counts in the generated JSON before changing the checked-in
+file.
+
+### V1 Large-Vault Performance Evidence
+
+- **Hypothesis:** candidate indexing and bounded top-k review remove the observed 5k
+  dashboard/background release blocker without changing small-vault duplicate scoring.
+- **Mechanism:** link terms are placed in an inverted index by their rarest contained token;
+  a literal term match necessarily contains that token. Duplicate analysis remains exhaustive
+  through 1,000 notes and then uses deterministic title/content/tag/folder blocking with a
+  256-candidate limit per note. Explicit merges score only the requested pair.
+- **Basis:** inverted indexes, deterministic blocking, and bounded top-k selection are standard
+  information-retrieval/entity-resolution techniques; ranking still uses the existing Jaccard
+  and confidence formula.
+- **Metric:** 5k duplicate work is at most `notes * 256`, dashboard duplicate output is at most
+  20, link output is at most 100, and comparable-profile runtime regression is at most 20 percent.
+- **Fixture:** `tests/large-vault-benchmark.test.ts` crosses the exact/blocked boundary at 1,100
+  notes and asserts both known-result recall and work limits; the checked 5k fixture includes
+  real plain-text link mentions.
+- **Safety:** all benchmark/analyzer phases are read-only; dry-run background benchmarking uses
+  in-process jobs so worker startup/timeout behavior is measured separately by background tests.
+- **Acceptance:** `npm run typecheck`, targeted analyzer tests, the 1k/5k benchmark, and
+  `npm run release-check` must pass.
+
 For policy-limited hooks:
 
 ```text
 hook_runtime_ms <= policy automation limit unless explicitly skipped with reason
 ```
 
-## Overall Score
+## Weighted Harness Score And Release Gates
 
-The overall Brain Quality Score is only computed if all hard safety gates pass.
+The standalone harness scores only the five behavior categories it measures directly. Their
+contract weights add up to `0.90` and are normalized to 100 for the reported behavior score:
 
 ```text
+measured_contract_weight = 0.25 + 0.20 + 0.20 + 0.15 + 0.10 = 0.90
+
 if any_hard_gate_fails:
   brain_quality_score = 0
 else:
-  brain_quality_score =
+  brain_quality_score = (
     0.25 * capture_score +
     0.20 * retrieval_score +
     0.20 * promotion_score +
     0.15 * review_score +
-    0.10 * background_score +
-    0.05 * performance_score +
-    0.05 * maintainability_score
+    0.10 * background_score
+  ) / measured_contract_weight
 ```
 
-Release interpretation:
+Category scores are the arithmetic mean of their matching fixture scores. The deterministic
+mapping is:
+
+- Capture: `harvester_update` and `session_digest`.
+- Retrieval: `retrieval`.
+- Promotion: `promotion` and `claim_extraction`.
+- Review: `review`.
+- Background: `background`.
+
+A missing category contributes zero. Policy and generated-surface redaction fixtures are safety
+gates and are never averaged into the score. This prevents fixture count, passing safety checks,
+or an absent category from silently inflating the result.
+
+Performance and maintainability are separate, conjunctive release gates because the standalone
+fixture harness cannot assign them a defensible numeric value. In particular, it must not invent
+five points for a benchmark it did not run or five points for tests it did not execute. A v1.0
+release therefore requires all of the following:
+
+- the weighted harness status is `pass` and every fixture passes,
+- `npm run typecheck` and `npm test` pass,
+- the demo health check and deterministic 1,100-note stability gate in `npm run release-check`
+  pass,
+- `git diff --check` passes before commit,
+- the 5k runtime baseline passes on a machine comparable to its recorded profile, as specified
+  in the release checklist.
+
+Harness interpretation:
 
 ```text
-90-100: pass for v1.0 production-ready release
-80-89: warn; acceptable for beta, not for v1.0 tag
+90-100: pass
+80-89: warn; acceptable for beta behavior evaluation
 0-79: fail
 ```
+
+Any failed fixture forces harness status `fail` independently of the numeric score. A passing
+harness is necessary but not sufficient for a production-ready release; the external performance
+and maintainability gates above are equally required.
 
 ## Maintainability Signals
 
@@ -581,6 +653,9 @@ It currently evaluates checked-in fixture JSON files for:
 - background report completeness, action-log coverage, lock correctness, and failed-job count,
 - generated-surface redaction,
 - policy safety gates.
+
+The large-vault benchmark additionally reports isolated duplicate/link timings, candidate
+work counts, deterministic stability-gate status, and the checked runtime-baseline result.
 
 `npm run release-check` runs the harness after typecheck and tests.
 

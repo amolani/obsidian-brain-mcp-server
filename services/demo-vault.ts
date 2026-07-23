@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { markGeneratedOutput, prepareGeneratedOutputTarget } from './generated-output-target.ts'
 
 export interface DemoVaultOptions {
   outPath: string
@@ -20,19 +21,10 @@ function write(outPath: string, files: string[], relativePath: string, content: 
   files.push(relativePath)
 }
 
-function ensureWritableTarget(outPath: string, force: boolean): void {
-  if (!existsSync(outPath)) return
-  const entries = readdirSync(outPath)
-  if (entries.length > 0 && !force) {
-    throw new Error(`${outPath} existiert bereits und ist nicht leer. Nutze --force fuer eine neue Demo.`)
-  }
-  if (force) rmSync(outPath, { recursive: true, force: true })
-}
-
 export function createDemoVault(options: DemoVaultOptions): DemoVaultResult {
-  if (!options.outPath?.trim()) throw new Error('outPath ist erforderlich')
-  ensureWritableTarget(options.outPath, options.force === true)
+  prepareGeneratedOutputTarget(options.outPath, options.force === true, 'demo-vault')
   mkdirSync(options.outPath, { recursive: true })
+  markGeneratedOutput(options.outPath, 'demo-vault')
 
   const files: string[] = []
 
@@ -101,7 +93,7 @@ status: aktiv
 tags:
   - customer-timeline
 datum: ${DEMO_DATE}
-quelle: demo
+quelle: memory-timeline
 ---
 
 # Acme-Schule Timeline
@@ -114,7 +106,7 @@ status: aktiv
 tags:
   - customer-snapshot
 datum: ${DEMO_DATE}
-quelle: demo
+quelle: customer-snapshot
 ---
 
 # Acme-Schule Snapshot
@@ -149,7 +141,7 @@ tags:
   - runbook
   - dhcp
 datum: ${DEMO_DATE}
-quelle: demo
+quelle: runbook-generator
 confidence: medium
 ---
 
@@ -238,13 +230,40 @@ Quelle: [[Kunden/Acme-Schule/Captures/2026-05-12 Firewall DHCP Fix|Firewall DHCP
 - Customer Snapshot aktualisiert
 `)
 
+  write(options.outPath, files, 'Maintenance/Capture Review.md', `---
+status: aktiv
+tags:
+  - capture-review
+  - maintenance
+datum: ${DEMO_DATE}
+quelle: capture-review
+---
+
+# Capture Review
+
+- [[Kunden/Acme-Schule/Captures/2026-05-12 Firewall DHCP Fix|Firewall DHCP Fix]] - Runbook-Kandidat, Kundenzuordnung bestätigt.
+`)
+
+  write(options.outPath, files, 'Knowledge/evidence.md', `---
+status: aktiv
+tags:
+  - evidence-dashboard
+datum: ${DEMO_DATE}
+quelle: evidence-dashboard
+---
+
+# Evidence Dashboard
+
+- [[Knowledge/Claims/DHCP Quelle Firewall|DHCP Quelle Firewall]] - Confidence high, Recheck 2026-08-12.
+`)
+
   write(options.outPath, files, 'Maintenance/Knowledge Inbox.md', `---
 status: aktiv
 tags:
   - knowledge-inbox
   - maintenance
 datum: ${DEMO_DATE}
-quelle: demo
+quelle: knowledge-inbox
 ---
 
 # Knowledge Inbox
@@ -267,7 +286,7 @@ tags:
   - change-ledger
   - maintenance
 datum: ${DEMO_DATE}
-quelle: demo
+quelle: change-ledger
 ---
 
 # Change Ledger
@@ -283,7 +302,7 @@ tags:
   - background-run
   - maintenance
 datum: ${DEMO_DATE}
-quelle: demo
+quelle: brain-run-background
 ---
 
 # Background Run Report

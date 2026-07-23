@@ -42,6 +42,7 @@ describe('referenz-organizer', () => {
     const result = organizeReferenz({
       vaultPath,
       notes,
+      removeNoteFromIndex() {},
       indexNote() {},
       buildLinkIndex() {},
     }, true)
@@ -61,11 +62,16 @@ describe('referenz-organizer', () => {
       })],
     ])
     const indexed: string[] = []
+    const removed: string[] = []
     let rebuilt = false
 
     const result = organizeReferenz({
       vaultPath,
       notes,
+      removeNoteFromIndex(path) {
+        removed.push(path)
+        notes.delete(path)
+      },
       indexNote(path) {
         indexed.push(path)
       },
@@ -78,6 +84,7 @@ describe('referenz-organizer', () => {
     assert.ok(result.moved[0].to.startsWith('Technik/Docker/'))
     assert.ok(!existsSync(join(vaultPath, 'Referenz/Docker Stuff.md')))
     assert.ok(existsSync(join(vaultPath, result.moved[0].to)))
+    assert.deepEqual(removed, ['Referenz/Docker Stuff.md'])
     assert.deepEqual(indexed, [join(vaultPath, result.moved[0].to)])
     assert.equal(rebuilt, true)
     assert.equal(notes.has('Referenz/Docker Stuff.md'), false)
@@ -92,6 +99,7 @@ describe('referenz-organizer', () => {
     const result = organizeReferenz({
       vaultPath,
       notes,
+      removeNoteFromIndex() {},
       indexNote() {},
       buildLinkIndex() {},
     }, false)

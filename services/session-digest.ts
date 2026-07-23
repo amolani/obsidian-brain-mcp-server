@@ -1,6 +1,20 @@
 import type { ClientMatch } from './client-resolver.ts'
 import type { ClassifiedIntent } from './intent-classifier.ts'
+import {
+  KNOWLEDGE_SALIENCE_MODEL,
+  selectSalientKnowledge,
+  type KnowledgeFactKind,
+  type KnowledgeProvenance,
+  type KnowledgeSalienceFact,
+  type KnowledgeSalienceSelection,
+} from './knowledge-salience.ts'
 import { redactSecrets } from './secret-redaction.ts'
+import {
+  digestEvidenceScore,
+  renderSessionDigestAttestation,
+  sessionDigestIntegrity,
+  type DigestIntegrityFact,
+} from './session-digest-integrity.ts'
 
 export interface SessionDigestPhase {
   userRequest: string
@@ -9,211 +23,259 @@ export interface SessionDigestPhase {
   hadError: boolean
 }
 
+/**
+ * `selection` is the preferred input. The remaining knowledge fields stay
+ * available for callers that have not moved salience selection into their
+ * capture pipeline yet; they are converted into the same typed selection and
+ * are never rendered as raw assistant blocks or command lists.
+ */
 export interface SessionDigestInput {
   title: string
-  client: string | null
-  clientMatch: ClientMatch
-  intent: ClassifiedIntent
-  phases: SessionDigestPhase[]
-  summaries: string[]
-  procedures: string[]
-  errorFixes: string[]
+  sessionId?: string
+  client?: string | null
+  clientMatch?: ClientMatch
+  intent?: ClassifiedIntent
+  phases?: SessionDigestPhase[]
+  summaries?: string[]
+  procedures?: string[]
+  errorFixes?: string[]
   redactionCount?: number
+  selection?: KnowledgeSalienceSelection
+}
+
+interface RenderedFact {
+  label: string
+  fact: KnowledgeSalienceFact
 }
 
 const EMPTY = '- Keine belastbare Aussage erkannt'
+const MAX_RENDERED_FACTS = 8
+const MAX_FACT_LENGTH = 220
+const MAX_PROVENANCE_ROWS = MAX_RENDERED_FACTS * 4
+const MAX_PROVENANCE_PER_FACT = 4
+const MAX_PROVENANCE_EXCERPT = 110
+const MIN_DURABLE_EVIDENCE = KNOWLEDGE_SALIENCE_MODEL.confidenceThresholds.medium
 
-const DEBUG_NARRATION = /^(zwei|drei|mehrere)\s+hinweise\s+sind\s+wichtig:?$|entscheidende(?:r)?\s+hinweis|crash-files?.*ajenti\.log.*nächst\w*\s+quellen|\.bak\s+ist\s+identisch/i
-const SENSITIVE_TEXT = /\b(passw(?:ort|örter|oerter)?|password|passwd|pwd|token|secret|--newpassword|setpassword|auth-user-pass|\.env)\b/i
-const VERBOSE_COMMAND = /`[^`]*(?:&&|;|\||\b(?:ssh|samba-tool|cat|grep|find|openssl|docker|systemctl|kubectl|nmap|curl|sed|awk|tail|head)\b)[^`]*`/i
-const OUTCOME_KEYWORDS = /\b(root cause|ursache|fehler|fix|behoben|wiederhergestellt|verifiziert|validiert|active|running|lauscht|listen|eingetragen|umgestellt|angepasst|ersetzt|entfernt|route|linkdown|default-route|interfaces\.d|\.disabled|subnets\.csv|vmbr|internet)\b/i
+const SECTION_KINDS: ReadonlyArray<{ title: string; kinds: readonly KnowledgeFactKind[] }> = [
+  { title: 'Problem', kinds: ['problem'] },
+  { title: 'Root Cause', kinds: ['cause'] },
+  { title: 'Entscheidung', kinds: ['decision'] },
+  { title: 'Änderung / Fix', kinds: ['change'] },
+  { title: 'Verifikation', kinds: ['verification'] },
+  { title: 'Ergebnis', kinds: ['result'] },
+  { title: 'Offene Punkte / Constraints', kinds: ['open_question', 'constraint'] },
+]
 
-function clean(value: string): string {
-  return value
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/^[-*#>\s\d.]+/gm, '')
+function truncateAtWord(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value
+  const head = value.slice(0, maxLength + 1)
+  const boundary = head.lastIndexOf(' ')
+  return `${head.slice(0, boundary >= maxLength * 0.65 ? boundary : maxLength).trimEnd()}…`
+}
+
+function safeInline(value: string, maxLength: number): string {
+  const withoutBlocks = value.replace(/```[\s\S]*?```/g, ' ')
+  const redacted = redactSecrets(withoutBlocks).content
+    .replace(/[\r\n]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+  return truncateAtWord(redacted, maxLength)
 }
 
-function safe(value: string, maxLength = 280): string | null {
-  const cleaned = clean(value)
-  if (!cleaned) return null
-  if (DEBUG_NARRATION.test(cleaned)) return null
-  if (SENSITIVE_TEXT.test(cleaned)) return null
-  if (cleaned.length > 140 && VERBOSE_COMMAND.test(cleaned)) return null
-  const redacted = redactSecrets(cleaned).content
-  if (redacted !== cleaned && SENSITIVE_TEXT.test(cleaned)) return null
-  return redacted.slice(0, maxLength).trim()
+function selectedKnowledge(input: SessionDigestInput): KnowledgeSalienceSelection {
+  if (input.selection) return input.selection
+  const phases = input.phases ?? []
+  return selectSalientKnowledge({
+    sessionId: input.sessionId ?? input.title,
+    task: [input.title, ...phases.map(phase => phase.userRequest)].filter(Boolean).join(' '),
+    phases,
+    assistantSummaries: input.summaries ?? [],
+    errorFixes: input.errorFixes ?? [],
+    maxFacts: MAX_RENDERED_FACTS,
+  })
 }
 
-function evidenceLines(input: SessionDigestInput): string[] {
-  const texts = [
-    ...input.phases.map(phase => phase.outcome),
-    ...input.summaries,
-    ...input.errorFixes,
-  ]
-  return texts.flatMap(text =>
-    text
-      .replace(/```[\s\S]*?```/g, ' ')
-      .split(/\n+|(?<=[.!?])\s+(?=[A-ZÄÖÜ0-9`])/)
-      .map(line => clean(line))
-      .filter(Boolean),
-  )
+function isDurable(fact: KnowledgeSalienceFact): boolean {
+  return !fact.evidenceConflict
+    && fact.provenance.length > 0
+    && fact.evidenceScore >= MIN_DURABLE_EVIDENCE
 }
 
-function bullets(values: string[]): string {
-  const cleanValues = values
-    .map(value => safe(value))
-    .filter((value): value is string => !!value)
-  return cleanValues.length > 0
-    ? [...new Set(cleanValues)].slice(0, 4).map(value => `- ${value}`).join('\n')
-    : EMPTY
+function factStatement(fact: KnowledgeSalienceFact): string {
+  return safeInline(fact.abstraction?.slots.fact || fact.statement, MAX_FACT_LENGTH)
 }
 
-function problem(input: SessionDigestInput): string[] {
-  const ranked = input.phases
-    .map((phase, index) => ({
-      phase,
-      score: (phase.hadError ? 4 : 0)
-        + (OUTCOME_KEYWORDS.test(`${phase.userRequest}\n${phase.outcome}`) ? 3 : 0)
-        + (phase.outcome.length > 80 ? 1 : 0)
-        + index / Math.max(1, input.phases.length),
+function scoreSummary(fact: KnowledgeSalienceFact): string {
+  return `Salienz ${fact.salienceScore}/100 · Evidenz ${fact.evidenceScore}/100 · ${fact.confidence}`
+}
+
+function factBullet(item: RenderedFact, prefix = ''): string {
+  const statement = factStatement(item.fact)
+  if (!statement) return ''
+  return `- [${item.label}] ${prefix}${statement} _(${scoreSummary(item.fact)})_`
+}
+
+function sectionBullets(facts: RenderedFact[], kinds: readonly KnowledgeFactKind[]): string {
+  const lines = facts
+    .filter(item => isDurable(item.fact) && kinds.includes(item.fact.kind))
+    .map(item => factBullet(item))
+    .filter(Boolean)
+  return lines.length > 0 ? lines.join('\n') : EMPTY
+}
+
+function routingReview(input: SessionDigestInput): string[] {
+  const match = input.clientMatch
+  if (!match) return []
+  if (match.method === 'unknown_cwd' && match.candidate) {
+    return [`Kunden-/Projektkandidat aus CWD prüfen: \`${safeInline(match.candidate, 80)}\`.`]
+  }
+  if (match.confidence === 'low' || ['fuzzy_cwd', 'exact_content', 'ambiguous_cwd', 'ambiguous_content'].includes(match.method)) {
+    return [`Kundenzuordnung prüfen: ${safeInline(match.reason, 180)}.`]
+  }
+  return []
+}
+
+function reviewBullets(input: SessionDigestInput, facts: RenderedFact[]): string {
+  const weakFacts = facts
+    .filter(item => !isDurable(item.fact))
+    .map(item => factBullet(item, item.fact.evidenceConflict ? 'Widersprüchlich: ' : 'Unbestätigt: '))
+    .filter(Boolean)
+  const contextReview = routingReview(input).map(value => `- ${value}`)
+  if (input.intent?.confidence === 'low') {
+    contextReview.push('- Session-Intent hat niedrige Confidence und sollte vor Promotion geprüft werden.')
+  }
+  const lines = [...weakFacts, ...contextReview]
+  return lines.length > 0 ? lines.join('\n') : '- Kein zusätzlicher Review-Hinweis'
+}
+
+function provenanceExcerpt(item: KnowledgeProvenance): string {
+  // Assistant/phase prose is deliberately not repeated. Its stable reference
+  // and digest are enough to locate it without copying another prose block.
+  if (item.source === 'assistant_summary' || item.source === 'phase' || item.source === 'error_fix') return ''
+  return safeInline(item.excerpt, MAX_PROVENANCE_EXCERPT)
+}
+
+function integrityCandidate(item: KnowledgeProvenance) {
+  return {
+    ref: safeInline(item.ref, 100),
+    hash: /^[a-f0-9]{64}$/i.test(item.hash) ? item.hash.toLowerCase() : 'ungültig',
+    excerpt: provenanceExcerpt(item),
+  }
+}
+
+/** Keep the smallest bounded evidence subset that reproduces the persisted score. */
+function integrityProvenance(items: KnowledgeProvenance[], targetScore: number): KnowledgeProvenance[] {
+  const byHash = new Map<string, KnowledgeProvenance>()
+  for (const item of items) {
+    const current = byHash.get(item.hash)
+    const currentScore = current ? (digestEvidenceScore([integrityCandidate(current)]) ?? -1) : -1
+    const candidateScore = digestEvidenceScore([integrityCandidate(item)]) ?? -1
+    if (!current || candidateScore > currentScore) byHash.set(item.hash, item)
+  }
+  const unique = [...byHash.values()]
+  const selected: KnowledgeProvenance[] = []
+  while (selected.length < MAX_PROVENANCE_PER_FACT && unique.length > 0) {
+    unique.sort((left, right) => {
+      const leftScore = digestEvidenceScore([...selected, left].map(integrityCandidate)) ?? -1
+      const rightScore = digestEvidenceScore([...selected, right].map(integrityCandidate)) ?? -1
+      return rightScore - leftScore || left.ref.localeCompare(right.ref, 'en')
+    })
+    const next = unique.shift()
+    if (!next) break
+    selected.push(next)
+    if (digestEvidenceScore(selected.map(integrityCandidate)) === targetScore) break
+  }
+  return selected
+}
+
+function renderedProvenance(fact: KnowledgeSalienceFact): KnowledgeProvenance[] {
+  return isDurable(fact)
+    ? integrityProvenance(fact.provenance, fact.evidenceScore)
+    : fact.provenance.slice(0, 1)
+}
+
+function provenanceBullets(facts: RenderedFact[]): string {
+  const rows: string[] = []
+  for (const { label, fact } of facts) {
+    for (const source of renderedProvenance(fact)) {
+      const ref = safeInline(source.ref, 100)
+      const hash = /^[a-f0-9]{64}$/i.test(source.hash) ? source.hash.toLowerCase() : 'ungültig'
+      const excerpt = provenanceExcerpt(source)
+      rows.push(`- [${label}] \`${ref}\` · Hash \`${hash}\`${excerpt ? ` — ${excerpt}` : ''}`)
+      if (rows.length >= MAX_PROVENANCE_ROWS) return rows.join('\n')
+    }
+  }
+  return rows.length > 0 ? rows.join('\n') : '- Keine verwertbare Provenienz vorhanden'
+}
+
+function attestedFacts(facts: RenderedFact[]): DigestIntegrityFact[] {
+  return facts
+    .filter(item => isDurable(item.fact))
+    .map(({ label, fact }) => ({
+      id: label,
+      kind: fact.kind,
+      statement: factStatement(fact),
+      salienceScore: fact.salienceScore,
+      evidenceScore: fact.evidenceScore,
+      confidence: fact.confidence,
+      provenance: renderedProvenance(fact).map(integrityCandidate),
     }))
-    .filter(item => safe(item.phase.userRequest, 220))
-    .sort((a, b) => b.score - a.score)
-  return ranked[0] ? [ranked[0].phase.userRequest] : [input.title]
 }
 
-function rootCause(input: SessionDigestInput, lines: string[]): string[] {
-  const corpus = `${lines.join('\n')}\n${input.procedures.join('\n')}`
-  const out: string[] = []
-  if (/bind\.mode|mode:\s*unix/i.test(corpus) && /bind\.socket/i.test(corpus)) {
-    out.push('Ajenti-Konfiguration war widersprüchlich: `bind.mode: unix` ohne `bind.socket`, obwohl TCP/SSL konfiguriert war.')
+function excludedBullets(input: SessionDigestInput, selection: KnowledgeSalienceSelection): string {
+  const lines: string[] = []
+  const excluded = selection.excluded
+  if (excluded.unsafeOrNoisy > 0 || excluded.belowSalienceThreshold > 0 || excluded.redundant > 0) {
+    lines.push(
+      `Nicht ausgewählt: ${excluded.unsafeOrNoisy} unsicher/rauschend, `
+      + `${excluded.belowSalienceThreshold} unter Salienzschwelle, ${excluded.redundant} redundant.`,
+    )
   }
-  if (/vmbr-trunk/i.test(corpus) && /invalid network interface name|invalid format|Proxmox WebUI/i.test(corpus)) {
-    out.push('`vmbr-trunk` war als Proxmox-Interface-Name ungeeignet; die Bridge wurde auf `vmbr2` umbenannt.')
+  if ((input.procedures?.length ?? 0) > 0) {
+    lines.push(`${input.procedures?.length ?? 0} ungebundene Befehle wurden ohne Ergebnisbeleg nicht übernommen.`)
   }
-  if (/source\s+\/etc\/network\/interfaces\.d\/\*/i.test(corpus) && /\.disabled/i.test(corpus)) {
-    out.push('`source /etc/network/interfaces.d/*` lädt auch Dateien mit `.disabled`-Suffix; dadurch wurde die Mgmt-Template-Config unbeabsichtigt aktiv.')
+  if ((input.redactionCount ?? 0) > 0) {
+    lines.push(`${input.redactionCount} sensible Fundstelle(n) wurden vor der Wissensauswahl redigiert.`)
   }
-  if (/default via .*vmbr2\.50/i.test(corpus) && /(linkdown|NO-CARRIER|ohne Carrier|kein Kabel)/i.test(corpus)) {
-    out.push('Die Default-Route zeigte auf `vmbr2.50`, obwohl das Interface linkdown/ohne Carrier war.')
-  }
-  for (const line of lines) {
-    if (!/(root cause|ursache|keyerror|bind\.socket|bind\.mode|widerspr|fehlte|missing|linkdown|default-route|interfaces\.d|\.disabled|invalid network interface name)/i.test(line)) continue
-    out.push(line)
-  }
-  return out
+  if (lines.length === 0) lines.push('Keine weiteren Kandidaten verworfen.')
+  return lines.map(line => `- ${line}`).join('\n')
 }
 
-function changes(input: SessionDigestInput, lines: string[]): string[] {
-  const corpus = `${lines.join('\n')}\n${input.procedures.join('\n')}`
-  const out: string[] = []
-  if (/cp\s+\/etc\/ajenti\/config\.yml|config\.yml\.broken/i.test(corpus)) {
-    out.push('Vor der Änderung wurde ein Backup der Ajenti-Konfiguration angelegt.')
-  }
-  if (/mode:\s*unix/i.test(corpus) && /mode:\s*tcp/i.test(corpus)) {
-    out.push('Ajenti `bind.mode` wurde von `unix` auf `tcp` umgestellt.')
-  }
-  if (/systemctl\s+restart\s+linuxmuster-webui/i.test(corpus)) {
-    out.push('`linuxmuster-webui` wurde neu gestartet.')
-  }
-  if (/vmbr-trunk/i.test(corpus) && /vmbr2/i.test(corpus)) {
-    out.push('Bridge-/Doku-Referenzen wurden von `vmbr-trunk` auf `vmbr2` umgestellt.')
-  }
-  if (/\/root\/vmbr2-mgmt\.template/i.test(corpus)) {
-    out.push('Die `vmbr2`-Mgmt-Template-Datei liegt außerhalb von `/etc/network/interfaces.d/` und wird erst bei Bedarf hineinkopiert.')
-  }
-  if (/\/etc\/linuxmuster\/subnets\.csv|\/etc\/linuxmuster\/sophomorix\/default\/school\/subnets\.csv/i.test(corpus) && /10\.50\.(20|30|40|50|60|70|80)\.0/i.test(corpus)) {
-    out.push('Zusätzliche VLAN-Subnetze wurden in der linuxmuster-Subnetz-CSV vorbereitet.')
-  }
-  for (const line of lines) {
-    if (!/(geändert|geaendert|umgestellt|angepasst|ersetzt|entfernt|gesetzt|eingetragen|neu gestartet|restart|fix erfolgreich|läuft wieder|laeuft wieder|wiederhergestellt)/i.test(line)) continue
-    out.push(line)
-  }
-  return out
-}
-
-function verification(input: SessionDigestInput, lines: string[]): string[] {
-  const corpus = `${lines.join('\n')}\n${input.procedures.join('\n')}`
-  const out: string[] = []
-  if (/linuxmuster-webui.*active|active\s*\(running\)|systemctl\s+is-active\s+linuxmuster-webui/i.test(corpus)) {
-    out.push('`linuxmuster-webui` war nach dem Fix active/running.')
-  }
-  if (/0\.0\.0\.0:443|LISTEN.*:443|ss\s+-tlnp.*:443/i.test(corpus)) {
-    out.push('Der Dienst lauschte auf `0.0.0.0:443`.')
-  }
-  if (/Internet.*wieder da|Internet-Zugriff.*wiederhergestellt|default via 10\.0\.0\.254 dev vmbr0/i.test(corpus)) {
-    out.push('Der Internet-Zugriff wurde wiederhergestellt; die Default-Route zeigte wieder über `vmbr0`.')
-  }
-  if (/keine vmbr-trunk.*Referenz|Proxmox WebUI.*vmbr2.*kein/i.test(corpus)) {
-    out.push('Die aktiven `vmbr-trunk`-Referenzen wurden bereinigt; `vmbr2` ist der gültige Proxmox-Bridge-Name.')
-  }
-  for (const line of lines) {
-    if (!/(verifiziert|validiert|active|running|lauscht|laeuscht|listen|0\.0\.0\.0:443|port 443|Internet.*wieder|Default-Route|sauber)/i.test(line)) continue
-    out.push(line)
-  }
-  return out
-}
-
-function review(input: SessionDigestInput): string[] {
-  const out: string[] = []
-  if (input.clientMatch.method === 'unknown_cwd' && input.clientMatch.candidate) {
-    out.push(`Kunden-/Projektkandidat aus CWD prüfen: \`${input.clientMatch.candidate}\`.`)
-  } else if (['fuzzy_cwd', 'exact_content'].includes(input.clientMatch.method)) {
-    out.push(`Kundenzuordnung prüfen: ${input.clientMatch.reason}.`)
-  }
-  if (input.intent.confidence === 'low') {
-    out.push('Session-Intent hat niedrige Confidence und sollte vor Promotion geprüft werden.')
-  }
-  return out
-}
-
-function excluded(input: SessionDigestInput): string[] {
-  const corpus = [
-    ...input.summaries,
-    ...input.procedures,
-    ...input.errorFixes,
-    ...input.phases.flatMap(phase => [phase.userRequest, phase.outcome]),
-  ].join('\n')
-  const out = ['Debug-Narration ohne dauerhaften Wissenswert wurde nicht als Digest-Fakt übernommen.']
-  if (SENSITIVE_TEXT.test(corpus) || (input.redactionCount ?? 0) > 0) {
-    out.push('Credential-/Kennwort-Inhalte und Werte wurden nicht ausgeschrieben.')
-  }
-  if (VERBOSE_COMMAND.test(corpus) || input.procedures.length > 0) {
-    out.push('Lange SSH-/Shell-/Samba-Befehlslisten bleiben außerhalb des Digest-Kontextes.')
-  }
-  return out
-}
-
+/**
+ * Renders a bounded digest of typed facts. Salience determines what is worth
+ * showing; evidence independently determines whether it belongs in a durable
+ * semantic section or only in Review.
+ */
 export function renderSessionDigest(input: SessionDigestInput): string {
-  const lines = evidenceLines(input)
-  return [
+  const selection = selectedKnowledge(input)
+  const facts: RenderedFact[] = selection.facts
+    .slice(0, MAX_RENDERED_FACTS)
+    .map((fact, index) => ({ label: `F${index + 1}`, fact }))
+  const body: string[] = [
     '## Session Digest',
     '',
-    '### Problem',
+    `_Modell: \`${safeInline(selection.modelVersion, 80)}\` · ${facts.length}/${selection.candidateCount} Fakten ausgewählt · ordinale Scores, keine Wahrscheinlichkeiten_`,
     '',
-    bullets(problem(input)),
-    '',
-    '### Root Cause',
-    '',
-    bullets(rootCause(input, lines)),
-    '',
-    '### Änderung / Fix',
-    '',
-    bullets(changes(input, lines)),
-    '',
-    '### Verifikation',
-    '',
-    bullets(verification(input, lines)),
+    renderSessionDigestAttestation(sessionDigestIntegrity(selection.modelVersion, attestedFacts(facts))),
+  ]
+
+  for (const section of SECTION_KINDS) {
+    body.push('', `### ${section.title}`, '', sectionBullets(facts, section.kinds))
+  }
+
+  body.push(
     '',
     '### Review',
     '',
-    bullets(review(input)),
+    reviewBullets(input, facts),
+    '',
+    '### Evidenz',
+    '',
+    provenanceBullets(facts),
     '',
     '### Nicht übernommen',
     '',
-    bullets(excluded(input)),
-  ].join('\n')
+    excludedBullets(input, selection),
+  )
+  return body.join('\n')
 }

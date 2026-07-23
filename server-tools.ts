@@ -118,7 +118,7 @@ export const TOOL_DEFINITIONS = [
           },
           dry_run: {
             type: 'boolean',
-            description: 'If true, only previews the target path/tags without writing. Default: false, except mode=review defaults to true.',
+            description: 'If true, only previews the target path/tags without writing. Default: true; set false explicitly to write.',
           },
         },
         required: ['content'],
@@ -425,6 +425,21 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'repair_generated_surfaces',
+      description:
+        'Dry-run-first repair for the seven fixed core Markdown surfaces. Rebuilds missing or generator-owned dashboard, review, evidence, inbox, index, hot-cache, and ledger files; fails before any write if a target is user-owned.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: { type: 'boolean', description: 'Default true. Set false to rebuild all core generated surfaces after an ownership preflight.' },
+          adopt_legacy: {
+            type: 'boolean',
+            description: 'Default false. With explicit apply, adopt only legacy files matching the exact fixed path, expected tag, heading, and generator-specific body signature. Foreign/manual files remain blocked.',
+          },
+        },
+      },
+    },
+    {
       name: 'build_knowledge_inbox',
       description:
         'Dry-run-first central review inbox for provisional claims, uncertain customer routing, runbook candidates, auto-build skips, and recent session impact reports. Writes Maintenance/Knowledge Inbox.md.',
@@ -446,6 +461,33 @@ export const TOOL_DEFINITIONS = [
           dry_run: { type: 'boolean', description: 'Default true. Set false to apply supported actions.' },
         },
         required: ['item_id'],
+      },
+    },
+    {
+      name: 'brain_review_inbox_items',
+      description:
+        'Dry-run-first persistent lifecycle action for Knowledge Inbox items. Sets open/accepted/rejected/snoozed/superseded, automatically reopens expired snoozes, and permits batches only when every item is low-risk. Claim acceptance/rejection must use brain_apply_inbox_item so the claim itself is changed.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          item_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+            maxItems: 100,
+            uniqueItems: true,
+            description: 'One or more exact item ids from build_knowledge_inbox. Multiple ids are accepted only for low-risk items.',
+          },
+          status: {
+            type: 'string',
+            enum: ['open', 'accepted', 'rejected', 'snoozed', 'superseded'],
+            description: 'Persistent review status. open explicitly reopens an item.',
+          },
+          reason: { type: 'string', description: 'Optional review reason stored with every selected item.' },
+          snoozed_until: { type: 'string', description: 'Required future ISO-8601 date/time when status=snoozed. The item reopens automatically after this time.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to atomically persist the selected state changes.' },
+        },
+        required: ['item_ids', 'status'],
       },
     },
     {
@@ -531,7 +573,7 @@ export const TOOL_DEFINITIONS = [
           source_path: { type: 'string', description: 'Optional source capture/source note path to promote.' },
           client: { type: 'string', description: 'Optional client/project name for hot cache and timeline.' },
           max_claims: { type: 'number', description: 'Maximum claims to extract from source. Default 6.' },
-          dry_run: { type: 'boolean', description: 'Override policy mode. If omitted, auto_build policy applies; review_only previews.' },
+          dry_run: { type: 'boolean', description: 'Optional preview request. Policy modes review_only/off cannot be overridden.' },
         },
       },
     },
@@ -591,11 +633,13 @@ export const TOOL_DEFINITIONS = [
           dry_run: { type: 'boolean', description: 'Default true. Set false to write safe generated surfaces and the background report.' },
           jobs: { type: 'array', items: { type: 'string' }, description: 'Optional explicit job ids. Defaults to the V1 safe background job set.' },
           max_runtime_ms: { type: 'number', description: 'Full run time budget. Default 30000, max 600000.' },
+          max_job_runtime_ms: { type: 'number', description: 'Budget for each individual job. Default min(10000, max_runtime_ms).' },
           lock_path: { type: 'string', description: 'Vault-relative lock path. Default .brain-background.lock.' },
           settings_path: { type: 'string', description: 'Optional Claude settings path for hook repair preview.' },
           client: { type: 'string', description: 'Optional client for customer timeline/snapshot jobs.' },
           source_path: { type: 'string', description: 'Optional source capture for an explicit brain_auto_build job.' },
           run_auto_build: { type: 'boolean', description: 'Only runs brain_auto_build when true and job list includes brain_auto_build.' },
+          max_auto_build_sources: { type: 'number', description: 'Maximum queued captures processed by brain_auto_build when source_path is omitted. Default 3, max 50.' },
         },
       },
     },
@@ -978,7 +1022,7 @@ export const TOOL_DEFINITIONS = [
         properties: {
           dry_run: {
             type: 'boolean',
-            description: 'If true, only shows what would be moved without actually moving files (default: false)',
+            description: 'If true, only shows what would be moved without actually moving files (default: true).',
           },
         },
       },
@@ -1182,7 +1226,7 @@ export const TOOL_DEFINITIONS = [
     {
       name: 'promote_suggestion',
       description:
-        'Promote a suggested client or Technik subcategory to the respective JSON config. Writes the entry and removes matching suggestions from the log. Subsequent captures will auto-categorize correctly.',
+        'Dry-run-first promotion of a suggested client or Technik subcategory to the respective JSON config. Apply writes the entry, removes matching suggestions from the log, and records the change.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -1195,6 +1239,7 @@ export const TOOL_DEFINITIONS = [
             items: { type: 'string' },
             description: 'Additional keywords/aliases to match (candidate itself is always included).',
           },
+          dry_run: { type: 'boolean', description: 'Preview only by default. Set false to update configuration and clear the matching log entry.' },
         },
         required: ['type', 'candidate'],
       },
@@ -1403,7 +1448,7 @@ export const TOOL_DEFINITIONS = [
       inputSchema: {
         type: 'object' as const,
         properties: {
-          dry_run: { type: 'boolean', description: 'Default false. If true, shows what would be created/updated without writing.' },
+          dry_run: { type: 'boolean', description: 'Default true. Set false explicitly to create/update generated MOCs.' },
           min_notes: { type: 'number', description: 'Minimum notes per folder to generate MOC (default 2).' },
         },
       },

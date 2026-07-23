@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { tokenize, jaccard } from './text-utils.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface BrokenLink {
   source: string       // note that has the broken link
@@ -137,6 +138,7 @@ export function fixBrokenLinks(vault: Vault, dryRun: boolean = true): {
     }
 
     if (changed && !dryRun) {
+      assertCanWriteTool('fix_broken_links', [sourceRel])
       writeFileSync(entry.path, content, 'utf-8')
     }
   }

@@ -1,4 +1,5 @@
 import type { Vault } from '../vault.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export type SafeMaintenanceStep =
   | 'frontmatter'
@@ -43,6 +44,8 @@ export function runSafeMaintenance(vault: Vault, options: RunSafeMaintenanceOpti
   const dryRun = options.dryRun ?? true
   const requestedSteps = options.steps?.length ? options.steps : DEFAULT_STEPS
   const steps: SafeMaintenanceStepResult[] = []
+
+  if (!dryRun) assertCanWriteTool('run_safe_maintenance')
 
   for (const step of requestedSteps) {
     switch (step) {

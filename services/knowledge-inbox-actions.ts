@@ -3,13 +3,20 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { atomicWriteJsonSync } from './atomic-file.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
-import { isActiveNote } from './note-scope.ts'
+import { isActiveNote, isActivePath, isAutoCaptureNote } from './note-scope.ts'
 import { stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
-export type KnowledgeInboxActionKind = 'confirm_claim' | 'reject_claim' | 'runbook_preview' | 'review_client_alias'
+export type KnowledgeInboxActionKind =
+  | 'confirm_claim'
+  | 'reject_claim'
+  | 'runbook_preview'
+  | 'review_client_alias'
+  | 'review_auto_build_skip'
+  | 'review_impact_report'
 
 export interface KnowledgeInboxItem {
   id: string
@@ -18,6 +25,9 @@ export interface KnowledgeInboxItem {
   target: string
   detail: string
   fingerprint: string
+  risk: 'low' | 'medium'
+  sourcePath?: string
+  action?: string
 }
 
 export interface BrainApplyInboxItemOptions {
@@ -33,6 +43,28 @@ export interface BrainApplyInboxItemResult {
   state?: KnowledgeInboxItemState
 }
 
+export interface BrainReviewInboxItemsOptions {
+  itemIds: string[]
+  status: KnowledgeInboxItemStatus
+  reason?: string
+  snoozedUntil?: string
+  dryRun?: boolean
+}
+
+export interface KnowledgeInboxStateChange {
+  item: KnowledgeInboxItem
+  previousStatus: KnowledgeInboxItemStatus
+  nextStatus: KnowledgeInboxItemStatus
+  snoozedUntil?: string
+}
+
+export interface BrainReviewInboxItemsResult {
+  dryRun: boolean
+  status: KnowledgeInboxItemStatus
+  changes: KnowledgeInboxStateChange[]
+  summary: string
+}
+
 export type KnowledgeInboxItemStatus = 'open' | 'accepted' | 'rejected' | 'snoozed' | 'superseded'
 
 export interface KnowledgeInboxItemState {
@@ -43,6 +75,7 @@ export interface KnowledgeInboxItemState {
   fingerprint: string
   updatedAt: string
   reason?: string
+  snoozedUntil?: string
 }
 
 export interface KnowledgeInboxState {
@@ -69,6 +102,12 @@ function itemFingerprint(kind: KnowledgeInboxActionKind, note: { relativePath: s
     .slice(0, 16)
 }
 
+function syntheticItemFingerprint(kind: KnowledgeInboxActionKind, target: string, values: unknown[]): string {
+  const hash = createHash('sha256').update(kind).update('\0').update(target)
+  for (const value of values) hash.update('\0').update(JSON.stringify(value))
+  return hash.digest('hex').slice(0, 16)
+}
+
 function makeItem(
   kind: KnowledgeInboxActionKind,
   note: { relativePath: string; title: string; content: string; frontmatter: Record<string, any> },
@@ -82,6 +121,29 @@ function makeItem(
     target: note.relativePath,
     detail,
     fingerprint: itemFingerprint(kind, note),
+    risk: kind === 'confirm_claim' || kind === 'reject_claim' ? 'medium' : 'low',
+  }
+}
+
+function makeSyntheticItem(
+  kind: 'review_auto_build_skip',
+  target: string,
+  title: string,
+  detail: string,
+  sourcePath: string,
+  action: string,
+  fingerprintValues: unknown[],
+): KnowledgeInboxItem {
+  return {
+    id: knowledgeInboxItemId(kind, target),
+    kind,
+    title,
+    target,
+    detail,
+    fingerprint: syntheticItemFingerprint(kind, target, fingerprintValues),
+    risk: 'low',
+    sourcePath,
+    action,
   }
 }
 
@@ -90,31 +152,64 @@ function emptyState(): KnowledgeInboxState {
 }
 
 export function readKnowledgeInboxState(vault: Vault): KnowledgeInboxState {
+  const path = vaultJoin(vault.vaultPath, KNOWLEDGE_INBOX_STATE_FILE)
+  if (!existsSync(path)) return emptyState()
   try {
-    const path = vaultJoin(vault.vaultPath, KNOWLEDGE_INBOX_STATE_FILE)
-    if (!existsSync(path)) return emptyState()
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<KnowledgeInboxState>
-    if (parsed.version !== 1 || !parsed.items || typeof parsed.items !== 'object') return emptyState()
+    if (parsed.version !== 1 || !parsed.items || typeof parsed.items !== 'object' || Array.isArray(parsed.items)) {
+      throw new Error('version=1 und items-Objekt erforderlich')
+    }
+    for (const [itemId, item] of Object.entries(parsed.items)) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${itemId}: State muss ein Objekt sein`)
+      if (item.itemId !== itemId) throw new Error(`${itemId}: itemId stimmt nicht mit dem Schlüssel überein`)
+      if (!['confirm_claim', 'reject_claim', 'runbook_preview', 'review_client_alias', 'review_auto_build_skip', 'review_impact_report'].includes(item.kind)) {
+        throw new Error(`${itemId}: kind ist ungültig`)
+      }
+      if (!['open', 'accepted', 'rejected', 'snoozed', 'superseded'].includes(item.status)) throw new Error(`${itemId}: status ist ungültig`)
+      if (typeof item.target !== 'string' || !item.target) throw new Error(`${itemId}: target fehlt`)
+      if (typeof item.fingerprint !== 'string' || !item.fingerprint) throw new Error(`${itemId}: fingerprint fehlt`)
+      if (typeof item.updatedAt !== 'string' || !Number.isFinite(Date.parse(item.updatedAt))) throw new Error(`${itemId}: updatedAt ist ungültig`)
+      if (item.snoozedUntil !== undefined && (typeof item.snoozedUntil !== 'string' || !Number.isFinite(Date.parse(item.snoozedUntil)))) {
+        throw new Error(`${itemId}: snoozedUntil ist ungültig`)
+      }
+    }
     return { version: 1, items: parsed.items as Record<string, KnowledgeInboxItemState> }
-  } catch {
-    return emptyState()
+  } catch (error) {
+    throw new Error(`Knowledge-Inbox-State ist beschädigt (${KNOWLEDGE_INBOX_STATE_FILE}): ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-function writeKnowledgeInboxState(vault: Vault, state: KnowledgeInboxState): void {
-  assertCanWriteTool('brain_apply_inbox_item', [KNOWLEDGE_INBOX_STATE_FILE])
-  writeFileSync(vaultJoin(vault.vaultPath, KNOWLEDGE_INBOX_STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, 'utf-8')
+function writeKnowledgeInboxState(vault: Vault, state: KnowledgeInboxState, tool: 'brain_apply_inbox_item' | 'brain_review_inbox_items'): void {
+  assertCanWriteTool(tool, [KNOWLEDGE_INBOX_STATE_FILE])
+  const path = vaultJoin(vault.vaultPath, KNOWLEDGE_INBOX_STATE_FILE)
+  atomicWriteJsonSync(path, state)
 }
 
-function currentStateForItem(state: KnowledgeInboxState, item: KnowledgeInboxItem): KnowledgeInboxItemState | null {
+export function currentKnowledgeInboxItemState(state: KnowledgeInboxState, item: KnowledgeInboxItem): KnowledgeInboxItemState | null {
   const record = state.items[item.id]
   if (!record) return null
   return record.fingerprint === item.fingerprint ? record : null
 }
 
-export function isKnowledgeInboxItemOpen(state: KnowledgeInboxState, item: KnowledgeInboxItem): boolean {
-  const record = currentStateForItem(state, item)
-  return !record || record.status === 'open'
+function snoozeHasExpired(record: KnowledgeInboxItemState, now: number): boolean {
+  if (record.status !== 'snoozed') return false
+  if (!record.snoozedUntil) return true
+  const timestamp = Date.parse(record.snoozedUntil)
+  return !Number.isFinite(timestamp) || timestamp <= now
+}
+
+export function effectiveKnowledgeInboxItemStatus(
+  state: KnowledgeInboxState,
+  item: KnowledgeInboxItem,
+  now: number = Date.now(),
+): KnowledgeInboxItemStatus {
+  const record = currentKnowledgeInboxItemState(state, item)
+  if (!record || snoozeHasExpired(record, now)) return 'open'
+  return record.status
+}
+
+export function isKnowledgeInboxItemOpen(state: KnowledgeInboxState, item: KnowledgeInboxItem, now: number = Date.now()): boolean {
+  return effectiveKnowledgeInboxItemStatus(state, item, now) === 'open'
 }
 
 export function recordKnowledgeInboxItemState(
@@ -134,7 +229,7 @@ export function recordKnowledgeInboxItemState(
     reason,
   }
   state.items[item.id] = record
-  writeKnowledgeInboxState(vault, state)
+  writeKnowledgeInboxState(vault, state, 'brain_apply_inbox_item')
   appendActionLog(vault.vaultPath, {
     tool: 'brain_apply_inbox_item',
     mode: 'apply',
@@ -153,7 +248,7 @@ function parseItemId(itemId: string): { kind: KnowledgeInboxActionKind; target: 
   return { kind, target: decodeURIComponent(match[2]) }
 }
 
-export function buildKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
+export function buildAllKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
   const items: KnowledgeInboxItem[] = []
   for (const note of [...vault.notes.values()].sort((a, b) => b.lastModified - a.lastModified)) {
     if (!isActiveNote(note)) continue
@@ -162,7 +257,16 @@ export function buildKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
       items.push(makeItem('reject_claim', note, `Claim ablehnen: ${note.title}`, 'Setzt claim_status auf rejected.'))
     }
 
-    const isCapture = note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester'
+    if (note.relativePath.startsWith('Maintenance/Session Impact/') || note.tags.includes('session-impact')) {
+      items.push(makeItem(
+        'review_impact_report',
+        note,
+        `Session Impact prüfen: ${note.title}`,
+        'Impact Report auf Vollständigkeit prüfen und danach als bearbeitet markieren.',
+      ))
+    }
+
+    const isCapture = isAutoCaptureNote(note)
     if (!isCapture) continue
     if (['fuzzy_cwd', 'exact_content', 'unknown_cwd'].includes(String(note.frontmatter.client_match_method ?? ''))) {
       items.push(makeItem(
@@ -176,8 +280,130 @@ export function buildKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
       items.push(makeItem('runbook_preview', note, `Runbook Dry-Run: ${note.title}`, 'Führt generate_runbook dry-run-first für diesen Capture-Kontext aus.'))
     }
   }
+
+  try {
+    const manifest = JSON.parse(readFileSync(vaultJoin(vault.vaultPath, '.brain-auto-build-manifest.json'), 'utf-8')) as {
+      sources?: Record<string, {
+        archivedAt?: string
+        plan?: Array<{ action?: string; title?: string; quality?: string; reason?: string }>
+      }>
+    }
+    for (const [sourcePath, entry] of Object.entries(manifest.sources ?? {})) {
+      if (entry.archivedAt || !isActivePath(sourcePath)) continue
+      const source = vault.notes.get(sourcePath)
+      if (!source) continue
+      for (const planItem of entry.plan ?? []) {
+        if (planItem.quality !== 'skip') continue
+        const action = String(planItem.action ?? 'unknown')
+        const title = String(planItem.title ?? planItem.action ?? 'Auto-Build Skip')
+        const reason = String(planItem.reason ?? 'quality gate')
+        const target = `${sourcePath}#${action}`
+        items.push(makeSyntheticItem(
+          'review_auto_build_skip',
+          target,
+          `Auto-Build Skip prüfen: ${title}`,
+          reason,
+          sourcePath,
+          action,
+          [planItem, source.frontmatter, source.content],
+        ))
+      }
+    }
+  } catch {
+    // A missing or malformed manifest simply contributes no review items.
+  }
+  return items
+}
+
+export function buildKnowledgeInboxItems(vault: Vault): KnowledgeInboxItem[] {
   const state = readKnowledgeInboxState(vault)
-  return items.filter(item => isKnowledgeInboxItemOpen(state, item))
+  return buildAllKnowledgeInboxItems(vault).filter(item => isKnowledgeInboxItemOpen(state, item))
+}
+
+function validateSnoozedUntil(value: string | undefined): string {
+  if (!value) throw new Error('snoozed_until ist für Status snoozed erforderlich')
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) throw new Error(`Ungültiges snoozed_until: ${value}`)
+  if (timestamp <= Date.now()) throw new Error('snoozed_until muss in der Zukunft liegen')
+  return value
+}
+
+function isClaimAction(item: KnowledgeInboxItem): boolean {
+  return item.kind === 'confirm_claim' || item.kind === 'reject_claim'
+}
+
+export function brainReviewInboxItems(vault: Vault, options: BrainReviewInboxItemsOptions): BrainReviewInboxItemsResult {
+  const dryRun = options.dryRun ?? true
+  const itemIds = [...new Set(options.itemIds.map(value => value.trim()).filter(Boolean))]
+  if (itemIds.length === 0) throw new Error('Mindestens eine Knowledge-Inbox Item-ID ist erforderlich')
+  if (itemIds.length > 100) throw new Error('Maximal 100 Knowledge-Inbox Items pro Batch')
+  if (!['open', 'accepted', 'rejected', 'snoozed', 'superseded'].includes(options.status)) {
+    throw new Error(`Ungültiger Knowledge-Inbox Status: ${options.status}`)
+  }
+
+  const allItems = buildAllKnowledgeInboxItems(vault)
+  const byId = new Map(allItems.map(item => [item.id, item]))
+  const items = itemIds.map(itemId => {
+    const item = byId.get(itemId)
+    if (!item) throw new Error(`Knowledge-Inbox Item nicht gefunden oder nicht mehr aktuell: ${itemId}`)
+    return item
+  })
+
+  if (items.length > 1 && items.some(item => item.risk !== 'low')) {
+    throw new Error('Batch-Review ist nur für low-risk Knowledge-Inbox Items erlaubt')
+  }
+  if ((options.status === 'accepted' || options.status === 'rejected') && items.some(isClaimAction)) {
+    throw new Error('Claims dürfen nicht per Statewechsel bestätigt oder abgelehnt werden; brain_apply_inbox_item führt die fachliche Claim-Änderung aus')
+  }
+
+  const snoozedUntil = options.status === 'snoozed'
+    ? validateSnoozedUntil(options.snoozedUntil)
+    : undefined
+  const state = readKnowledgeInboxState(vault)
+  const now = new Date().toISOString()
+  const changes = items.map(item => ({
+    item,
+    previousStatus: effectiveKnowledgeInboxItemStatus(state, item),
+    nextStatus: options.status,
+    ...(snoozedUntil ? { snoozedUntil } : {}),
+  }))
+
+  if (!dryRun) {
+    for (const item of items) {
+      state.items[item.id] = {
+        itemId: item.id,
+        kind: item.kind,
+        target: item.target,
+        status: options.status,
+        fingerprint: item.fingerprint,
+        updatedAt: now,
+        ...(options.reason ? { reason: options.reason } : {}),
+        ...(snoozedUntil ? { snoozedUntil } : {}),
+      }
+    }
+    writeKnowledgeInboxState(vault, state, 'brain_review_inbox_items')
+    appendActionLog(vault.vaultPath, {
+      tool: 'brain_review_inbox_items',
+      mode: 'apply',
+      targets: [KNOWLEDGE_INBOX_STATE_FILE],
+      summary: `${items.length} Knowledge-Inbox Item(s) auf ${options.status} gesetzt`,
+      meta: {
+        itemIds,
+        status: options.status,
+        snoozedUntil,
+        reason: options.reason,
+      },
+    })
+  }
+
+  return {
+    dryRun,
+    status: options.status,
+    changes,
+    summary: dryRun
+      ? `Dry-Run: ${items.length} Knowledge-Inbox Item(s) würden auf ${options.status} gesetzt`
+      : `${items.length} Knowledge-Inbox Item(s) auf ${options.status} gesetzt`,
+  }
 }
 
 function updateClaimStatus(vault: Vault, path: string, status: 'confirmed' | 'rejected', dryRun: boolean): unknown {
@@ -228,7 +454,9 @@ export function brainApplyInboxItem(vault: Vault, options: BrainApplyInboxItemOp
     const outputFolder = note.frontmatter.kunde ? `Kunden/${note.frontmatter.kunde}` : 'Knowledge/Runbooks'
     result = vault.generateRunbook(note.frontmatter.kunde ? String(note.frontmatter.kunde) : basename(parsed.target, '.md'), {
       outputFolder,
-      dryRun,
+      // This inbox action is deliberately a preview, even when the caller
+      // explicitly persists the review decision.
+      dryRun: true,
     })
     nextStatus = 'accepted'
   } else {

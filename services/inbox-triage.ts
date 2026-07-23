@@ -7,6 +7,7 @@ import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
+import { assertSafeRelativePath } from './vault-paths.ts'
 
 export interface TriageNoteOptions {
   path: string
@@ -143,9 +144,7 @@ function normalizeTags(note: NoteEntry, classification: Classification, detected
 }
 
 function duplicateCandidates(vault: Vault, path: string): TriageDuplicateCandidate[] {
-  return vault.findDuplicates(40)
-    .filter(match => match.noteA === path || match.noteB === path)
-    .slice(0, 5)
+  return vault.findDuplicates(40, { focusPath: path, maxResults: 5 })
     .map(match => {
       const otherPath = match.noteA === path ? match.noteB : match.noteA
       const otherTitle = match.noteA === path ? match.titleB : match.titleA
@@ -217,7 +216,7 @@ export function triageNote(vault: Vault, options: TriageNoteOptions): TriageNote
   const isSecurity = SECURITY_KEYWORDS.some(keyword => textLower.includes(keyword))
   const classification = classifyNote(note.title, note.content, [...baseTags])
   const route = options.targetFolder
-    ? { folder: options.targetFolder, reason: 'target_folder override' }
+    ? { folder: assertSafeRelativePath(options.targetFolder), reason: 'target_folder override' }
     : routeNote(note, classification, detectedClient, isSecurity, minConfidence)
   const tags = normalizeTags(note, classification, detectedClient, isSecurity)
   const duplicates = duplicateCandidates(vault, note.relativePath)
@@ -298,9 +297,10 @@ export function triageNote(vault: Vault, options: TriageNoteOptions): TriageNote
 }
 
 export function triageInbox(vault: Vault, options: TriageInboxOptions = {}): TriageInboxResult {
-  const folder = options.folder ?? 'Inbox'
+  const folder = options.folder === undefined ? 'Inbox' : assertSafeRelativePath(options.folder)
   const dryRun = options.dryRun ?? true
   const maxNotes = options.maxNotes ?? 25
+  if (!dryRun) assertCanWriteTool('triage_inbox')
   const candidates = [...vault.notes.values()]
     .filter(note => note.relativePath.startsWith(`${folder.replace(/\/$/, '')}/`))
     .sort((a, b) => a.relativePath.localeCompare(b.relativePath))

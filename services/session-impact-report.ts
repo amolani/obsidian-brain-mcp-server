@@ -3,9 +3,10 @@ import { basename, join } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { classifyIntent, type ClassifiedIntent } from './intent-classifier.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
 import { isActiveNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface ImpactStep {
   step: string
@@ -52,6 +53,7 @@ export interface SessionImpactReportResult {
 }
 
 interface ManifestEntry {
+  archivedAt?: string
   artifacts?: string[]
   reportPath?: string | null
   impactReportPath?: string | null
@@ -76,7 +78,10 @@ function readManifest(vault: Vault): Record<string, ManifestEntry> {
 }
 
 function artifactPaths(snapshot: AutoBuildImpactSnapshot | null, manifest: ManifestEntry | undefined): string[] {
-  const artifacts = new Set<string>(manifest?.artifacts ?? [])
+  // During an incremental correction the previous run is committed as
+  // archived before the new impact report is rendered. Those historical paths
+  // belong to lineage, not to the active correction report.
+  const artifacts = new Set<string>(manifest?.archivedAt ? [] : manifest?.artifacts ?? [])
   if (snapshot?.reportPath) artifacts.add(snapshot.reportPath)
   for (const step of snapshot?.steps ?? []) {
     if (!step.applied || !step.result || typeof step.result !== 'object') continue
@@ -156,7 +161,15 @@ function renderImpactReport(
     'Knowledge Inbox und Capture Review für nächste Review-Runde aktualisieren.',
   ].filter(Boolean)
 
-  const content = `---\nstatus: aktiv\ntags:\n  - session-impact\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: session-impact-report\nsource: ${sourcePath}\nsession_intent: ${intent.intent}\nintent_confidence: ${intent.confidence}\n---\n\n# Session Impact\n\nQuelle: [[${sourcePath}|${source?.title ?? basename(sourcePath, '.md')}]]\nClient: ${snapshot?.client ?? source?.frontmatter.kunde ?? '(keiner)'}\nIntent: ${intent.intent} (${intent.confidence})\nAuto-Build Mode: ${snapshot?.mode ?? '(aus Manifest)'}\nAuto-Build Report: ${snapshot?.reportPath ? `[[${snapshot.reportPath}|Report]]` : manifest?.reportPath ? `[[${manifest.reportPath}|Report]]` : '(keiner)'}\n\n## Warum dieser Intent?\n\n${renderList(intent.reasons)}\n\n## Was wurde geschrieben?\n\n${renderLinkedList(artifacts)}\n\n## Auto-Build Schritte\n\n${steps.length > 0 ? steps.map(step => `- ${step.applied ? '[x]' : step.skipped ? '[!]' : '[ ]'} \`${step.step}\`: ${step.summary}`).join('\n') : '- Keine Schritte gefunden'}\n\n## Übersprungen / Review nötig\n\n${renderList(reviewItems)}\n\n## Promotion Plan\n\n${plan.length > 0 ? plan.map(item => `- **${item.quality}** \`${item.action}\` ${item.title} - ${item.reason}`).join('\n') : '- Kein Plan gefunden'}\n\n## Nächste Aktionen\n\n${renderList(nextActions)}\n`
+  const content = `---\n${buildFrontmatter({
+    status: 'aktiv',
+    tags: ['session-impact', 'maintenance'],
+    aktualisiert: new Date().toISOString(),
+    quelle: 'session-impact-report',
+    source: sourcePath,
+    session_intent: intent.intent,
+    intent_confidence: intent.confidence,
+  })}---\n\n# Session Impact\n\nQuelle: [[${sourcePath}|${source?.title ?? basename(sourcePath, '.md')}]]\nClient: ${snapshot?.client ?? source?.frontmatter.kunde ?? '(keiner)'}\nIntent: ${intent.intent} (${intent.confidence})\nAuto-Build Mode: ${snapshot?.mode ?? '(aus Manifest)'}\nAuto-Build Report: ${snapshot?.reportPath ? `[[${snapshot.reportPath}|Report]]` : manifest?.reportPath ? `[[${manifest.reportPath}|Report]]` : '(keiner)'}\n\n## Warum dieser Intent?\n\n${renderList(intent.reasons)}\n\n## Was wurde geschrieben?\n\n${renderLinkedList(artifacts)}\n\n## Auto-Build Schritte\n\n${steps.length > 0 ? steps.map(step => `- ${step.applied ? '[x]' : step.skipped ? '[!]' : '[ ]'} \`${step.step}\`: ${step.summary}`).join('\n') : '- Keine Schritte gefunden'}\n\n## Übersprungen / Review nötig\n\n${renderList(reviewItems)}\n\n## Promotion Plan\n\n${plan.length > 0 ? plan.map(item => `- **${item.quality}** \`${item.action}\` ${item.title} - ${item.reason}`).join('\n') : '- Kein Plan gefunden'}\n\n## Nächste Aktionen\n\n${renderList(nextActions)}\n`
 
   return {
     dryRun: false,
@@ -172,12 +185,13 @@ function renderImpactReport(
 
 export function buildSessionImpactReport(vault: Vault, options: BuildSessionImpactReportOptions): SessionImpactReportResult {
   const dryRun = options.dryRun ?? true
-  const manifest = readManifest(vault)[options.sourcePath]
-  const base = sanitizePathSegment(`${today()}-${basename(options.sourcePath, '.md')}`)
+  const sourcePath = assertSafeRelativePath(options.sourcePath)
+  const manifest = readManifest(vault)[sourcePath]
+  const base = sanitizePathSegment(`${today()}-${basename(sourcePath, '.md')}`)
   const path = dryRun
     ? `Maintenance/Session Impact/${base}.md`
     : uniqueRelativePath(vault.vaultPath, 'Maintenance/Session Impact', `${base}.md`)
-  const result = { ...renderImpactReport(vault, options.sourcePath, options.autoBuild ?? null, manifest, path), dryRun }
+  const result = { ...renderImpactReport(vault, sourcePath, options.autoBuild ?? null, manifest, path), dryRun }
 
   if (!dryRun) {
     assertCanWriteTool('build_session_impact_report', [path])
@@ -190,8 +204,8 @@ export function buildSessionImpactReport(vault: Vault, options: BuildSessionImpa
       tool: 'build_session_impact_report',
       mode: 'apply',
       targets: [path],
-      summary: `Session Impact Report geschrieben: ${options.sourcePath}`,
-      meta: { sourcePath: options.sourcePath, intent: result.intent.intent, reviewCount: result.reviewCount },
+      summary: `Session Impact Report geschrieben: ${sourcePath}`,
+      meta: { sourcePath, intent: result.intent.intent, reviewCount: result.reviewCount },
     })
   }
 

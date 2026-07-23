@@ -90,17 +90,21 @@ Usage:
   obsidian-brain install-hooks --vault <path> [--apply] [--settings <path>] [--json]
   obsidian-brain repair-hooks --vault <path> [--apply] [--settings <path>] [--json]
   obsidian-brain init --vault <path> [--apply-hooks]
-  obsidian-brain background --vault <path> [--apply] [--json] [--max-runtime-ms <ms>] [--jobs a,b]
-  obsidian-brain benchmark --out <path> [--notes <n>] [--force]
+  obsidian-brain background --vault <path> [--apply] [--json] [--quiet] [--max-runtime-ms <ms>] [--max-job-runtime-ms <ms>] [--jobs a,b] [--run-auto-build] [--max-auto-build-sources <n>]
+  obsidian-brain benchmark --out <path> [--notes <n>] [--runs <n>] [--force] [--baseline <path>] [--enforce-baseline] [--json]
   obsidian-brain brain-quality [--fixtures <path>] [--json] [--keep-temp]
   obsidian-brain demo --out <path> [--force]
   obsidian-brain release-check
 `
 }
 
-async function withVault<T>(vaultPath: string, fn: (vault: Vault) => T | Promise<T>): Promise<T> {
+async function withVault<T>(
+  vaultPath: string,
+  fn: (vault: Vault) => T | Promise<T>,
+  options: { quiet?: boolean } = {},
+): Promise<T> {
   const vault = new Vault(vaultPath)
-  await vault.init()
+  await vault.init(options)
   try {
     return await fn(vault)
   } finally {
@@ -219,18 +223,22 @@ function runDemo(args: ParsedArgs): number {
 
 async function runBackground(args: ParsedArgs): Promise<number> {
   const vaultPath = requirePath(args.options, 'vault')
+  const quiet = bool(args.options, 'quiet')
   const result = await withVault(vaultPath, vault => vault.runBackgroundBrain({
     dryRun: !bool(args.options, 'apply'),
     jobs: optionList(args.options, 'jobs'),
     maxRuntimeMs: optionNumber(args.options, 'max-runtime-ms'),
+    maxJobRuntimeMs: optionNumber(args.options, 'max-job-runtime-ms'),
     lockPath: optionString(args.options, 'lock-path'),
     settingsPath: optionPath(args.options, 'settings'),
     client: optionString(args.options, 'client'),
     sourcePath: optionString(args.options, 'source-path'),
     runAutoBuild: bool(args.options, 'run-auto-build'),
-  }))
+    maxAutoBuildSources: optionNumber(args.options, 'max-auto-build-sources'),
+    quiet,
+  }), { quiet })
   if (bool(args.options, 'json')) printJson(result)
-  else {
+  else if (!quiet) {
     process.stdout.write([
       result.dryRun ? '# Background Run Dry-Run' : '# Background Run',
       '',
@@ -247,10 +255,13 @@ async function runBackground(args: ParsedArgs): Promise<number> {
 
 async function runBenchmark(args: ParsedArgs): Promise<number> {
   const outPath = requirePath(args.options, 'out')
+  const enforceBaseline = bool(args.options, 'enforce-baseline')
   const result = await runLargeVaultBenchmark({
     outPath,
     notes: optionNumber(args.options, 'notes'),
     force: bool(args.options, 'force'),
+    baselinePath: optionPath(args.options, 'baseline'),
+    runs: optionNumber(args.options, 'runs') ?? (enforceBaseline ? 3 : 1),
   })
   if (bool(args.options, 'json')) printJson(result)
   else {
@@ -260,11 +271,19 @@ async function runBenchmark(args: ParsedArgs): Promise<number> {
       `Path: ${result.outPath}`,
       `Notes: ${result.notes}`,
       `Files: ${result.files}`,
+      `Measurement runs: ${result.measurementRuns} (median)`,
       `Index: ${result.timings.indexMs} ms`,
+      `Duplicate scan: ${result.timings.duplicateScanMs} ms (${result.workload.duplicateScan.scoredPairs} pairs, ${result.workload.duplicateScan.mode})`,
+      `Link suggestions: ${result.timings.linkSuggestionsMs} ms`,
+      `Dashboard dry-run: ${result.timings.dashboardDryRunMs} ms`,
       `Background dry-run: ${result.timings.backgroundDryRunMs} ms`,
+      `Stability: ${result.stability.status}`,
+      `Runtime baseline (${result.regression.profile}): ${result.regression.status}`,
       `Report: ${result.reportPath}`,
     ].join('\n') + '\n')
   }
+  if (result.stability.status === 'fail') return 1
+  if (enforceBaseline && result.regression.status !== 'pass') return 1
   return 0
 }
 
@@ -311,6 +330,21 @@ async function runReleaseCheck(): Promise<number> {
     process.stdout.write(`\n## Demo Health\nStatus: ${health.status}; fail=${health.summary.fail}\n`)
   } finally {
     rmSync(demoPath, { recursive: true, force: true })
+  }
+
+  const benchmarkPath = mkdtempSync(join(tmpdir(), 'obsidian-brain-release-benchmark-'))
+  try {
+    const benchmark = await runLargeVaultBenchmark({
+      outPath: join(benchmarkPath, 'vault'),
+      notes: 1100,
+      force: true,
+    })
+    if (benchmark.stability.status !== 'pass' || benchmark.workload.duplicateScan.mode !== 'blocked') {
+      throw new Error(`Large-vault stability gate failed: ${benchmark.stability.violations.join('; ') || benchmark.workload.duplicateScan.mode}`)
+    }
+    process.stdout.write(`\n## Large Vault Stability\nStatus: ${benchmark.stability.status}; duplicate pairs=${benchmark.workload.duplicateScan.scoredPairs}/${benchmark.stability.maxDuplicatePairs}\n`)
+  } finally {
+    rmSync(benchmarkPath, { recursive: true, force: true })
   }
 
   process.stdout.write('\nRelease check passed.\n')

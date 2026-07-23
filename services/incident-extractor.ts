@@ -3,7 +3,7 @@ import { basename } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface ExtractTroubleshootingPatternResult {
   source: string
@@ -151,7 +151,7 @@ export function promoteCaptureToRunbook(vault: Vault, options: PromoteCaptureToR
   if (!note) throw new Error(`Note nicht gefunden: ${options.path}`)
   const steps = extractSteps(note.content)
   const fixes = extractFixes(note.content)
-  const folder = options.outputFolder ?? 'Runbooks'
+  const folder = options.outputFolder === undefined ? 'Runbooks' : assertSafeRelativePath(options.outputFolder)
   const relativePath = dryRun
     ? `${folder}/Runbook ${sanitizePathSegment(note.title)}.md`
     : uniqueRelativePath(vault.vaultPath, folder, `Runbook ${sanitizePathSegment(note.title)}.md`)
@@ -202,7 +202,7 @@ export function generatePostmortem(vault: Vault, options: GeneratePostmortemOpti
   const note = resolveNote(vault, options.path)
   if (!note) throw new Error(`Note nicht gefunden: ${options.path}`)
   const pattern = extractTroubleshootingPattern(vault, note.relativePath)
-  const folder = options.outputFolder ?? 'Postmortems'
+  const folder = options.outputFolder === undefined ? 'Postmortems' : assertSafeRelativePath(options.outputFolder)
   const relativePath = dryRun
     ? `${folder}/${today()} ${sanitizePathSegment(note.title)} Postmortem.md`
     : uniqueRelativePath(vault.vaultPath, folder, `${today()} ${sanitizePathSegment(note.title)} Postmortem.md`)

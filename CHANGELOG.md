@@ -26,9 +26,15 @@
 - Additional anonymized Claude Code transcript fixtures for research and troubleshooting sessions.
 - Brain Quality Contract defining measurable gates for capture, retrieval, promotion, review, safety, and background behavior.
 - Brain Quality fixtures for late-session capture updates, misspelled customer routing, retrieval ranking, claim extraction quality, promotion faithfulness, Knowledge Inbox review behavior, background operations, generated-surface redaction, and policy safety.
+- `brain_review_inbox_items` for bounded safe batch review plus accepted, rejected, snoozed, and superseded item lifecycle state.
+- `repair_generated_surfaces` for dry-run-first, ownership-guarded reconstruction of fixed Brain surfaces.
+- Explicit multi-signal adoption for recognizable pre-marker generated surfaces while foreign/manual files remain blocked.
+- Checked-in 5k-note benchmark baseline, deterministic work limits, and comparable-machine regression enforcement.
+- Hard per-job background timeouts in isolated workers and richer unattended-run health signals.
 
 ### Changed
 
+- Large-vault link and duplicate analysis now uses deterministic candidate indexes, bounded dashboard result sets, and checked performance/stability gates instead of quadratic review scans.
 - `generate_runbook` now supports dry-run previews through the MCP tool surface.
 - Brain Dashboard links to Capture Review and Evidence Dashboard.
 - Health checks include hook `VAULT_PATH` and new Public Beta surface policies.
@@ -37,3 +43,7 @@
 - Generated Hot Cache and customer snapshots now hide snippets from credential/access-notes while keeping links visible.
 - Claim extraction now filters assistant command tips and transient operational instructions more aggressively.
 - Generated review, inbox, metrics, evidence, and customer surfaces ignore archived notes as active work, and customer snapshots avoid re-ingesting generated customer surfaces.
+- Policy and configuration validation now fail closed for incomplete, malformed, or unsafe values; all exposed tools have explicit policy entries.
+- Fixed generated outputs and demo/benchmark directories now require exact ownership before replacement, and persistent JSON state uses atomic replacement.
+- Vault indexing and guarded writes reject path traversal and symlink escapes; internal directory symlinks are not traversed.
+- Risky executors and generated builders consistently preview by default, including legacy wrapper call shapes.

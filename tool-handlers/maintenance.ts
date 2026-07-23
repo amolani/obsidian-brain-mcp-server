@@ -265,7 +265,7 @@ export const maintenanceHandlers: ToolHandlerRegistry = {
   },
 
   generate_mocs(vault, args) {
-    const dryRun = args.dry_run === true
+    const dryRun = args.dry_run !== false
     const minNotes = typeof args.min_notes === 'number' ? args.min_notes : 2
     const results = vault.generateMocs(dryRun, minNotes)
 

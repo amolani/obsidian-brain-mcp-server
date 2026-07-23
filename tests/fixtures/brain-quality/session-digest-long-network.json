@@ -4,13 +4,56 @@
   "description": "A long implementation/troubleshooting session should summarize late operational findings, redact signed URLs/passwords, and not anchor the digest on the first setup question.",
   "sessionId": "quality-session-digest-long-network",
   "cwd": "/home/amo/Documents/code/amo/offenbach",
-  "expectedDigestPatterns": [
-    "## Session Digest",
-    "vmbr-trunk.*vmbr2|vmbr2.*vmbr-trunk",
-    "interfaces\\.d/\\*.*\\.disabled|\\.disabled.*interfaces\\.d/\\*",
-    "Default-Route.*vmbr2\\.50.*linkdown|vmbr2\\.50.*linkdown.*Default-Route",
-    "Internet-Zugriff.*wiederhergestellt|Default-Route.*vmbr0",
-    "VLAN-Subnetze.*linuxmuster"
+  "expectedAtoms": [
+    {
+      "id": "proxmox-bridge-rename",
+      "importance": "high",
+      "kind": "change",
+      "section": "Änderung / Fix",
+      "pattern": "vmbr-trunk.{0,100}vmbr2|vmbr2.{0,100}vmbr-trunk"
+    },
+    {
+      "id": "disabled-file-loaded-root-cause",
+      "importance": "critical",
+      "kind": "cause",
+      "section": "Root Cause",
+      "pattern": "interfaces\\.d/?(?:.{0,100})(?:jede|all|every).{0,40}(?:Datei|file).{0,60}(?:\\.disabled|disabled)|(?:\\.disabled|disabled).{0,140}interfaces\\.d/?"
+    },
+    {
+      "id": "linkdown-default-route-problem",
+      "importance": "high",
+      "kind": "problem",
+      "section": "Problem",
+      "pattern": "(?:Default-Route|default).{0,100}vmbr2\\.50.{0,100}linkdown|vmbr2\\.50.{0,100}linkdown.{0,100}(?:Default-Route|default)"
+    },
+    {
+      "id": "management-template-move",
+      "importance": "high",
+      "kind": "change",
+      "section": "Änderung / Fix",
+      "pattern": "vmbr2-mgmt(?:\\.disabled|\\.template).{0,120}(verschob|moved|Template)|(?:verschob|moved|Template).{0,120}vmbr2-mgmt(?:\\.disabled|\\.template)"
+    },
+    {
+      "id": "internet-route-restored",
+      "importance": "high",
+      "kind": "result",
+      "section": "Ergebnis",
+      "pattern": "(?:Internet|Default-Route|default).{0,120}vmbr0|vmbr0.{0,120}(?:Internet|Default-Route|default)"
+    },
+    {
+      "id": "linuxmuster-vlan-subnets-change",
+      "importance": "high",
+      "kind": "change",
+      "section": "Änderung / Fix",
+      "pattern": "(?:VLAN|Subnetz|subnets\\.csv).{0,140}(?:linuxmuster|10\\.50\\.20\\.0/24|10\\.50\\.30\\.0/24)|(?:linuxmuster|10\\.50\\.20\\.0/24|10\\.50\\.30\\.0/24).{0,140}(?:VLAN|Subnetz|subnets\\.csv)"
+    },
+    {
+      "id": "subnet-import-approval-gate",
+      "importance": "medium",
+      "kind": "open_question",
+      "section": "Offene Punkte / Constraints",
+      "pattern": "linuxmuster-import-subnets.{0,100}(Freigabe|approval)|(?:Freigabe|approval).{0,100}linuxmuster-import-subnets"
+    }
   ],
   "forbiddenDigestPatterns": [
     "heute installieren wir eine linuxmuster",

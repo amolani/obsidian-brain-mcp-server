@@ -1,7 +1,8 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
 import { assertCanWriteTool } from './policy.ts'
+import { assertSafeRelativePath, assertSingleLineText, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface CreateNoteOptions {
   title: string
@@ -27,12 +28,7 @@ function today(): string {
 const TEMPLATES: Record<string, (title: string, tags: string[]) => string> = {
   kunde: (title, tags) =>
     `---
-projekt: ${title}
-status: aktiv
-tags:
-${tags.map(t => `  - ${t}`).join('\n')}
-datum: ${today()}
----
+${buildFrontmatter({ projekt: title, status: 'aktiv', tags, datum: today() })}---
 
 # ${title}
 
@@ -45,11 +41,7 @@ datum: ${today()}
 
   referenz: (title, tags) =>
     `---
-status: aktiv
-tags:
-${tags.map(t => `  - ${t}`).join('\n')}
-datum: ${today()}
----
+${buildFrontmatter({ status: 'aktiv', tags, datum: today() })}---
 
 # ${title}
 
@@ -62,12 +54,7 @@ datum: ${today()}
 
   troubleshooting: (title, tags) =>
     `---
-status: aktiv
-tags:
-  - troubleshooting
-${tags.map(t => `  - ${t}`).join('\n')}
-datum: ${today()}
----
+${buildFrontmatter({ status: 'aktiv', tags: ['troubleshooting', ...tags], datum: today() })}---
 
 # ${title}
 
@@ -82,12 +69,7 @@ datum: ${today()}
 
   learning: (title, tags) =>
     `---
-status: aktiv
-tags:
-  - learning
-${tags.map(t => `  - ${t}`).join('\n')}
-datum: ${today()}
----
+${buildFrontmatter({ status: 'aktiv', tags: ['learning', ...tags], datum: today() })}---
 
 # ${title}
 
@@ -140,7 +122,8 @@ export function buildNoteFromTemplate(options: CreateNoteOptions): string {
   const templateFn = TEMPLATES[options.template]
   if (!templateFn) throw new Error(`Unknown template: ${options.template}`)
 
-  let noteContent = templateFn(options.title, options.tags ?? [])
+  const title = assertSingleLineText(options.title, 'title')
+  let noteContent = templateFn(title, options.tags ?? [])
   if (options.content) {
     noteContent = noteContent.trimEnd() + '\n\n' + options.content + '\n'
   }
@@ -148,16 +131,21 @@ export function buildNoteFromTemplate(options: CreateNoteOptions): string {
 }
 
 export function fileNameForTemplate(title: string, template: string): string {
-  return template === 'daily' ? `${today()}.md` : `${title}.md`
+  if (template === 'daily') return `${today()}.md`
+  const stem = sanitizePathSegment(assertSingleLineText(title, 'title'))
+  if (!stem) throw new Error('title ergibt keinen gültigen Dateinamen')
+  return `${stem}.md`
 }
 
 export function createNote(ctx: NoteCreatorContext, options: CreateNoteOptions): CreateNoteResult {
-  const noteContent = buildNoteFromTemplate(options)
-  const targetFolder = targetFolderForTemplate(options.title, options.template, options.folder)
-  const fileName = fileNameForTemplate(options.title, options.template)
-  const fullDir = join(ctx.vaultPath, targetFolder)
-  const fullPath = join(fullDir, fileName)
-  const relativePath = relative(ctx.vaultPath, fullPath)
+  const title = assertSingleLineText(options.title, 'title')
+  const noteContent = buildNoteFromTemplate({ ...options, title })
+  const defaultFolder = targetFolderForTemplate(sanitizePathSegment(title), options.template)
+  const targetFolder = options.folder === undefined ? assertSafeRelativePath(defaultFolder) : assertSafeRelativePath(options.folder)
+  const fileName = fileNameForTemplate(title, options.template)
+  const relativePath = assertSafeRelativePath(`${targetFolder}/${fileName}`)
+  const fullDir = vaultJoin(ctx.vaultPath, targetFolder)
+  const fullPath = vaultJoin(ctx.vaultPath, relativePath)
   assertCanWriteTool('create_note', [relativePath])
 
   mkdirSync(fullDir, { recursive: true })

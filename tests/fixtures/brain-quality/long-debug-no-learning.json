@@ -1,0 +1,32 @@
+{
+  "id": "long-debug-no-learning",
+  "type": "session_digest",
+  "description": "Length and command count alone must not create durable knowledge when an exploratory debug session ends without a reproducible finding, decision, change, or verified result.",
+  "sessionId": "quality-long-debug-no-learning",
+  "cwd": "/home/amo/Documents/code/amo/sandbox-debug",
+  "expectCapture": false,
+  "expectedAtoms": [],
+  "steps": [
+    {
+      "name": "final-stop",
+      "entries": [
+        { "type": "user", "message": { "content": "Ein lokaler Test war einmal langsam. Bitte sieh kurz nach, ob etwas auffällt." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Ich beginne mit einer unverändernden Bestandsaufnahme." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "pwd" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "/tmp/sandbox-debug" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "ls -la" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "ordinary files only" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Die Dateiliste zeigt keinen auffälligen Zustand." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "git status --short" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "grep -R latency logs || true" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "no matches" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Auch die lokalen Texte liefern keinen verwertbaren Hinweis." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "find . -maxdepth 2 -type f" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "./README.md\n./notes.txt" }] } },
+        { "type": "user", "message": { "content": "Der Effekt ist nicht mehr reproduzierbar. Wir ändern nichts und treffen keine Entscheidung." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Kein reproduzierbarer Befund; keine Änderung und keine belastbare Lehre." }] } }
+      ]
+    }
+  ]
+}

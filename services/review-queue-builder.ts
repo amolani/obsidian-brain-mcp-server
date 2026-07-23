@@ -6,8 +6,11 @@ import { findBrokenLinks, type BrokenLink } from './broken-link-analyzer.ts'
 import { lintFrontmatter, type LintIssue } from './frontmatter-linter.ts'
 import { generateMocs, type MocResult } from './moc-generator.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { listLowQualityNotes, summarizeQuality, type NoteQualityScore, type QualitySummary } from './note-quality.ts'
 import { suggestLifecycleUpdates, type LifecycleSuggestion } from './lifecycle-manager.ts'
+import { assertCanWriteTool } from './policy.ts'
+import { isReviewQueueItemOpen, readReviewQueueState, type ReviewQueueEntry } from './review-queue-actions.ts'
 
 export interface MaintenanceReport {
   datum: string
@@ -77,9 +80,15 @@ export function runMaintenance(vault: Vault): MaintenanceReport {
   }
 
   // Write report as Obsidian note
-  const reportContent = formatReportMd(report, { duplicates, brokenLinks, lintIssues, mocs, stats, lowQuality, lifecycle })
+  const reportContent = formatReportMd(
+    report,
+    { duplicates, brokenLinks, lintIssues, mocs, stats, lowQuality, lifecycle },
+    readReviewQueueState(vault),
+  )
   const fullDir = join(vault.vaultPath, 'Maintenance')
   const fullPath = join(fullDir, `${datum}-review.md`)
+  assertCanWriteTool('run_vault_maintenance', [report.reportPath])
+  assertGeneratedSurfaceOwnership(vault.vaultPath, report.reportPath, 'vault-gardener')
   mkdirSync(fullDir, { recursive: true })
   writeFileSync(fullPath, reportContent, 'utf-8')
 
@@ -89,7 +98,7 @@ export function runMaintenance(vault: Vault): MaintenanceReport {
   vault.buildLinkIndex()
 
   appendActionLog(vault.vaultPath, {
-    tool: 'run_maintenance',
+    tool: 'run_vault_maintenance',
     mode: 'apply',
     targets: [report.reportPath],
     summary: `Maintenance-Report erstellt (${report.duplicates.total} Duplikate, ${report.brokenLinks.total} kaputte Links, ${report.lintIssues.total} Lint-Issues)`,
@@ -114,9 +123,11 @@ export function formatReportMd(report: MaintenanceReport, details: {
   stats: VaultStats
   lowQuality: NoteQualityScore[]
   lifecycle: LifecycleSuggestion[]
-}): string {
+}, reviewState: Record<string, ReviewQueueEntry> = {}): string {
   const datum = report.datum
   const sections: string[] = []
+  const open = (id: string) => isReviewQueueItemOpen(reviewState, id)
+  const hiddenByReviewState = Object.keys(reviewState).filter(id => !open(id)).length
 
   sections.push(`---
 status: aktiv
@@ -147,8 +158,14 @@ quelle: vault-gardener
 | Stale Notes (>180 Tage) | ${report.staleNotes} | — |
 | Verwaiste Notes | ${report.orphanNotes} | — |`)
 
+  if (hiddenByReviewState > 0) {
+    sections.push(`\n> [!note] Review-Status\n> ${hiddenByReviewState} akzeptierte, abgelehnte oder aktuell gesnoozte Item(s) sind in diesem Report ausgeblendet.`)
+  }
+
   // High-priority: High-confidence duplicates
-  const highDups = details.duplicates.filter(d => d.confidence === 'high')
+  const highDups = details.duplicates.filter(d =>
+    d.confidence === 'high' && open(reviewItemId('duplicate', d.noteA, d.noteB)),
+  )
   if (highDups.length > 0) {
     sections.push(`\n## 🔴 High-Confidence Duplikate\n\n${highDups.slice(0, 10).map(d =>
       `- \`${reviewItemId('duplicate', d.noteA, d.noteB)}\` **${d.titleA}** ↔ **${d.titleB}** (Score ${d.score})\n  \`${d.noteA}\` vs \`${d.noteB}\`\n  → ${d.suggestion}`,
@@ -156,7 +173,11 @@ quelle: vault-gardener
   }
 
   // High-priority: Broken links with auto-fix
-  const fixableLinks = details.brokenLinks.filter(b => b.candidates.length === 1 && b.candidates[0].confidence === 'high')
+  const fixableLinks = details.brokenLinks.filter(b =>
+    b.candidates.length === 1
+      && b.candidates[0].confidence === 'high'
+      && open(reviewItemId('broken_link', b.source, b.target)),
+  )
   if (fixableLinks.length > 0) {
     sections.push(`\n## 🟡 Auto-fixbare kaputte Links (${fixableLinks.length})\n\n${fixableLinks.slice(0, 10).map(b =>
       `- \`${reviewItemId('broken_link', b.source, b.target)}\` \`${b.source}\`: [[${b.target}]] → [[${b.candidates[0].path.replace(/\.md$/, '')}]]`,
@@ -164,19 +185,23 @@ quelle: vault-gardener
   }
 
   // Stale notes
-  if (details.stats.staleNotes.length > 0) {
-    sections.push(`\n## 🟢 Stale Notes (${details.stats.staleNotes.length})\n\nNotizen mit \`status: aktiv\`, aber >180 Tage nicht bearbeitet.\n\n${details.stats.staleNotes.slice(0, 10).map(s =>
+  const staleNotes = details.stats.staleNotes.filter(s => open(reviewItemId('stale_note', s.path)))
+  if (staleNotes.length > 0) {
+    sections.push(`\n## 🟢 Stale Notes (${staleNotes.length})\n\nNotizen mit \`status: aktiv\`, aber >180 Tage nicht bearbeitet.\n\n${staleNotes.slice(0, 10).map(s =>
       `- \`${reviewItemId('stale_note', s.path)}\` \`${s.path}\` — ${s.daysAgo} Tage`,
     ).join('\n')}`)
   }
 
-  if (details.lowQuality.length > 0) {
-    sections.push(`\n## 🟡 Niedrige Notizqualität (${details.lowQuality.length})\n\n${details.lowQuality.slice(0, 10).map(q =>
+  const lowQuality = details.lowQuality.filter(q => open(reviewItemId('quality', q.path)))
+  if (lowQuality.length > 0) {
+    sections.push(`\n## 🟡 Niedrige Notizqualität (${lowQuality.length})\n\n${lowQuality.slice(0, 10).map(q =>
       `- \`${reviewItemId('quality', q.path)}\` \`${q.path}\` — Score ${q.score} (${q.grade})\n  ${q.issues.slice(0, 2).map(i => `${i.dimension}: ${i.message}`).join('; ')}`,
     ).join('\n')}`)
   }
 
-  const lifecycleHigh = details.lifecycle.filter(s => s.confidence === 'high')
+  const lifecycleHigh = details.lifecycle.filter(s =>
+    s.confidence === 'high' && open(reviewItemId('lifecycle', s.path, s.recommendedStatus)),
+  )
   if (lifecycleHigh.length > 0) {
     sections.push(`\n## 🟡 Lifecycle-Vorschläge (${lifecycleHigh.length} high)\n\n${lifecycleHigh.slice(0, 10).map(s =>
       `- \`${reviewItemId('lifecycle', s.path, s.recommendedStatus)}\` \`${s.path}\`: ${s.currentStatus ?? '(kein status)'} → ${s.recommendedStatus}\n  ${s.reasons.join('; ')}`,
@@ -184,7 +209,7 @@ quelle: vault-gardener
   }
 
   // Missing MOCs
-  const missingMocs = details.mocs.filter(m => m.action === 'created')
+  const missingMocs = details.mocs.filter(m => m.action === 'created' && open(reviewItemId('moc', m.path)))
   if (missingMocs.length > 0) {
     sections.push(`\n## 🟢 Fehlende MOCs (${missingMocs.length})\n\n${missingMocs.slice(0, 15).map(m =>
       `- \`${reviewItemId('moc', m.path)}\` \`${m.path}\` (${m.noteCount} Notizen)`,
@@ -193,7 +218,9 @@ quelle: vault-gardener
 
   // Lint issues (info)
   if (details.lintIssues.length > 0) {
-    const warningsOnly = details.lintIssues.filter(i => i.severity === 'warning').slice(0, 10)
+    const warningsOnly = details.lintIssues
+      .filter(i => i.severity === 'warning' && open(reviewItemId('frontmatter', i.path, i.field)))
+      .slice(0, 10)
     if (warningsOnly.length > 0) {
       sections.push(`\n## 🟢 Frontmatter-Warnings (${warningsOnly.length})\n\n${warningsOnly.map(i =>
         `- \`${reviewItemId('frontmatter', i.path, i.field)}\` \`${i.path}\` [${i.field}]: ${i.issue}`,

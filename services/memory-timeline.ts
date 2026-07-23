@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { safeGeneratedSnippet } from './generated-surface-redaction.ts'
-import { isActiveNote, isGeneratedCustomerSurface } from './note-scope.ts'
+import { isActiveNote, isAutoCaptureNote, isGeneratedCustomerSurface } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
+import { assertSafePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface BuildMemoryTimelineOptions {
   client: string
@@ -36,7 +38,7 @@ function dateOf(entry: NoteEntry): string {
 function kind(entry: NoteEntry): string {
   if (entry.tags.includes('decision')) return 'Entscheidung'
   if (entry.tags.includes('runbook')) return 'Runbook'
-  if (entry.tags.includes('auto-capture')) return 'Capture'
+  if (isAutoCaptureNote(entry)) return 'Capture'
   if (entry.tags.includes('claim')) return 'Claim'
   if (/incident|postmortem|troubleshooting/i.test(entry.relativePath + entry.title)) return 'Incident'
   if (entry.todos.some(todo => !todo.done)) return 'Offene Punkte'
@@ -65,8 +67,7 @@ function clientNotes(vault: Vault, client: string): Array<{ path: string; entry:
 
 export function buildMemoryTimeline(vault: Vault, options: BuildMemoryTimelineOptions): MemoryTimelineResult {
   const dryRun = options.dryRun ?? true
-  const client = sanitizePathSegment(options.client.trim())
-  if (!client) throw new Error('client ist erforderlich')
+  const client = assertSafePathSegment(options.client, 'client')
   const events: MemoryTimelineEvent[] = clientNotes(vault, client)
     .map(({ path, entry }) => ({
       date: dateOf(entry),
@@ -80,17 +81,12 @@ export function buildMemoryTimeline(vault: Vault, options: BuildMemoryTimelineOp
   const eventLines = events.length > 0
     ? events.map(event => `- **${event.date}** · ${event.type} · [[${event.path}|${event.title}]]\n  ${event.summary}`).join('\n')
     : '- Keine Ereignisse gefunden'
-  const content = `---\nstatus: aktiv\ntags:\n  - timeline\n  - kunde\nkunde: ${client}\naktualisiert: ${new Date().toISOString().split('T')[0]}\nquelle: memory-timeline\n---\n\n# ${client} Memory Timeline\n\n${eventLines}\n`
+  const content = `---\n${buildFrontmatter({ status: 'aktiv', tags: ['timeline', 'kunde'], kunde: client, aktualisiert: new Date().toISOString().split('T')[0], quelle: 'memory-timeline' })}---\n\n# ${client} Memory Timeline\n\n${eventLines}\n`
 
   if (!dryRun) {
     assertCanWriteTool('build_memory_timeline', [path])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, path, 'memory-timeline')
     const fullPath = vaultJoin(vault.vaultPath, path)
-    if (existsSync(fullPath)) {
-      const existing = vault.notes.get(path)
-      if (existing && existing.frontmatter.quelle !== 'memory-timeline') {
-        throw new Error(`${path} existiert und ist nicht auto-generiert`)
-      }
-    }
     mkdirSync(vaultJoin(vault.vaultPath, `Kunden/${client}`), { recursive: true })
     writeFileSync(fullPath, content, 'utf-8')
     vault.indexNote(fullPath, statSync(fullPath).mtimeMs)

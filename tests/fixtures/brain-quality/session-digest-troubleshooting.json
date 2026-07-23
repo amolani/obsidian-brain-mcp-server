@@ -4,13 +4,35 @@
   "description": "A troubleshooting stop capture should contain an evidence-backed digest without debug narration, password commands, or client auto-apply.",
   "sessionId": "quality-session-digest-troubleshooting",
   "cwd": "/home/amo/Documents/code/amo/Abt-Ulrich-Schule",
-  "expectedDigestPatterns": [
-    "## Session Digest",
-    "Ajenti-Konfiguration war.*bind\\.mode.*unix.*bind\\.socket",
-    "bind\\.mode.*unix.*tcp",
-    "linuxmuster-webui.*active/running",
-    "0\\.0\\.0\\.0:443",
-    "abt-ulrich-schule"
+  "expectedAtoms": [
+    {
+      "id": "ajenti-socket-root-cause",
+      "importance": "critical",
+      "kind": "cause",
+      "section": "Root Cause",
+      "pattern": "bind\\.mode.{0,100}unix.{0,100}bind\\.socket.{0,60}(fehl|missing)|bind\\.socket.{0,60}(fehl|missing).{0,100}bind\\.mode.{0,100}unix"
+    },
+    {
+      "id": "ajenti-bind-mode-change",
+      "importance": "high",
+      "kind": "change",
+      "section": "Änderung / Fix",
+      "pattern": "bind\\.mode.{0,100}(unix.{0,60}tcp|tcp.{0,60}unix)|unix.{0,60}bind\\.mode.{0,60}tcp"
+    },
+    {
+      "id": "webui-running-verification",
+      "importance": "high",
+      "kind": "verification",
+      "section": "Verifikation",
+      "pattern": "linuxmuster-webui.{0,100}(active|running)|(active|running).{0,100}linuxmuster-webui"
+    },
+    {
+      "id": "https-listen-verification",
+      "importance": "medium",
+      "kind": "verification",
+      "section": "Verifikation",
+      "pattern": "0\\.0\\.0\\.0:443"
+    }
   ],
   "forbiddenDigestPatterns": [
     "Drei Hinweise sind wichtig",

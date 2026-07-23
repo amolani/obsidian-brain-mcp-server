@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, test, afterEach } from 'node:test'
@@ -41,6 +41,7 @@ describe('long session checkpoint monitor', () => {
     const debounced = evaluateLongSessionCheckpoint(marked, policy, new Date('2026-05-12T10:05:00Z'))
     assert.equal(debounced.shouldCheckpoint, false)
     assert.ok(debounced.reasons.some(reason => reason.includes('debounce')))
+    assert.ok(!readdirSync(stateDir).some(name => name.includes('.tmp-')))
   })
 
   test('caps checkpoints per session', () => {

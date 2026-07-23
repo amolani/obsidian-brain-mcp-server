@@ -2,7 +2,7 @@
 
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync, writeFileSync, utimesSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, writeFileSync, utimesSync, statSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
 import { createTempVault, cleanupVault, writeNote } from './helpers.ts'
@@ -89,6 +89,29 @@ describe('Vault: link resolution', () => {
     assert.ok(ctx)
     assert.equal(ctx.backlinks.length, 1)
     assert.equal(ctx.backlinks[0].path, 'Dashboard.md')
+  })
+})
+
+describe('Vault: filesystem boundary', () => {
+  test('does not traverse internal symlinks and rejects direct indexing outside the vault', { skip: process.platform === 'win32' }, async () => {
+    const vaultPath = createTempVault()
+    const outsidePath = createTempVault()
+    const externalNote = writeNote(outsidePath, { path: 'External.md', title: 'External' })
+    symlinkSync(outsidePath, join(vaultPath, 'linked-outside'), 'dir')
+
+    const vault = new Vault(vaultPath)
+    try {
+      await vault.init()
+      assert.equal(vault.getOverview().totalNotes, 0)
+      assert.throws(
+        () => vault.indexNote(externalNote, statSync(externalNote).mtimeMs),
+        /Unsicherer Vault-Pfad|außerhalb des Vaults/,
+      )
+    } finally {
+      vault.shutdown()
+      cleanupVault(vaultPath)
+      cleanupVault(outsidePath)
+    }
   })
 })
 
@@ -235,6 +258,7 @@ describe('Vault: search', () => {
     const applied = vault.rebuildSemanticIndex({ dryRun: false })
     assert.equal(applied.dryRun, false)
     assert.ok(existsSync(join(vaultPath, '.semantic-index.json')))
+    assert.ok(!readdirSync(vaultPath).some(name => name.includes('.semantic-index.json.tmp-')))
 
     const after = vault.semanticIndexStatus()
     assert.equal(after.exists, true)
@@ -311,18 +335,18 @@ describe('Vault: capture auto-categorization', () => {
   })
 
   test('auto-tags technical terms', () => {
-    const result = vault.capture('Docker compose setup with nginx reverse proxy')
+    const result = vault.capture('Docker compose setup with nginx reverse proxy and TLS')
     assert.ok(result.tags.includes('docker'))
     assert.ok(result.tags.includes('nginx'))
   })
 
-  test('capture_v2 routes technical captures into Technik subcategories', () => {
+  test('capture_v2 routes technical captures but defaults to a dry-run', () => {
     const result = vault.captureV2('Docker compose setup with nginx reverse proxy')
     assert.equal(result.folder, 'Technik/Docker/Compose')
     assert.ok(result.tags.includes('docker'))
     assert.ok(result.tags.includes('docker/compose'))
-    assert.equal(result.dryRun, false)
-    assert.ok(existsSync(join(vaultPath, result.path)))
+    assert.equal(result.dryRun, true)
+    assert.ok(!existsSync(join(vaultPath, result.path)))
   })
 
   test('capture_v2 dry-run previews without writing', () => {
@@ -346,8 +370,8 @@ describe('Vault: capture auto-categorization', () => {
   })
 
   test('capture_v2 keeps repeated titles by creating unique paths', () => {
-    const first = vault.captureV2('Unique Entry\n\nFirst body.')
-    const second = vault.captureV2('Unique Entry\n\nSecond body.')
+    const first = vault.captureV2('Unique Entry\n\nFirst body.', { dryRun: false })
+    const second = vault.captureV2('Unique Entry\n\nSecond body.', { dryRun: false })
     assert.equal(first.path, 'Inbox/Unique Entry.md')
     assert.equal(second.path, 'Inbox/Unique Entry (2).md')
     assert.ok(existsSync(join(vaultPath, first.path)))
@@ -1311,11 +1335,16 @@ describe('Vault: generate_runbook', () => {
   })
 
   test('generates runbook from auto-captures', () => {
-    const result = vault.generateRunbook('TestClient')
-    assert.ok(result.sourceCount >= 1)
-    assert.ok(result.stepCount >= 2)
-    assert.ok(result.fixCount >= 1)
-    assert.ok(existsSync(join(vaultPath, result.path)))
+    const preview = vault.generateRunbook('TestClient')
+    assert.equal(preview.dryRun, true)
+    assert.ok(preview.sourceCount >= 1)
+    assert.ok(preview.stepCount >= 2)
+    assert.ok(preview.fixCount >= 1)
+    assert.ok(!existsSync(join(vaultPath, preview.path)))
+
+    const applied = vault.generateRunbook('TestClient', { dryRun: false })
+    assert.equal(applied.dryRun, false)
+    assert.ok(existsSync(join(vaultPath, applied.path)))
   })
 
   test('throws if no sources found', () => {

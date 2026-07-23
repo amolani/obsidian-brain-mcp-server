@@ -47,7 +47,7 @@ describe('review queue actions', () => {
     })
     vault.snoozeReviewItem({
       itemId: 'lifecycle:Inbox/Needs_Status.md:archiviert',
-      snoozedUntil: '2026-05-20',
+      snoozedUntil: '2099-05-20',
       dryRun: false,
     })
 
@@ -55,12 +55,12 @@ describe('review queue actions', () => {
     assert.equal(state['frontmatter:Inbox/Needs_Status.md:status'].status, 'accepted')
     assert.equal(state['quality:Inbox/Needs_Status.md'].status, 'rejected')
     assert.equal(state['lifecycle:Inbox/Needs_Status.md:archiviert'].status, 'snoozed')
-    assert.equal(state['lifecycle:Inbox/Needs_Status.md:archiviert'].snoozedUntil, '2026-05-20')
+    assert.equal(state['lifecycle:Inbox/Needs_Status.md:archiviert'].snoozedUntil, '2099-05-20')
 
     const log = readFileSync(join(vaultPath, '.action-log.jsonl'), 'utf-8')
-    assert.match(log, /"tool":"accepted_review_item"/)
-    assert.match(log, /"tool":"rejected_review_item"/)
-    assert.match(log, /"tool":"snoozed_review_item"/)
+    assert.match(log, /"tool":"accept_review_item"/)
+    assert.match(log, /"tool":"reject_review_item"/)
+    assert.match(log, /"tool":"snooze_review_item"/)
   })
 
   test('apply_all_safe_fixes delegates to safe maintenance dry-run first', () => {
@@ -77,7 +77,16 @@ describe('review queue actions', () => {
 
   test('maintenance report includes review item ids', () => {
     const report = vault.runMaintenance()
-    const raw = readFileSync(join(vaultPath, report.reportPath), 'utf-8')
-    assert.match(raw, /frontmatter:Inbox\/Needs_Status.md:status/)
+    const first = readFileSync(join(vaultPath, report.reportPath), 'utf-8')
+    assert.match(first, /frontmatter:Inbox\/Needs_Status.md:status/)
+
+    vault.acceptReviewItem({
+      itemId: 'frontmatter:Inbox/Needs_Status.md:status',
+      dryRun: false,
+    })
+    vault.runMaintenance()
+    const second = readFileSync(join(vaultPath, report.reportPath), 'utf-8')
+    assert.doesNotMatch(second, /frontmatter:Inbox\/Needs_Status.md:status/)
+    assert.match(second, /Review-Status/)
   })
 })

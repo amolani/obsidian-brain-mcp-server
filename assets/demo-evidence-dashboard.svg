@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="700" viewBox="0 0 1180 700" role="img" aria-labelledby="title desc">
+  <title id="title">Evidence Dashboard demo surface</title>
+  <desc id="desc">Fictional Obsidian Evidence Dashboard summarizing evidence candidates, missing sources, due rechecks, contradictions, and high-risk items.</desc>
+  <rect width="1180" height="700" fill="#f7f8fb"/>
+  <rect x="42" y="36" width="1096" height="628" rx="12" fill="#ffffff" stroke="#d9dee8"/>
+  <path d="M54 36h1072a12 12 0 0 1 12 12v44H42V48a12 12 0 0 1 12-12z" fill="#252a34"/>
+  <circle cx="76" cy="64" r="7" fill="#ff5f57"/>
+  <circle cx="100" cy="64" r="7" fill="#ffbd2e"/>
+  <circle cx="124" cy="64" r="7" fill="#28c840"/>
+  <text x="162" y="70" fill="#f8fafc" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">Knowledge/evidence.md</text>
+
+  <text x="82" y="138" fill="#101828" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800">Evidence Dashboard</text>
+  <text x="82" y="167" fill="#667085" font-family="Inter, Arial, sans-serif" font-size="16">Confidence, provenance, rechecks, and contradictions in one trust surface</text>
+
+  <rect x="82" y="192" width="176" height="84" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="104" y="221" fill="#3730a3" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">CANDIDATES</text>
+  <text x="104" y="256" fill="#4338ca" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="800">18</text>
+  <rect x="277" y="192" width="176" height="84" rx="8" fill="#fef7e8" stroke="#f1cb7a"/>
+  <text x="299" y="221" fill="#92400e" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">NO SOURCE</text>
+  <text x="299" y="256" fill="#b54708" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="800">2</text>
+  <rect x="472" y="192" width="176" height="84" rx="8" fill="#fff1f3" stroke="#fecdd6"/>
+  <text x="494" y="221" fill="#9f1239" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">DUE RECHECKS</text>
+  <text x="494" y="256" fill="#be123c" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="800">3</text>
+  <rect x="667" y="192" width="176" height="84" rx="8" fill="#fff1f3" stroke="#fecdd6"/>
+  <text x="689" y="221" fill="#9f1239" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">CONTRADICTED</text>
+  <text x="689" y="256" fill="#be123c" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="800">1</text>
+  <rect x="862" y="192" width="192" height="84" rx="8" fill="#ecfdf3" stroke="#abefc6"/>
+  <text x="884" y="221" fill="#067647" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">HEALTHY</text>
+  <text x="884" y="256" fill="#067647" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="800">12</text>
+
+  <text x="82" y="326" fill="#101828" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="800">High risk</text>
+  <rect x="82" y="348" width="972" height="66" rx="7" fill="#fff1f3" stroke="#fecdd6"/>
+  <rect x="103" y="369" width="48" height="24" rx="12" fill="#ffe4e8"/>
+  <text x="114" y="386" fill="#be123c" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="800">HIGH</text>
+  <text x="174" y="376" fill="#344054" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">DHCP relay requirement</text>
+  <text x="174" y="397" fill="#667085" font-family="Inter, Arial, sans-serif" font-size="14">Source recheck overdue — verify the vendor guide before confirmation.</text>
+
+  <text x="82" y="460" fill="#101828" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="800">Review groups</text>
+  <g font-family="Inter, Arial, sans-serif">
+    <rect x="82" y="482" width="306" height="108" rx="8" fill="#f9fafb" stroke="#e5e7eb"/>
+    <text x="106" y="515" fill="#344054" font-size="17" font-weight="800">Missing sources</text>
+    <text x="106" y="544" fill="#667085" font-size="14">• VLAN note — add primary source</text>
+    <text x="106" y="570" fill="#667085" font-size="14">• DNS note — add source URL</text>
+    <rect x="414" y="482" width="306" height="108" rx="8" fill="#f9fafb" stroke="#e5e7eb"/>
+    <text x="438" y="515" fill="#344054" font-size="17" font-weight="800">Due rechecks</text>
+    <text x="438" y="544" fill="#667085" font-size="14">• Firewall support matrix</text>
+    <text x="438" y="570" fill="#667085" font-size="14">• Backup retention guidance</text>
+    <rect x="746" y="482" width="308" height="108" rx="8" fill="#f9fafb" stroke="#e5e7eb"/>
+    <text x="770" y="515" fill="#344054" font-size="17" font-weight="800">Contradictions</text>
+    <text x="770" y="544" fill="#667085" font-size="14">• MTU recommendation differs</text>
+    <text x="770" y="570" fill="#667085" font-size="14">  across two source notes</text>
+  </g>
+
+  <text x="82" y="634" fill="#475467" font-family="Inter, Arial, sans-serif" font-size="15">Weak or stale claims stay visible instead of being silently treated as confirmed.</text>
+</svg>

@@ -92,7 +92,7 @@ describe('ActionLog: vault writers emit entries', () => {
 
   test('captureV2 emits a capture_v2 entry on apply', () => {
     const before = readLogLines(vaultPath).length
-    vault.captureV2('Docker compose setup')
+    vault.captureV2('Docker compose setup', { dryRun: false })
     const lines = readLogLines(vaultPath)
     assert.equal(lines.length, before + 1)
     const entry = lines[lines.length - 1]

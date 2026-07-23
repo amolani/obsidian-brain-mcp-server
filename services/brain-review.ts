@@ -123,8 +123,8 @@ export function brainReview(vault: Vault, options: BrainReviewOptions = {}): Bra
   const includeLow = options.includeLow === true
   const items: BrainReviewItem[] = []
 
-  const duplicates = findDuplicates(vault, 60)
-  for (const duplicate of duplicates.slice(0, 20)) {
+  const duplicates = findDuplicates(vault, 60, { maxResults: 20 })
+  for (const duplicate of duplicates) {
     if (!isActivePath(duplicate.noteA) || !isActivePath(duplicate.noteB)) continue
     if (duplicate.confidence === 'low' && !includeLow) continue
     items.push({
@@ -293,11 +293,11 @@ export function brainApplyReviewItem(vault: Vault, options: BrainApplyReviewItem
   const item = review.items.find(candidate => candidate.id === options.itemId)
   if (!item) throw new Error(`Review-Item nicht gefunden oder nicht mehr aktuell: ${options.itemId}`)
   if (item.action.kind === 'none') throw new Error(`Review-Item hat keine automatische Aktion: ${options.itemId}`)
+  if (!dryRun) assertCanWriteTool('brain_apply_review_item', item.targets)
 
   let result: unknown
   switch (item.action.kind) {
     case 'safe_maintenance':
-      assertCanWriteTool('brain_apply_review_item', item.targets)
       result = vault.runSafeMaintenance({
         dryRun,
         steps: item.action.args?.steps as SafeMaintenanceStep[] | undefined,

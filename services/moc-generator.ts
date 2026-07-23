@@ -2,6 +2,8 @@ import { writeFileSync, mkdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface MocResult {
   path: string
@@ -75,7 +77,7 @@ LIMIT 20
   return sections.join('\n')
 }
 
-export function generateMocs(vault: Vault, dryRun: boolean = false, minNotes: number = 2): MocResult[] {
+export function generateMocs(vault: Vault, dryRun: boolean = true, minNotes: number = 2): MocResult[] {
   const results: MocResult[] = []
 
   // Discover folders that deserve MOCs:
@@ -132,6 +134,8 @@ export function generateMocs(vault: Vault, dryRun: boolean = false, minNotes: nu
     const content = buildMocContent(folder, subdirs)
 
     if (!dryRun) {
+      assertCanWriteTool('generate_mocs', [mocPath])
+      assertGeneratedSurfaceOwnership(vault.vaultPath, mocPath, 'moc-generator')
       const fullPath = join(vault.vaultPath, mocPath)
       mkdirSync(dirname(fullPath), { recursive: true })
       writeFileSync(fullPath, content, 'utf-8')

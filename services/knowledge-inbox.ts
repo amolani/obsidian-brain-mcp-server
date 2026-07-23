@@ -1,15 +1,22 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { classifyIntent, isMutatingCommand, performedCommands } from './intent-classifier.ts'
-import { buildKnowledgeInboxItems, knowledgeInboxItemId, readKnowledgeInboxState } from './knowledge-inbox-actions.ts'
-import { isActiveNote, isActivePath } from './note-scope.ts'
+import {
+  buildAllKnowledgeInboxItems,
+  effectiveKnowledgeInboxItemStatus,
+  knowledgeInboxItemId,
+  readKnowledgeInboxState,
+} from './knowledge-inbox-actions.ts'
+import { isActiveNote, isAutoCaptureNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BuildKnowledgeInboxOptions {
   dryRun?: boolean
+  adoptLegacyOwnership?: boolean
 }
 
 export interface KnowledgeInboxResult {
@@ -28,7 +35,7 @@ export interface KnowledgeInboxResult {
 const KNOWLEDGE_INBOX_PATH = 'Maintenance/Knowledge Inbox.md'
 
 function isCapture(note: NoteEntry): boolean {
-  return isActiveNote(note) && (note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester')
+  return isActiveNote(note) && isAutoCaptureNote(note)
 }
 
 function link(note: NoteEntry): string {
@@ -37,29 +44,6 @@ function link(note: NoteEntry): string {
 
 function lines(values: string[]): string {
   return values.length > 0 ? values.map(value => `- ${value}`).join('\n') : '- Keine'
-}
-
-function readManifest(vault: Vault): Array<{ sourcePath: string; action: string; title: string; reason: string }> {
-  try {
-    const text = readFileSync(vaultJoin(vault.vaultPath, '.brain-auto-build-manifest.json'), 'utf-8')
-    const parsed = JSON.parse(text) as { sources?: Record<string, { archivedAt?: string; plan?: Array<{ action?: string; title?: string; quality?: string; reason?: string }> }> }
-    const rows: Array<{ sourcePath: string; action: string; title: string; reason: string }> = []
-    for (const [sourcePath, entry] of Object.entries(parsed.sources ?? {})) {
-      if (entry.archivedAt || !isActivePath(sourcePath) || !vault.notes.has(sourcePath)) continue
-      for (const item of entry.plan ?? []) {
-        if (item.quality !== 'skip') continue
-        rows.push({
-          sourcePath,
-          action: String(item.action ?? 'unknown'),
-          title: String(item.title ?? item.action ?? 'Auto-Build Skip'),
-          reason: String(item.reason ?? 'quality gate'),
-        })
-      }
-    }
-    return rows
-  } catch {
-    return []
-  }
 }
 
 function uncertainClientLine(note: NoteEntry): string | null {
@@ -91,14 +75,17 @@ export function buildKnowledgeInbox(vault: Vault, options: BuildKnowledgeInboxOp
     .sort((a, b) => b.lastModified - a.lastModified)
   const uncertainClients = captures.map(uncertainClientLine).filter((value): value is string => !!value)
   const runbookCandidates = captures.map(runbookCandidateLine).filter((value): value is string => !!value)
-  const skipped = readManifest(vault).slice(0, 30)
-  const impacts = [...vault.notes.values()]
-    .filter(isActiveNote)
-    .filter(note => note.relativePath.startsWith('Maintenance/Session Impact/') || note.tags.includes('session-impact'))
-    .sort((a, b) => b.lastModified - a.lastModified)
-
-  const inboxItems = buildKnowledgeInboxItems(vault)
+  const allInboxItems = buildAllKnowledgeInboxItems(vault)
+  const state = readKnowledgeInboxState(vault)
+  const inboxItems = allInboxItems.filter(item => effectiveKnowledgeInboxItemStatus(state, item) === 'open')
   const active = new Set(inboxItems.map(item => `${item.kind}:${item.target}`))
+  const activeProvisionalClaims = provisionalClaims.map(note => ({
+    note,
+    actionIds: [
+      knowledgeInboxItemId('confirm_claim', note.relativePath),
+      knowledgeInboxItemId('reject_claim', note.relativePath),
+    ].filter(itemId => inboxItems.some(item => item.id === itemId)),
+  })).filter(entry => entry.actionIds.length > 0)
   const activeUncertainClients = uncertainClients.filter(line => {
     const match = line.match(/\[\[([^|\]]+)/)
     return match ? active.has(`review_client_alias:${match[1]}`) : true
@@ -107,18 +94,28 @@ export function buildKnowledgeInbox(vault: Vault, options: BuildKnowledgeInboxOp
     const match = line.match(/\[\[([^|\]]+)/)
     return match ? active.has(`runbook_preview:${match[1]}`) : true
   })
-  const state = readKnowledgeInboxState(vault)
+  const activeSkipped = inboxItems.filter(item => item.kind === 'review_auto_build_skip').slice(0, 30)
+  const activeImpacts = inboxItems
+    .filter(item => item.kind === 'review_impact_report')
+    .map(item => ({ item, note: vault.notes.get(item.target) }))
+    .filter((entry): entry is { item: typeof entry.item; note: NoteEntry } => !!entry.note)
+    .slice(0, 20)
   const persistedStateCount = Object.keys(state.items).length
-  const content = `---\nstatus: aktiv\ntags:\n  - knowledge-inbox\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: knowledge-inbox\n---\n\n# Knowledge Inbox\n\n## Queue State\n\n- Offene Actions: ${inboxItems.length}\n- Persistierte Item-States: ${persistedStateCount}\n- Bereits bearbeitete Items bleiben ausgeblendet, solange sich die Quelle nicht ändert.\n\n## Provisional Claims\n\n${lines(provisionalClaims.slice(0, 30).map(note => `${link(note)} - Quelle: \`${note.frontmatter.quelle ?? 'unbekannt'}\`; Actions: \`${knowledgeInboxItemId('confirm_claim', note.relativePath)}\`, \`${knowledgeInboxItemId('reject_claim', note.relativePath)}\``))}\n\n## Kundenzuordnung prüfen\n\n${lines(activeUncertainClients.slice(0, 30))}\n\n## Runbook-Kandidaten\n\n${lines(activeRunbookCandidates.slice(0, 30))}\n\n## Auto-Build Skips\n\n${lines(skipped.map(item => `[[${item.sourcePath}|${basename(item.sourcePath, '.md')}]] - \`${item.action}\`: ${item.reason}`))}\n\n## Inbox Actions\n\n${lines(inboxItems.slice(0, 40).map(item => `\`${item.id}\` - ${item.title}: ${item.detail}`))}\n\n## Letzte Impact Reports\n\n${lines(impacts.slice(0, 20).map(link))}\n\n## Nächste Aktionen\n\n- Provisional Claims nur bestätigen, wenn Quelle und Gültigkeit belastbar sind.\n- Unsichere Kundenzuordnungen prüfen und stabile Aliase in clients.json ergänzen.\n- Runbook-Kandidaten zuerst mit generate_runbook dry-run ansehen.\n- Auto-Build Skips als Qualitätsfeedback behandeln, nicht blind umgehen.\n`
+  const statusCounts = allInboxItems.reduce<Record<string, number>>((counts, item) => {
+    const status = effectiveKnowledgeInboxItemStatus(state, item)
+    counts[status] = (counts[status] ?? 0) + 1
+    return counts
+  }, {})
+  const content = `---\nstatus: aktiv\ntags:\n  - knowledge-inbox\n  - maintenance\naktualisiert: ${new Date().toISOString()}\nquelle: knowledge-inbox\n---\n\n# Knowledge Inbox\n\n## Queue State\n\n- Offene Actions: ${inboxItems.length}\n- Akzeptiert: ${statusCounts.accepted ?? 0}\n- Abgelehnt: ${statusCounts.rejected ?? 0}\n- Snoozed: ${statusCounts.snoozed ?? 0}\n- Superseded: ${statusCounts.superseded ?? 0}\n- Persistierte Item-States: ${persistedStateCount}\n- Bereits bearbeitete Items bleiben ausgeblendet, solange sich die Quelle nicht ändert. Abgelaufene Snoozes werden automatisch wieder geöffnet.\n\n## Provisional Claims\n\n${lines(activeProvisionalClaims.slice(0, 30).map(({ note, actionIds }) => `${link(note)} - Quelle: \`${note.frontmatter.quelle ?? 'unbekannt'}\`; Actions: ${actionIds.map(itemId => `\`${itemId}\``).join(', ')}`))}\n\n## Kundenzuordnung prüfen\n\n${lines(activeUncertainClients.slice(0, 30))}\n\n## Runbook-Kandidaten\n\n${lines(activeRunbookCandidates.slice(0, 30))}\n\n## Auto-Build Skips\n\n${lines(activeSkipped.map(item => `[[${item.sourcePath}|${basename(item.sourcePath!, '.md')}]] - \`${item.action}\`: ${item.detail}; Action: \`${item.id}\``))}\n\n## Inbox Actions\n\n${lines(inboxItems.slice(0, 40).map(item => `\`${item.id}\` - **${item.risk} risk** - ${item.title}: ${item.detail}`))}\n\n## Letzte Impact Reports\n\n${lines(activeImpacts.map(({ item, note }) => `${link(note)} - Action: \`${item.id}\``))}\n\n## Nächste Aktionen\n\n- Provisional Claims nur mit brain_apply_inbox_item bestätigen oder ablehnen, damit die fachliche Claim-Änderung ausgeführt wird.\n- Unsichere Kundenzuordnungen prüfen und stabile Aliase in clients.json ergänzen.\n- Runbook-Kandidaten zuerst mit generate_runbook dry-run ansehen.\n- brain_review_inbox_items verwaltet open/accepted/rejected/snoozed/superseded; Batches sind nur für low-risk Items erlaubt.\n- Auto-Build Skips als Qualitätsfeedback behandeln, nicht blind umgehen.\n`
 
   const result = {
     dryRun,
     path: KNOWLEDGE_INBOX_PATH,
-    provisionalClaimCount: provisionalClaims.length,
+    provisionalClaimCount: activeProvisionalClaims.length,
     uncertainClientCount: activeUncertainClients.length,
     runbookCandidateCount: activeRunbookCandidates.length,
-    skippedAutoBuildCount: skipped.length,
-    impactReportCount: impacts.length,
+    skippedAutoBuildCount: activeSkipped.length,
+    impactReportCount: activeImpacts.length,
     openItemCount: inboxItems.length,
     persistedStateCount,
     content,
@@ -126,6 +123,9 @@ export function buildKnowledgeInbox(vault: Vault, options: BuildKnowledgeInboxOp
 
   if (!dryRun) {
     assertCanWriteTool('build_knowledge_inbox', [KNOWLEDGE_INBOX_PATH])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, KNOWLEDGE_INBOX_PATH, 'knowledge-inbox', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     mkdirSync(join(vault.vaultPath, 'Maintenance'), { recursive: true })
     const fullPath = vaultJoin(vault.vaultPath, KNOWLEDGE_INBOX_PATH)
     writeFileSync(fullPath, content, 'utf-8')

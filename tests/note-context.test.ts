@@ -60,4 +60,19 @@ describe('note-context', () => {
     assert.deepEqual(context.relatedByTags, [{ path: 'Related.md', title: 'Related' }])
     assert.equal(context.content, 'Target content')
   })
+
+  test('ignores stale tag-index paths that no longer exist in notes', () => {
+    const notes = new Map<string, NoteEntry>([
+      ['Target.md', note('Target.md', { tags: ['docker', 'tls'] })],
+    ])
+    const tagIndex = new Map<string, Set<string>>([
+      ['docker', new Set(['Target.md', 'Deleted.md'])],
+      ['tls', new Set(['Target.md', 'Deleted.md'])],
+    ])
+
+    const context = buildNoteContext(notes, new Map(), tagIndex, () => null, 'Target.md')
+
+    assert.ok(context)
+    assert.deepEqual(context.relatedByTags, [])
+  })
 })

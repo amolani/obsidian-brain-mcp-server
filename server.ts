@@ -2,6 +2,9 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { createReadStream, createWriteStream, fstatSync } from 'node:fs'
+import { Socket } from 'node:net'
+import type { Readable, Writable } from 'node:stream'
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -22,6 +25,41 @@ if (!VAULT_PATH) {
 
 const vault = new Vault(VAULT_PATH)
 await vault.init()
+
+function isNodeSocket(stream: Readable | Writable): boolean {
+  return stream instanceof Socket
+}
+
+function createMcpInput(): Readable {
+  try {
+    // Some Node/container combinations expose a spawned fd 0 as a socket but
+    // initialize process.stdin as an already-ended dummy Readable. Reading the
+    // descriptor directly preserves normal MCP stdio framing in that case.
+    if (fstatSync(process.stdin.fd).isSocket() && !isNodeSocket(process.stdin)) {
+      return createReadStream('', { fd: process.stdin.fd, autoClose: false })
+    }
+  } catch {
+    // Keep Node's standard stdin behavior when the descriptor cannot be probed.
+  }
+  return process.stdin
+}
+
+const mcpInput = createMcpInput()
+
+function createMcpOutput(): Writable {
+  try {
+    // Apply the same narrow fallback to fd 1. A correctly initialized Node
+    // pipe/socket remains untouched; only the dummy Writable is replaced.
+    if (fstatSync(process.stdout.fd).isSocket() && !isNodeSocket(process.stdout)) {
+      return createWriteStream('', { fd: process.stdout.fd, autoClose: false })
+    }
+  } catch {
+    // Keep Node's standard stdout behavior when the descriptor cannot be probed.
+  }
+  return process.stdout
+}
+
+const mcpOutput = createMcpOutput()
 
 // ── MCP Server ─────────────────────────────────────────────────────────
 
@@ -64,8 +102,8 @@ function shutdown(): void {
   setTimeout(() => process.exit(0), 1000)
 }
 
-process.stdin.on('end', shutdown)
-process.stdin.on('close', shutdown)
+mcpInput.on('end', shutdown)
+mcpInput.on('close', shutdown)
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 process.on('unhandledRejection', (err) => {
@@ -74,4 +112,4 @@ process.on('unhandledRejection', (err) => {
 
 // ── Start ──────────────────────────────────────────────────────────────
 
-await mcp.connect(new StdioServerTransport())
+await mcp.connect(new StdioServerTransport(mcpInput, mcpOutput))

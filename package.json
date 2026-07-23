@@ -7,6 +7,32 @@
     "obsidian-brain": "./cli.ts",
     "obsidian-brain-mcp": "./server.ts"
   },
+  "files": [
+    "cli.ts",
+    "config.ts",
+    "server-tools.ts",
+    "server.ts",
+    "suggestions.ts",
+    "technik-categories.ts",
+    "tool-handlers.ts",
+    "vault.ts",
+    "brain-policy.json",
+    "CHANGELOG.md",
+    "clients.json",
+    "tag-aliases.json",
+    "tech-terms.json",
+    "technik-categories.json",
+    ".env.example",
+    "hooks/**/*.ts",
+    "services/**/*.ts",
+    "tool-handlers/**/*.ts",
+    "tests/fixtures/brain-quality/*.json",
+    "benchmarks/*.json",
+    "demo/**",
+    "docs/**",
+    "assets/**",
+    "plugins/claude-code/**"
+  ],
   "scripts": {
     "start": "node server.ts",
     "test": "node --test --test-reporter=spec tests/*.test.ts",
@@ -33,7 +59,7 @@
     "yaml": "^2.7.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.18.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.2",

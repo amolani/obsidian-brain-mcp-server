@@ -68,7 +68,7 @@ export function classifyIntent(content: string, tags: string[] = []): Classified
     ['implementation', 3, /\b(umgesetzt|eingerichtet|konfiguriert|aktiviert|deploy|deployed|restart|reload|angewendet|applied|installed)\b/i, 'Umsetzungsbegriffe im Inhalt'],
     ['troubleshooting', 4, /\b(fe(h|hl)er|error|failed|fix|workaround|gel(ö|oe)st|debug|troubleshoot|incident|root cause)\b/i, 'Fehler/Fix-Signale erkannt'],
     ['research', 4, /\b(recherche|befund|prüf|pruef|analys|lookup|dig|whois|nslookup|read-only|herausfinden|nachschauen)\b/i, 'Recherche-/Analyse-Signale erkannt'],
-    ['planning', 4, /\b(plan|nächste schritte|naechste schritte|todo|soll|muss noch|offen|roadmap|konzept)\b/i, 'Planungs- oder offene Punkte erkannt'],
+    ['planning', 4, /\b(plan|planung|entscheidung|entscheiden|festlegen|auswahl|abwägung|abwaegung|wartungsfenster|nächste schritte|naechste schritte|todo|soll|muss noch|offen|roadmap|konzept)\b/i, 'Planungs-, Entscheidungs- oder offene Punkte erkannt'],
     ['documentation', 3, /\b(dokumentiert|notiz|readme|doku|beschreibung|zusammenfassung|runbook)\b/i, 'Dokumentationssignale erkannt'],
     ['meeting', 5, /\b(meeting|besprechung|protokoll|teilnehmer|agenda|termin|abstimmung)\b/i, 'Meeting-/Protokollsignale erkannt'],
   ]

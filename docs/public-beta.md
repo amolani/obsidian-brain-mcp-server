@@ -2,6 +2,8 @@
 
 Obsidian Brain MCP is beta-ready when a new user can validate safety, install hooks, and inspect useful demo output without touching a private vault.
 
+Prerequisite: Node.js 22.18.0 or newer. The CLI, hooks, and MCP server execute TypeScript directly with `node`.
+
 ## 5-Minute Trial
 
 ```bash
@@ -60,6 +62,7 @@ For production scheduling, see [Production Setup](production-setup.md).
 - Legacy captures/claims can be backfilled with `migrate_brain_metadata` dry-run first.
 - Background jobs use a lock and keep merge/rename/folder/link/gap actions out of automatic apply.
 - Reviewed Knowledge Inbox items are persisted in `.brain-knowledge-inbox-state.json`.
+- Legacy fixed surfaces can be adopted only through explicit `repair_generated_surfaces` apply with `adopt_legacy=true` and a strict multi-signal signature; manual files remain protected.
 
 ## Good First Commands
 
@@ -69,8 +72,10 @@ brain_metrics
 brain_run_background
 build_capture_review
 build_knowledge_inbox
+brain_review_inbox_items
 build_change_ledger
 build_evidence_dashboard
+repair_generated_surfaces
 migrate_brain_metadata
 brain_review
 ```

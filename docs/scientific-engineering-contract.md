@@ -2,6 +2,9 @@
 
 This document defines how Obsidian Brain MCP may be made "more intelligent".
 
+Session-level importance selection and non-verbatim capture behavior are specified in the
+[Knowledge Distillation Contract](knowledge-distillation-contract.md).
+
 The project does not accept intelligence-by-vibe. New brain behavior must be grounded in
 a known method, translated into an explicit software mechanism, and measured with a
 repeatable fixture.
@@ -218,4 +221,3 @@ When changing this contract:
 2. update affected Brain Quality fixtures,
 3. run `npm run release-check`,
 4. document the reason in the commit message.
-

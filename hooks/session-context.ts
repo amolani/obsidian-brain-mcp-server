@@ -5,12 +5,13 @@
 // relevant knowledge from the Obsidian vault.
 // Also ensures the daily note exists.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { resolveClientContext } from '../services/client-resolver.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import { atomicWriteFileSync } from '../services/atomic-file.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
-import { Vault } from '../vault.ts'
+import { vaultJoin } from '../services/vault-paths.ts'
 
 if (!process.env.VAULT_PATH) {
   console.log(JSON.stringify({ result: 'continue' }))
@@ -27,16 +28,17 @@ function ensureDailyNote(): string | null {
   const policy = loadBrainPolicy()
   if (!policy.hooks.createDailyNote) return null
   const datum = today()
-  assertCanWriteTool('create_daily_note', [`Daily/${datum}.md`])
-  const dailyDir = join(VAULT_PATH, 'Daily')
-  const dailyPath = join(dailyDir, `${datum}.md`)
+  const dailyRelativePath = `Daily/${datum}.md`
+  assertCanWriteTool('create_daily_note', [dailyRelativePath])
+  const dailyPath = vaultJoin(VAULT_PATH, dailyRelativePath)
+  const dailyDir = dirname(dailyPath)
   if (!existsSync(dailyPath)) {
     mkdirSync(dailyDir, { recursive: true })
-    writeFileSync(dailyPath, `---\ntags:\n  - daily\ndatum: ${datum}\n---\n\n# ${datum}\n\n## Aufgaben\n\n- [ ]\n\n## Notizen\n\n## Gelernt\n`, 'utf-8')
+    atomicWriteFileSync(dailyPath, `---\ntags:\n  - daily\ndatum: ${datum}\n---\n\n# ${datum}\n\n## Aufgaben\n\n- [ ]\n\n## Notizen\n\n## Gelernt\n`)
     appendActionLog(VAULT_PATH, {
       tool: 'create_daily_note',
       mode: 'apply',
-      targets: [`Daily/${datum}.md`],
+      targets: [dailyRelativePath],
       summary: `Daily Note ${datum} erstellt`,
     })
     return `Daily Note ${datum} erstellt.`
@@ -44,49 +46,49 @@ function ensureDailyNote(): string | null {
   return null
 }
 
-// Auto-organize through the same Vault implementation used by the MCP tool.
-async function autoOrganize(): Promise<number> {
-  if (!loadBrainPolicy().hooks.autoOrganize) return 0
-  const vault = new Vault(VAULT_PATH)
-  try {
-    await vault.init()
-    return vault.organizeReferenz(false).moved.length
-  } catch {
-    return 0
-  } finally {
-    vault.shutdown()
-  }
+interface ClientNotePath {
+  relativePath: string
+  fullPath: string
 }
 
-// Find relevant notes for a client/project
-function findRelevantNotes(client: string): string[] {
-  const clientDir = join(VAULT_PATH, 'Kunden', client)
-  const notes: string[] = []
-  try {
-    const files = readdirSync(clientDir, { recursive: true })
-    for (const f of files) {
-      if (typeof f === 'string' && f.endsWith('.md')) {
-        notes.push(`Kunden/${client}/${f}`)
+// Find client notes without following directory/file symlinks outside the
+// vault. SessionStart exposes only paths and aggregate TODO counts.
+function findRelevantNotes(client: string): ClientNotePath[] {
+  const rootRelative = `Kunden/${client}`
+  const notes: ClientNotePath[] = []
+  const visit = (relativeDir: string): void => {
+    let entries
+    try {
+      entries = readdirSync(vaultJoin(VAULT_PATH, relativeDir), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue
+      const relativePath = `${relativeDir}/${entry.name}`
+      if (entry.isDirectory()) visit(relativePath)
+      else if (entry.isFile() && entry.name.endsWith('.md')) {
+        try {
+          notes.push({ relativePath, fullPath: vaultJoin(VAULT_PATH, relativePath) })
+        } catch {
+          // A raced or escaping path is ignored fail-closed.
+        }
       }
     }
-  } catch {}
+  }
+  visit(rootRelative)
   return notes
 }
 
-// Count open TODOs for a client
-function countTodos(client: string): number {
-  const clientDir = join(VAULT_PATH, 'Kunden', client)
+function countTodos(notes: ClientNotePath[]): number {
   let count = 0
-  try {
-    const files = readdirSync(clientDir, { recursive: true })
-    for (const f of files) {
-      if (typeof f === 'string' && f.endsWith('.md')) {
-        const content = readFileSync(join(clientDir, f), 'utf-8')
-        const matches = content.match(/- \[ \]/g)
-        if (matches) count += matches.length
-      }
-    }
-  } catch {}
+  for (const note of notes) {
+    try {
+      const content = readFileSync(note.fullPath, 'utf-8')
+      const matches = content.match(/- \[ \]/g)
+      if (matches) count += matches.length
+    } catch {}
+  }
   return count
 }
 
@@ -107,18 +109,12 @@ process.stdin.on('end', async () => {
     // Always ensure daily note
     const dailyMsg = ensureDailyNote()
 
-    // Auto-organize Referenz/ → Technik/{Kategorie}/
-    const organizedCount = await autoOrganize()
-    const organizeMsg = organizedCount > 0
-      ? `${organizedCount} Notiz${organizedCount > 1 ? 'en' : ''} automatisch in Technik/ einsortiert.`
-      : null
-
     // Detect client from CWD
     const detectedClient = resolveClientContext(cwd).client
 
     if (!detectedClient) {
-      // No client context - just output daily note + organize status
-      const msgs = [dailyMsg, organizeMsg].filter(Boolean)
+      // No client context - only report daily-note setup.
+      const msgs = [dailyMsg].filter(Boolean)
       if (msgs.length > 0) {
         console.log(JSON.stringify({ result: 'continue', message: msgs.join('\n') }))
       } else {
@@ -128,8 +124,9 @@ process.stdin.on('end', async () => {
     }
 
     // Build context message
-    const notes = findRelevantNotes(detectedClient)
-    const todoCount = countTodos(detectedClient)
+    const notePaths = findRelevantNotes(detectedClient)
+    const notes = notePaths.map(note => note.relativePath)
+    const todoCount = countTodos(notePaths)
 
     const parts: string[] = []
     parts.push(`Projekt-Kontext: **${detectedClient}** (${notes.length} Notizen in Vault)`)
@@ -145,8 +142,6 @@ process.stdin.on('end', async () => {
     }
 
     if (dailyMsg) parts.push(dailyMsg)
-    if (organizeMsg) parts.push(organizeMsg)
-
     console.log(JSON.stringify({
       result: 'continue',
       message: parts.join('\n')

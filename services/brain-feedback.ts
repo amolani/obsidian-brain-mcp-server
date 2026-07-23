@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { atomicWriteJsonSync } from './atomic-file.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -37,7 +38,7 @@ export interface BrainFeedbackSummary {
   byCategory: Record<string, { accepted: number; rejected: number; snoozed: number }>
 }
 
-const FEEDBACK_PATH = '.brain-feedback.json'
+export const BRAIN_FEEDBACK_PATH = '.brain-feedback.json'
 const AUTO_BUILD_PREFIX = 'auto_build:'
 
 function now(): string {
@@ -45,13 +46,22 @@ function now(): string {
 }
 
 export function readBrainFeedbackEntries(vault: Vault): BrainFeedbackEntry[] {
+  const path = vaultJoin(vault.vaultPath, BRAIN_FEEDBACK_PATH)
+  if (!existsSync(path)) return []
   try {
-    const path = vaultJoin(vault.vaultPath, FEEDBACK_PATH)
-    if (!existsSync(path)) return []
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as BrainFeedbackEntry[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
+    if (!Array.isArray(parsed)) throw new Error('Array erforderlich')
+    for (const [index, entry] of parsed.entries()) {
+      if (!entry || typeof entry !== 'object') throw new Error(`Eintrag ${index} muss ein Objekt sein`)
+      if (typeof entry.itemId !== 'string' || !entry.itemId.trim()) throw new Error(`Eintrag ${index}: itemId fehlt`)
+      if (!['accepted', 'rejected', 'snoozed'].includes(entry.outcome)) throw new Error(`Eintrag ${index}: outcome ungültig`)
+      if (typeof entry.updatedAt !== 'string' || !entry.updatedAt) throw new Error(`Eintrag ${index}: updatedAt fehlt`)
+      if (entry.category !== undefined && typeof entry.category !== 'string') throw new Error(`Eintrag ${index}: category ungültig`)
+      if (entry.reason !== undefined && typeof entry.reason !== 'string') throw new Error(`Eintrag ${index}: reason ungültig`)
+    }
+    return parsed
+  } catch (error) {
+    throw new Error(`Brain-Feedback ist beschädigt (${BRAIN_FEEDBACK_PATH}): ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -166,18 +176,18 @@ export function recordBrainFeedback(vault: Vault, options: RecordBrainFeedbackOp
   const next = [...entries.filter(existing => existing.itemId !== entry.itemId), entry]
 
   if (!dryRun) {
-    assertCanWriteTool('record_brain_feedback', [FEEDBACK_PATH])
-    writeFileSync(vaultJoin(vault.vaultPath, FEEDBACK_PATH), `${JSON.stringify(next, null, 2)}\n`, 'utf-8')
+    assertCanWriteTool('record_brain_feedback', [BRAIN_FEEDBACK_PATH])
+    atomicWriteJsonSync(vaultJoin(vault.vaultPath, BRAIN_FEEDBACK_PATH), next)
     appendActionLog(vault.vaultPath, {
       tool: 'record_brain_feedback',
       mode: 'apply',
-      targets: [FEEDBACK_PATH],
+      targets: [BRAIN_FEEDBACK_PATH],
       summary: `Brain feedback gespeichert: ${entry.itemId} -> ${entry.outcome}`,
       meta: { entry },
     })
   }
 
-  return { dryRun, path: FEEDBACK_PATH, entry, summary: summarize(next) }
+  return { dryRun, path: BRAIN_FEEDBACK_PATH, entry, summary: summarize(next) }
 }
 
 export function brainFeedbackSummary(vault: Vault): BrainFeedbackSummary {

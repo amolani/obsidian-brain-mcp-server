@@ -1,10 +1,11 @@
 import { afterEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { installClaudeHooks, planClaudeHookInstall } from '../services/claude-hooks.ts'
 import { createDemoVault } from '../services/demo-vault.ts'
+import { Vault } from '../vault.ts'
 
 const roots: string[] = []
 
@@ -98,7 +99,38 @@ describe('cli setup and hooks', () => {
     const root = tempDir('obsidian-cli-')
     const demoPath = join(root, 'demo')
     const result = createDemoVault({ outPath: demoPath })
-    assert.equal(result.files.length, 18)
+    assert.equal(result.files.length, 20)
     assert.ok(existsSync(join(demoPath, 'Knowledge', '_brain.md')))
+
+    const vault = new Vault(demoPath)
+    await vault.init()
+    try {
+      const health = vault.brainHealthCheck({ checkHooks: false })
+      assert.equal(health.summary.fail, 0)
+      const background = vault.runBackgroundBrain({
+        dryRun: false,
+        jobs: ['brain_metrics', 'build_knowledge_inbox', 'build_change_ledger'],
+      })
+      assert.equal(background.status, 'ok')
+    } finally {
+      vault.shutdown()
+    }
+  })
+
+  test('demo --force replaces only a generator-owned target', () => {
+    const root = tempDir('obsidian-demo-force-')
+    const owned = join(root, 'owned')
+    createDemoVault({ outPath: owned })
+    const repeated = createDemoVault({ outPath: owned, force: true })
+    assert.equal(repeated.files.length, 20)
+
+    const foreign = join(root, 'foreign')
+    mkdirSync(foreign)
+    writeFileSync(join(foreign, 'personal.md'), '# Personal\n', 'utf-8')
+    assert.throws(
+      () => createDemoVault({ outPath: foreign, force: true }),
+      /löscht keine fremden Verzeichnisse/,
+    )
+    assert.ok(existsSync(join(foreign, 'personal.md')))
   })
 })

@@ -305,7 +305,7 @@ Acceptance criteria:
 
 ### A. Installation And Release
 
-Status: mostly done
+Status: implementation done; remote CI evidence and the release tag remain
 
 Required:
 
@@ -326,7 +326,7 @@ Done when:
 
 ### B. Capture Safety
 
-Status: mostly done
+Status: done
 
 Required:
 
@@ -345,7 +345,7 @@ Done when:
 
 ### C. Session Understanding
 
-Status: mostly done
+Status: done
 
 Required:
 
@@ -380,7 +380,7 @@ Done when:
 
 ### D. Promotion Pipeline
 
-Status: mostly done
+Status: done
 
 Required:
 
@@ -400,7 +400,7 @@ Done when:
 
 ### E. Review Workflow
 
-Status: partly done
+Status: done
 
 Required:
 
@@ -431,7 +431,15 @@ Done when:
 
 ### F. Background Scheduler
 
-Status: not done
+Status: implementation done; production soak evidence remains before the release tag
+
+Implemented: MCP and CLI entrypoints, an atomic vault-local lock, total-run and hard per-job budgets, isolated jobs, Markdown and JSON reports, action-log output, safe default jobs, forced preview jobs, optional client surfaces, and an opt-in policy-gated auto-build queue. Concrete cron and systemd user-timer setup is documented in `docs/production-setup.md`.
+
+Remaining constraints:
+
+- V1 intentionally uses an external scheduler; it does not ship a resident daemon.
+- Customer timeline/snapshot jobs require an explicit client scope, and queued auto-build remains opt-in.
+- A real scheduled-run soak test and green CI remain release evidence before the version tag.
 
 Required:
 
@@ -473,7 +481,7 @@ Done when:
 
 ### G. Trust Surfaces
 
-Status: mostly done
+Status: done
 
 Required:
 
@@ -493,7 +501,9 @@ Done when:
 
 ### H. Migration And Repair
 
-Status: partly done
+Status: done
+
+Implemented: dry-run metadata migration, preview-and-backup hook repair, ownership-guarded generated-surface repair with explicit narrow legacy adoption, strict fail-closed policy validation, and diagnostics for all four routing/tag configuration files.
 
 Required:
 
@@ -510,7 +520,9 @@ Done when:
 
 ### I. Scale And Robustness
 
-Status: partly done
+Status: done
+
+Implemented: anonymized transcript and quality fixtures, redaction/migration/inbox/generated-surface regression tests, hard per-job and total background budgets, a deterministic bounded-work release gate, and a checked-in 5k-note median baseline with a 20-percent comparable-machine regression threshold.
 
 Required:
 
@@ -532,7 +544,9 @@ Done when:
 
 ### J. Documentation And Demo
 
-Status: partly done
+Status: done
+
+The README now includes a concrete before/after session walkthrough and anonymized, repo-native visuals for Session Impact, Knowledge Inbox, Change Ledger, and Evidence Dashboard. The unattended Background Run Report is shown separately.
 
 Required:
 
@@ -560,7 +574,7 @@ Done when:
 
 ## Background Brain Contract
 
-The unattended background system is the main remaining leap from "good tool" to "brain running in the background."
+The unattended background system is the V1 path for running the Brain safely without an interactive user. The runner is implemented; the remaining boundary is operational deployment through a local scheduler and final release verification.
 
 ### Background Run Input
 
@@ -692,7 +706,7 @@ This is the fixed implementation queue. Completed items stay here to prevent sco
 6. Done: Add more anonymized Claude Code transcript fixtures.
 7. Done: Add "What gets written to my vault?" documentation.
 8. Done: Add production setup guide for unattended scheduler.
-9. Done: Build README screenshots/GIFs from demo output.
+9. Done: Add anonymized repo-native README visuals for Session Impact, Knowledge Inbox, Change Ledger, Evidence Dashboard, and the Background Run Report.
 10. Pending release decision: Final release pass and version tag.
 
 ## V1.1 Or Later
