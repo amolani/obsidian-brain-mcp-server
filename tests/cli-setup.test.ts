@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { installClaudeHooks, planClaudeHookInstall } from '../services/claude-hooks.ts'
 import { createDemoVault } from '../services/demo-vault.ts'
 import { Vault } from '../vault.ts'
@@ -72,12 +73,13 @@ describe('cli setup and hooks', () => {
   test('repairs checkpoint hook matcher without duplicating the hook', () => {
     const root = tempDir('obsidian-hooks-')
     const settingsPath = join(root, 'settings.json')
+    const checkpointPath = fileURLToPath(new URL('../hooks/session-checkpoint.ts', import.meta.url))
     writeFileSync(settingsPath, JSON.stringify({
       env: { VAULT_PATH: '/tmp/example-vault' },
       hooks: {
         PostToolUse: [{
           matcher: 'Edit',
-          hooks: [{ type: 'command', command: 'node /home/amo/Documents/obsidian-brain-mcp/hooks/session-checkpoint.ts' }],
+          hooks: [{ type: 'command', command: `node "${checkpointPath}"` }],
         }],
       },
     }, null, 2), 'utf-8')
