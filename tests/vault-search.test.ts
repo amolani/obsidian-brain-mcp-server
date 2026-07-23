@@ -33,6 +33,28 @@ describe('vault-search', () => {
     assert.deepEqual(results.map(result => result.matchCount), [11, 5, 4, 3])
   })
 
+  test('does not score internal calibration frontmatter', () => {
+    const notes = new Map<string, NoteEntry>([
+      ['Calibration.md', note({
+        title: 'Generic Capture',
+        frontmatter: {
+          status: 'aktiv',
+          calibration_snapshot_payloads: ['blindreviewtoken'],
+          calibration_capture_schema: 'calibration-capture-v2',
+        },
+      })],
+      ['Knowledge.md', note({
+        title: 'Ordinary Knowledge',
+        frontmatter: { projekt: 'blindreviewtoken' },
+      })],
+    ])
+
+    const results = searchNotes(notes, { query: 'blindreviewtoken' })
+
+    assert.deepEqual(results.map(result => result.path), ['Knowledge.md'])
+    assert.equal(results[0]?.matchCount, 3)
+  })
+
   test('applies folder, tag, and status filters before query scoring', () => {
     const notes = new Map<string, NoteEntry>([
       ['Kunden/A/Docker.md', note({

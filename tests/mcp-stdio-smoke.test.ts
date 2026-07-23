@@ -110,3 +110,71 @@ test('server.ts serves ListTools and a read-only tool over MCP stdio', { timeout
   stopped = true
   assert.equal(transport.pid, null)
 })
+
+test('calibration-review MCP mode hides and rejects production-vault tools', {
+  timeout: 30_000,
+}, async (t) => {
+  const vaultPath = createTempVault()
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER_PATH],
+    cwd: dirname(SERVER_PATH),
+    env: {
+      VAULT_PATH: vaultPath,
+      OBSIDIAN_BRAIN_MCP_MODE: 'calibration-review',
+    },
+    stderr: 'pipe',
+  })
+  const client = new Client({ name: 'obsidian-brain-review-smoke', version: '1.0.0' })
+  let resolveServerClosed: (() => void) | undefined
+  const serverClosed = new Promise<void>(resolve => {
+    resolveServerClosed = resolve
+  })
+  transport.onclose = () => resolveServerClosed?.()
+  let stopped = false
+  t.after(async () => {
+    if (!stopped) {
+      const cleanupPid = transport.pid
+      try {
+        await within(client.close(), SHUTDOWN_TIMEOUT_MS, 'review MCP cleanup')
+        await within(serverClosed, SHUTDOWN_TIMEOUT_MS, 'review MCP process cleanup')
+      } catch {
+        if (cleanupPid !== null) {
+          try {
+            process.kill(cleanupPid, 'SIGKILL')
+          } catch {
+            // The process may already have exited.
+          }
+        }
+      }
+    }
+    cleanupVault(vaultPath)
+  })
+
+  await client.connect(transport, { timeout: REQUEST_TIMEOUT_MS })
+  const listed = await client.listTools({}, { timeout: REQUEST_TIMEOUT_MS })
+  assert.deepEqual(
+    listed.tools.map(tool => tool.name),
+    ['brain_calibration_review_batch', 'record_calibration_judgement'],
+  )
+
+  const forbidden = CallToolResultSchema.parse(
+    await client.callTool(
+      { name: 'vault_overview', arguments: {} },
+      CallToolResultSchema,
+      { timeout: REQUEST_TIMEOUT_MS },
+    ),
+  )
+  assert.equal(forbidden.isError, true)
+  assert.match(
+    forbidden.content
+      .filter(item => item.type === 'text')
+      .map(item => item.text)
+      .join('\n'),
+    /calibration-review nicht verfügbar/,
+  )
+
+  await within(client.close(), SHUTDOWN_TIMEOUT_MS, 'review MCP client close')
+  await within(serverClosed, SHUTDOWN_TIMEOUT_MS, 'review MCP server exit')
+  stopped = true
+})

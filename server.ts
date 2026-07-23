@@ -10,7 +10,11 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { Vault } from './vault.ts'
-import { TOOL_DEFINITIONS } from './server-tools.ts'
+import {
+  isToolAllowedInMode,
+  parseMcpToolMode,
+  toolDefinitionsForMode,
+} from './server-tools.ts'
 import { createToolHandler } from './tool-handlers.ts'
 
 // ── Config ─────────────────────────────────────────────────────────────
@@ -20,6 +24,16 @@ if (!VAULT_PATH) {
   process.stderr.write('obsidian-brain: VAULT_PATH environment variable is required\n')
   process.exit(1)
 }
+let toolMode
+try {
+  toolMode = parseMcpToolMode(process.env.OBSIDIAN_BRAIN_MCP_MODE)
+} catch (error) {
+  process.stderr.write(
+    `obsidian-brain: ${error instanceof Error ? error.message : String(error)}\n`,
+  )
+  process.exit(1)
+}
+const exposedToolDefinitions = toolDefinitionsForMode(toolMode)
 
 // ── Vault Init ─────────────────────────────────────────────────────────
 
@@ -67,29 +81,48 @@ const mcp = new Server(
   { name: 'obsidian-brain', version: '0.2.0' },
   {
     capabilities: { tools: {} },
-    instructions: [
-      'Obsidian Brain - Second Brain MCP Server.',
-      'Vault-Sprache ist Deutsch. Notizen haben YAML-Frontmatter mit: status, tags, projekt, datum.',
-      'Ordnerstruktur: Kunden/ (Kunden-Projekte), Technik/ (technisches Wissen), Referenz/ (unsortierte Referenz/Staging), Sicherheit/ (Befunde), Persönlich/, Daily/, Inbox/',
-      '',
-      'Workflow:',
-      '1. vault_search ZUERST nutzen bevor neue Notizen erstellt werden (Duplikate vermeiden)',
-      '2. Bestehendes updaten bevorzugen statt Neues erstellen',
-      '3. capture für schnelles Festhalten, create_note für strukturierte Dokumente',
-      '4. vault_overview für Gesamtüberblick, todo_list für offene Aufgaben',
-    ].join('\n'),
+    instructions: toolMode === 'calibration-review'
+      ? [
+        'Obsidian Brain - getrennte, verblindete Kalibrierungs-Review-Oberfläche.',
+        'Nur brain_calibration_review_batch und record_calibration_judgement verwenden.',
+        'Während der Bewertung keine Produktionsnotizen, Suche, Kontexte oder Auswertung öffnen.',
+      ].join('\n')
+      : [
+        'Obsidian Brain - Second Brain MCP Server.',
+        'Vault-Sprache ist Deutsch. Notizen haben YAML-Frontmatter mit: status, tags, projekt, datum.',
+        'Ordnerstruktur: Kunden/ (Kunden-Projekte), Technik/ (technisches Wissen), Referenz/ (unsortierte Referenz/Staging), Sicherheit/ (Befunde), Persönlich/, Daily/, Inbox/',
+        '',
+        'Workflow:',
+        '1. vault_search ZUERST nutzen bevor neue Notizen erstellt werden (Duplikate vermeiden)',
+        '2. Bestehendes updaten bevorzugen statt Neues erstellen',
+        '3. capture für schnelles Festhalten, create_note für strukturierte Dokumente',
+        '4. vault_overview für Gesamtüberblick, todo_list für offene Aufgaben',
+      ].join('\n'),
   },
 )
 
 // ── Tool Definitions ───────────────────────────────────────────────────
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOL_DEFINITIONS,
+  tools: exposedToolDefinitions,
 }))
 
 // ── Tool Handlers ──────────────────────────────────────────────────────
 
-mcp.setRequestHandler(CallToolRequestSchema, createToolHandler(vault))
+const toolHandler = createToolHandler(vault)
+mcp.setRequestHandler(CallToolRequestSchema, async request => {
+  if (!isToolAllowedInMode(toolMode, request.params.name)) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text',
+        text:
+          `Tool ${request.params.name} ist im MCP-Modus calibration-review nicht verfügbar`,
+      }],
+    }
+  }
+  return toolHandler(request)
+})
 
 // ── Graceful Shutdown ──────────────────────────────────────────────────
 

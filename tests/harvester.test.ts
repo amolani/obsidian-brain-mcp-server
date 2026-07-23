@@ -4,12 +4,17 @@
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { Vault } from '../vault.ts'
 import { parseFrontmatter } from '../services/note-parser.ts'
+import {
+  CALIBRATION_CAPTURE_SCHEMA,
+  parseCalibrationCaptureBundle,
+} from '../services/calibration-capture.ts'
 import { createTempVault, cleanupVault } from './helpers.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -36,6 +41,7 @@ interface CaptureState {
   capturePath?: string
   bashCount: number
   transcriptHash: string
+  calibrationSampleSeed?: string
 }
 
 function readCapturedSession(vaultPath: string, stateDir: string, sessionId: string): {
@@ -64,6 +70,42 @@ function assertTypedDigest(content: string): void {
   assert.match(content, /Salienz \d+\/100 · Evidenz \d+\/100/)
   assert.match(content, /### Evidenz/)
   assert.doesNotMatch(content, /^## Zusammenfassung$/m)
+  const frontmatter = parseFrontmatter(content)
+  assert.ok(Array.isArray(frontmatter.knowledge_fact_ids))
+  assert.ok(Array.isArray(frontmatter.calibration_fact_map))
+  assert.ok(Array.isArray(frontmatter.calibration_snapshot_fingerprints))
+  assert.ok(Array.isArray(frontmatter.calibration_snapshot_payloads))
+  assert.ok(Array.isArray(frontmatter.calibration_review_map))
+  assert.ok(Array.isArray(frontmatter.calibration_review_payloads))
+  assert.match(String(frontmatter.calibration_sample_seed), /^cs-[a-f0-9]{32}$/)
+  assert.equal(frontmatter.knowledge_fact_ids.length, Number(frontmatter.knowledge_fact_count))
+  assert.equal(frontmatter.calibration_capture_schema, CALIBRATION_CAPTURE_SCHEMA)
+  const bundle = parseCalibrationCaptureBundle(frontmatter)
+  assert.deepEqual(bundle.selectedFactIds, frontmatter.knowledge_fact_ids)
+  assert.ok(bundle.facts.length >= bundle.selectedFactIds.length)
+  assert.equal(frontmatter.calibration_fact_map.length, bundle.facts.length)
+  assert.equal(frontmatter.calibration_snapshot_payloads.length, bundle.facts.length)
+  assert.equal(frontmatter.calibration_review_map.length, bundle.facts.length)
+  assert.equal(frontmatter.calibration_review_payloads.length, bundle.facts.length)
+  for (const [index, factId] of bundle.selectedFactIds.entries()) {
+    assert.equal(bundle.facts[index]?.reference, `F${index + 1}`)
+    assert.equal(bundle.facts[index]?.factId, factId)
+  }
+  assert.doesNotMatch(content, /^## Kalibrierungsstichprobe$/m)
+  for (const fact of bundle.facts.filter(item => item.reference.startsWith('C'))) {
+    assert.doesNotMatch(content, new RegExp(`^- \\[${fact.reference}\\] `, 'm'))
+    assert.ok(fact.review.statement.length > 0)
+    assert.ok(fact.review.evidence.length > 0)
+  }
+  for (const raw of frontmatter.calibration_snapshot_payloads) {
+    const payload = JSON.parse(String(raw)) as Record<string, unknown>
+    assert.match(String(payload.factId), /^ks-[a-f0-9]{20}$/)
+    assert.equal(typeof payload.generatedAt, 'string')
+    assert.equal(typeof payload.evaluationSample, 'boolean')
+    assert.equal(typeof payload.samplingProbability, 'number')
+    assert.equal(Object.hasOwn(payload, 'statement'), false)
+    assert.equal(Object.hasOwn(payload, 'excerpt'), false)
+  }
 }
 
 describe('Harvester: end-to-end', () => {
@@ -119,8 +161,12 @@ describe('Harvester: end-to-end', () => {
     const state = JSON.parse(readFileSync(join(stateDir, stateFile), 'utf-8')) as { capturePath: string }
     const capture = readFileSync(join(vaultPath, state.capturePath), 'utf-8')
     const frontmatter = parseFrontmatter(capture)
-    assert.equal(frontmatter.session_id, sessionId)
+    const expectedSessionId = `session-${
+      createHash('sha256').update(sessionId).digest('hex').slice(0, 24)
+    }`
+    assert.equal(frontmatter.session_id, expectedSessionId)
     assert.equal(frontmatter.claim_status, undefined)
+    assert.doesNotMatch(capture, /escaped\nclaim_status/)
   })
 })
 
@@ -420,7 +466,10 @@ describe('Harvester: incremental session updates', () => {
     assert.ok(noteFile)
     const notePath = join(hugDir, noteFile)
     assert.ok(existsSync(notePath))
-    assert.doesNotMatch(readFileSync(notePath, 'utf-8'), /Synology01/)
+    const firstContent = readFileSync(notePath, 'utf-8')
+    const firstFrontmatter = parseFrontmatter(firstContent)
+    assert.doesNotMatch(firstContent, /Synology01/)
+    assert.match(String(firstFrontmatter.calibration_sample_seed), /^cs-[a-f0-9]{32}$/)
 
     writeTranscript(true)
     const second = runHarvester(vaultPath, stateDir, input)
@@ -429,6 +478,12 @@ describe('Harvester: incremental session updates', () => {
     assert.match(updated, /Synology01/)
     assert.match(updated, /192\.168\.1\.51/)
     assert.match(updated, /transcript_entries:/)
+    const updatedFrontmatter = parseFrontmatter(updated)
+    assert.equal(
+      updatedFrontmatter.calibration_sample_seed,
+      firstFrontmatter.calibration_sample_seed,
+      'Incremental updates must retain the original random sampling seed',
+    )
 
     const third = runHarvester(vaultPath, stateDir, input)
     assert.equal(third.status, 0, third.stderr)
@@ -501,6 +556,18 @@ describe('Harvester: capture hygiene', () => {
     assert.doesNotMatch(note, /P4=signature/)
     assert.doesNotMatch(note, /Pull durch/)
     assert.doesNotMatch(note, /Zusammenfassung:\s*ADBK Satellite/)
+    const actionLog = readFileSync(join(vaultPath, '.action-log.jsonl'), 'utf-8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as Record<string, any>)
+      .findLast(entry => entry.tool === 'auto_capture')
+    assert.ok(actionLog)
+    assert.equal(
+      Object.hasOwn(actionLog.meta.salience, 'calibrationCandidates'),
+      false,
+      'The full calibration candidate universe must never be duplicated into the action log',
+    )
+    assert.equal(Object.hasOwn(actionLog.meta.salience, 'facts'), false)
   })
 })
 

@@ -75,4 +75,26 @@ describe('note-context', () => {
     assert.ok(context)
     assert.deepEqual(context.relatedByTags, [])
   })
+
+  test('removes internal calibration frontmatter from returned context', () => {
+    const target = note('Target.md', {
+      frontmatter: {
+        status: 'aktiv',
+        projekt: 'Public Project',
+        calibration_capture_schema: 'calibration-capture-v2',
+        calibration_snapshot_payloads: ['blinded-review-data'],
+        Calibration_Internal_Status: 'shadow',
+      },
+    })
+    const notes = new Map<string, NoteEntry>([['Target.md', target]])
+
+    const context = buildNoteContext(notes, new Map(), new Map(), () => null, 'Target.md')
+
+    assert.ok(context)
+    assert.deepEqual(context.frontmatter, {
+      status: 'aktiv',
+      projekt: 'Public Project',
+    })
+    assert.ok(Object.hasOwn(target.frontmatter, 'calibration_capture_schema'))
+  })
 })

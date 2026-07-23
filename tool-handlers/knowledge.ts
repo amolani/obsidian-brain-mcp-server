@@ -1,6 +1,10 @@
 import { listSuggestions, promoteClientSuggestion, promoteTechnikSuggestion } from '../suggestions.ts'
 import type { SaveKnowledgeResult } from '../vault.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import type {
+  BrainCalibrationLabel,
+  RecordCalibrationLabelOptions,
+} from '../services/brain-calibration.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { strings, type ToolHandlerRegistry } from './types.ts'
 
@@ -704,6 +708,235 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           '',
           categories,
         ].join('\n'),
+      }],
+    }
+  },
+
+  brain_calibration_review_batch(vault, args) {
+    if (typeof args.reviewer !== 'string') {
+      throw new Error('reviewer ist für den verblindeten MCP-Review erforderlich')
+    }
+    const result = vault.brainCalibrationReviewBatch({
+      limit: typeof args.limit === 'number' ? args.limit : undefined,
+      reviewer: args.reviewer,
+    })
+    const items = result.items.map((item, index) => [
+      `## ${index + 1}. ${item.reviewReference}`,
+      '',
+      item.statement,
+      '',
+      'Evidenz:',
+      ...item.evidence.map(evidence =>
+        `- \`${evidence.ref}\` · sha256 \`${evidence.hash}\`${evidence.excerpt ? ` · ${evidence.excerpt}` : ''}`),
+      '',
+      `Fehlende Labels: ${item.missingLabels.join(', ')}`,
+      'record_calibration_judgement:',
+      '```json',
+      JSON.stringify(item.recordArgs, null, 2),
+      '```',
+    ].join('\n')).join('\n\n')
+    const integrityErrors = result.integrity.errors.length > 0
+      ? result.integrity.errors
+        .map((error, index) => `- Integritätsfehler ${index + 1}: ${error.message}`)
+        .join('\n')
+      : '- keine'
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Verblindeter Kalibrierungs-Review',
+          '',
+          `Protokoll: ${result.protocolVersion}`,
+          `Reviewer: ${result.reviewer ?? '(globaler Labelstand)'}`,
+          `Batch: ${result.items.length}; danach offen: ${result.remaining}`,
+          '',
+          '## Response Coverage',
+          '',
+          `Vollständig: ${result.coverage.completeUsefulSupported}/${result.coverage.sampledObservations}`,
+          `Quote: ${
+            result.coverage.overallRate === null
+              ? 'n/a'
+              : `${(result.coverage.overallRate * 100).toFixed(1)} %`
+          }`,
+          '',
+          '## Integrität',
+          '',
+          `Captures gültig/ungültig: ${result.integrity.validCaptures}/${result.integrity.invalidCaptures}`,
+          `Label-Dataset verfügbar: ${result.integrity.datasetAvailable}`,
+          integrityErrors,
+          '',
+          ...result.instructions.map(instruction => `- ${instruction}`),
+          '',
+          items || 'Keine offenen verblindeten Beobachtungen.',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  record_calibration_judgement(vault, args) {
+    const result = vault.recordCalibrationJudgement({
+      reviewToken: args.review_token as string,
+      useful: args.useful as boolean,
+      supported: args.supported as boolean,
+      reviewer: args.reviewer as string,
+      recordedAt: args.recorded_at as string,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun
+            ? '# Atomare Kalibrierungsbewertung – Vorschau'
+            : '# Atomare Kalibrierungsbewertung gespeichert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Operation: ${result.operation}`,
+          `useful: ${result.labels.useful}`,
+          `supported: ${result.labels.supported}`,
+          `Reviewer: ${result.reviewer}`,
+          '',
+          'Das vollständige Urteil ist nach dem Anwenden unveränderlich; die Antwort enthält keine Produktions- oder Modelldiagnosen.',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  record_calibration_label(vault, args) {
+    const result = vault.recordCalibrationLabel({
+      reviewToken: args.review_token as string,
+      label: args.label as BrainCalibrationLabel,
+      value: args.value as boolean,
+      reviewer: args.reviewer as string,
+      recordedAt: args.recorded_at as string,
+      observedAt: typeof args.observed_at === 'string' ? args.observed_at : undefined,
+      validityClass: args.validity_class as RecordCalibrationLabelOptions['validityClass'],
+      clientId: typeof args.client_id === 'string' ? args.client_id : undefined,
+      dryRun: args.dry_run !== false,
+    })
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Kalibrierungslabel Vorschau' : '# Kalibrierungslabel gespeichert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Operation: ${result.operation}`,
+          `Label: ${result.entry.label}=${result.entry.value}`,
+          `Reviewer: ${result.entry.reviewer}`,
+          `Pfad: \`${result.path}\``,
+          '',
+          'Keine aggregierten Label- oder Modelldiagnosen werden an die Reviewer-Rolle zurückgegeben.',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_calibration_summary(vault) {
+    const result = vault.brainCalibrationSummary()
+    const labels = Object.entries(result.byLabel)
+      .map(([label, summary]) =>
+        `- ${label}: true ${summary.true}, false ${summary.false}, n=${summary.labeled}, Jeffreys-Mittel ${summary.jeffreysPosteriorMean.toFixed(3)}`)
+      .join('\n')
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Calibration Summary',
+          '',
+          `Einträge: ${result.totalEntries}`,
+          `Eindeutige Targets: ${result.uniqueTargets}`,
+          `Eindeutige Beobachtungen: ${result.uniqueObservations}`,
+          `Semantische Fakten: ${result.uniqueFacts}`,
+          '',
+          labels,
+          '',
+          'Die Posterior-Mittel sind reine Datendiagnostik und ändern keine Automationsregeln.',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_calibration_evaluate(vault, args) {
+    const result = vault.evaluateBrainCalibration({
+      label: args.label as 'useful' | 'supported' | 'all' | undefined,
+      groupBy: args.group_by as 'session' | 'project' | undefined,
+      bootstrapSamples: typeof args.bootstrap_samples === 'number'
+        ? args.bootstrap_samples
+        : undefined,
+    })
+    const reports = result.reports.map(report => {
+      const percent = (value: number | null) =>
+        value === null ? 'n/a' : `${(value * 100).toFixed(1)} %`
+      const interval = (value: { low: number; high: number } | null) =>
+        value === null ? 'n/a' : `${value.low.toFixed(4)} bis ${value.high.toFixed(4)}`
+      const scoreBands = report.responseCoverage.scoreBands
+        .map(band => `${band.band}: ${percent(band.weightedResponseRate)}`)
+        .join('; ')
+      const populationBands = report.responseCoverage.candidatePopulationBands
+        .map(band => `${band.band}: ${percent(band.weightedResponseRate)}`)
+        .join('; ')
+      const lines = [
+        `## ${report.label}`,
+        '',
+        `Status: ${report.status}`,
+        `Empfehlung: ${report.recommendation}`,
+        `Split: train ${report.split.trainTargets} Targets/${report.split.trainGroups} Gruppen; test ${report.split.testTargets} Targets/${report.split.testGroups} Gruppen`,
+        `Klassen: train +${report.split.trainPositive}/-${report.split.trainNegative}; test +${report.split.testPositive}/-${report.split.testNegative}`,
+        `Zeitordnung: ${report.split.strictTemporalOrder ? 'strikt' : 'nicht verfügbar'}; Cutoff ${report.split.cutoffAt ?? 'n/a'}; embargoed ${report.split.embargoedTargets} Targets/${report.split.embargoedGroups} Gruppen`,
+        `Abstentions: ${report.split.abstainedTies}`,
+        '',
+        'Response-Coverage:',
+        `- Gesamt IPW: ${percent(report.responseCoverage.weightedResponseRate)} (${report.responseCoverage.labeledTargets}/${report.responseCoverage.eligibleTargets} roh)`,
+        `- selected / sampled_unselected IPW: ${percent(report.responseCoverage.selected.weightedResponseRate)} / ${percent(report.responseCoverage.sampledUnselected.weightedResponseRate)}`,
+        `- Holdout-Ära ab ${report.responseCoverage.holdoutEra.startsAt ?? 'n/a'}: ${percent(report.responseCoverage.holdoutEra.weightedResponseRate)}`,
+        `- Score-Bänder: ${scoreBands || 'n/a'}`,
+        `- Populationsgrößen: ${populationBands || 'n/a'}`,
+        `- Ungültige Captures / Labels außerhalb Frame: ${report.responseCoverage.invalidCaptureBundles} / ${report.responseCoverage.labelsOutsideFrame}`,
+      ]
+      if (report.calibratedProductionScore && report.shadowCandidate && report.comparison) {
+        lines.push(
+          '',
+          `Kalibrierter Produktionsscore: Brier ${report.calibratedProductionScore.metrics.brier.toFixed(4)}, Log-Loss ${report.calibratedProductionScore.metrics.logLoss.toFixed(4)}, eff. n ${report.calibratedProductionScore.metrics.effectiveSampleSize.toFixed(1)}, monoton ${report.calibratedProductionScore.monotonicOrdinalScore}`,
+          `Shadow-Kandidat: Brier ${report.shadowCandidate.metrics.brier.toFixed(4)}, Log-Loss ${report.shadowCandidate.metrics.logLoss.toFixed(4)}, eff. n ${report.shadowCandidate.metrics.effectiveSampleSize.toFixed(1)}`,
+          `ΔBrier: ${report.comparison.deltaBrier.toFixed(4)} (95 % ${report.comparison.brier95.low.toFixed(4)} bis ${report.comparison.brier95.high.toFixed(4)})`,
+          `MNAR-ΔBrier: ${interval(report.comparison.mnarBrier95)}`,
+          `ΔLog-Loss: ${report.comparison.deltaLogLoss.toFixed(4)} (95 % ${report.comparison.logLoss95.low.toFixed(4)} bis ${report.comparison.logLoss95.high.toFixed(4)})`,
+          `ΔFalse-Promotion / ΔFPR 95 %: ${interval(report.comparison.falsePromotion95)} / ${interval(report.comparison.falsePositiveRate95)}`,
+          `Promoted baseline/shadow: ${report.comparison.baselinePromotedCount}/${report.comparison.candidatePromotedCount}`,
+          `Gepaarte Coverage: ${(report.comparison.pairedCoverage * 100).toFixed(1)} %`,
+          '',
+          'Shadow-Koeffizienten (standardisiert, diagnostisch):',
+          ...report.shadowCandidate.featureNames.map((feature, index) =>
+            `- ${feature}: ${report.shadowCandidate?.standardizedCoefficients[index]?.toFixed(4) ?? 'n/a'}`),
+        )
+      }
+      if (report.reasons.length > 0) {
+        lines.push('', 'Gründe/Grenzen:', ...report.reasons.map(reason => `- ${reason}`))
+      }
+      return lines.join('\n')
+    }).join('\n\n')
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          '# Brain Calibration Shadow Evaluation',
+          '',
+          `Version: ${result.evaluationVersion}`,
+          `Run: \`${result.runId}\``,
+          `Aktive Gewichte geändert: ${result.activeWeightsChanged}`,
+          `Release-Entscheidung erlaubt: ${result.releaseDecisionAllowed}`,
+          '',
+          reports,
+          result.stillValid
+            ? `\n## still_valid\n\nStatus: ${result.stillValid.status}; ${result.stillValid.reason}`
+            : '',
+          '',
+          'Methodische Grenzen:',
+          ...result.limitations.map(limitation => `- ${limitation}`),
+          '',
+          'Die Ausgabe enthält ausschließlich aggregierte Metriken und ändert weder Modell, Policy noch Release-Status.',
+        ].filter(Boolean).join('\n'),
       }],
     }
   },

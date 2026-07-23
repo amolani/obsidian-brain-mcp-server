@@ -181,7 +181,7 @@ describe('claim extractor noise filtering', () => {
         '',
         '### Root Cause',
         '',
-        '- [F1] In /etc/ajenti/config.yml fehlte bind.socket für den Unix-Modus. _(Salienz 89/100 · Evidenz 67/100 · medium)_',
+        '- [F1] In /etc/ajenti/config.yml fehlte bind.socket für den Unix-Modus. _(Salienz 89/100 · Evidenz 44/100 · low)_',
         '',
         '### Verifikation',
         '',

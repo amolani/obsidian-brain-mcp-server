@@ -31,6 +31,10 @@
 - Explicit multi-signal adoption for recognizable pre-marker generated surfaces while foreign/manual files remain blocked.
 - Checked-in 5k-note benchmark baseline, deterministic work limits, and comparable-machine regression enforcement.
 - Hard per-job background timeouts in isolated workers and richer unattended-run health signals.
+- Attested calibration-capture V2 bundles with persisted random sample seeds, blinded R-reference/evidence payloads, stable base IDs, temporal recheck IDs, and stale-review protection.
+- `brain_calibration_review_batch` for role-separated, selection-blind human labels with opaque record tokens and unweighted overall progress; weighted/stratified diagnostics remain exclusive to the later evaluator, while calibration payloads stay out of generic knowledge surfaces and action logs.
+- `record_calibration_judgement` for one-lock, one-write useful/supported pairs that become immutable after submission; identical retries are idempotent and divergent retries fail closed.
+- `brain_calibration_evaluate` for IPW-weighted, strictly chronological leakage-group shadow evaluation with boundary embargo, monotone train-only probability calibration, Brier/log-loss/reliability/FPR diagnostics, MNAR bounds, and paired cluster-bootstrap intervals. It can never authorize a release.
 
 ### Changed
 
@@ -47,3 +51,5 @@
 - Fixed generated outputs and demo/benchmark directories now require exact ownership before replacement, and persistent JSON state uses atomic replacement.
 - Vault indexing and guarded writes reject path traversal and symlink escapes; internal directory symlinks are not traversed.
 - Risky executors and generated builders consistently preview by default, including legacy wrapper call shapes.
+- Calibration state now keeps occurrence identity separate from semantic fact identity, and schema V2 records immutable sampling/time metadata without fact prose.
+- The legacy single-label writer now accepts only temporal `still_valid` rechecks; useful/supported cannot bypass the atomic frozen judgement path through direct selectors.

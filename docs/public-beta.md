@@ -62,6 +62,8 @@ For production scheduling, see [Production Setup](production-setup.md).
 - Legacy captures/claims can be backfilled with `migrate_brain_metadata` dry-run first.
 - Background jobs use a lock and keep merge/rename/folder/link/gap actions out of automatic apply.
 - Reviewed Knowledge Inbox items are persisted in `.brain-knowledge-inbox-state.json`.
+- Calibration review supports a blind, role-separated workflow: `brain_calibration_review_batch` returns opaque record tokens and no production path, fact ID, weighted progress, or production strata. `record_calibration_judgement` stores useful+supported atomically and freezes the pair. Hidden sample payloads do not enter normal search, semantic context, links, promotion, or action logs. The reviewer must use `OBSIDIAN_BRAIN_MCP_MODE=calibration-review` without production notes/search or evaluator access.
+- Calibration evaluation is read-only shadow analysis and can never change weights or authorize a release.
 - Legacy fixed surfaces can be adopted only through explicit `repair_generated_surfaces` apply with `adopt_legacy=true` and a strict multi-signal signature; manual files remain protected.
 
 ## Good First Commands
@@ -78,6 +80,9 @@ build_evidence_dashboard
 repair_generated_surfaces
 migrate_brain_metadata
 brain_review
+brain_calibration_review_batch
+brain_calibration_summary
+brain_calibration_evaluate
 ```
 
 ## Scale Check

@@ -295,7 +295,7 @@ Most note systems wait for you to organize after the work is done. This one watc
 | Tool | Purpose |
 |---|---|
 | `brain_health_check` | Readiness check for policy, hooks, generated surfaces, manifest, and action log |
-| `brain_review` / `brain_apply_review_item` | Central review queue plus one-action dry-run-first executor |
+| `brain_review` / `brain_apply_review_item` | Central review queue, including blinded calibration references, plus one-action dry-run-first executor |
 | `brain_auto_build` | Policy-controlled promotion of captures into durable memory and generated surfaces |
 | `archive_auto_build_run` | Archive one auto-build run's artifacts and record negative learning feedback |
 | `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
@@ -304,6 +304,9 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
 | `build_session_impact_report`, `build_knowledge_inbox`, `build_change_ledger` | Explain one session's vault impact, collect review work, and show recent Brain writes |
 | `brain_apply_inbox_item`, `brain_review_inbox_items` | Dry-run-first single-item and safe batch review actions with persistent lifecycle state |
+| `brain_calibration_review_batch` | Selection-blind batch over the seeded evaluation sample; shows attested R-references, statements, evidence, opaque record tokens, and only unweighted overall response progress |
+| `record_calibration_judgement`, `record_calibration_label`, `brain_calibration_summary` | Atomically freeze useful+supported through an opaque token, record separate temporal validity rechecks, and inspect aggregate counts |
+| `brain_calibration_evaluate` | IPW-weighted shadow comparison with strict chronological embargo, monotone train-only calibration, response/MNAR diagnostics, and cluster-bootstrap intervals |
 | `repair_generated_surfaces`, `migrate_brain_metadata` | Rebuild owned operating surfaces, explicitly adopt narrowly recognized pre-marker surfaces, and repair legacy metadata without reorganizing notes |
 | `build_knowledge_index`, `update_hot_cache` | Knowledge map and manual hot context cache |
 | `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
@@ -390,6 +393,25 @@ claude mcp add-json -s user obsidian-brain '{
 ```
 
 Verify: `claude mcp list` should show `obsidian-brain: ✓ Connected`.
+
+For an actual blind calibration review, register a separate reviewer process/profile with
+only the restricted tool surface, and do not enable the normal `obsidian-brain` server in
+that reviewer session:
+
+```bash
+claude mcp add-json -s user obsidian-brain-review '{
+  "command": "node",
+  "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
+  "env": {
+    "VAULT_PATH": "/path/to/your/obsidian/vault",
+    "OBSIDIAN_BRAIN_MCP_MODE": "calibration-review"
+  }
+}'
+```
+
+That mode advertises and accepts only `brain_calibration_review_batch` and
+`record_calibration_judgement`. A separate OS account or otherwise isolated reviewer profile
+is still required if the reviewer could open the vault directly outside MCP.
 
 ### 4. (Optional) Register hooks for automation
 
@@ -503,6 +525,7 @@ Left side = alternate spelling. Right side = canonical form.
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `VAULT_PATH` | **Required.** Path to your Obsidian vault root. | — |
+| `OBSIDIAN_BRAIN_MCP_MODE` | `calibration-review` exposes only the blind batch and opaque-token label writer. | `default` |
 | `CLIENTS_PATH` | Override path to `clients.json`. | `{project}/clients.json` |
 | `TECHNIK_CATEGORIES_PATH` | Override path to `technik-categories.json`. | `{project}/technik-categories.json` |
 | `TAG_ALIASES_PATH` | Override path to `tag-aliases.json`. | `{project}/tag-aliases.json` |
@@ -523,7 +546,7 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Generate a runbook for the linuxmuster installation."
 - "Run vault maintenance."
 
-The Knowledge Harvester runs at `Stop` when `brain-policy.json` allows `hooks.autoCapture`. It no longer uses transcript length or Bash volume as a value proxy: a short decision without commands can be captured, while a long read-only debug session without a reproducible finding is skipped. The distiller selects at most a small set of typed atoms (`problem`, `cause`, `decision`, `change`, `verification`, `result`, `constraint`, `open_question`) and writes no raw assistant-summary or phase-narration blocks. Captures expose the versioned importance model, salience/evidence scores, provenance references, `capture_value`, `runbook_readiness`, `review_need`, intent, and routing evidence. Secret-like source values are audited and redacted before write.
+The Knowledge Harvester runs at `Stop` when `brain-policy.json` allows `hooks.autoCapture`. It no longer uses transcript length or Bash volume as a value proxy: a short decision without commands can be captured, while a long read-only debug session without a reproducible finding is skipped. The distiller selects at most a small set of typed atoms (`problem`, `cause`, `decision`, `change`, `verification`, `result`, `constraint`, `open_question`) and writes no raw assistant-summary or phase-narration blocks. Captures expose the versioned importance model, salience/evidence scores, provenance references, `capture_value`, `runbook_readiness`, `review_need`, intent, and routing evidence. A separate seeded calibration sample is stored only as attested internal frontmatter and is excluded from normal search, semantic indexing, note context, links, and promotion. Secret-like source values are audited and redacted before write.
 
 Only an exact customer alias as a complete CWD segment permits direct physical customer routing. Fuzzy, content-only, unknown, and ambiguous matches stay in a neutral Technik/Referenz capture path with their match reason in Review; they never silently create a confident customer assignment.
 
@@ -573,15 +596,16 @@ Use the vault as a dry-run-first operating loop:
 6. At session `Stop`, let the hook distill durable decisions, causes, changes, checks, constraints, and open questions. No minimum command count is required. Review important/weak-evidence atoms before promotion; a verified change can become a runbook candidate automatically.
 7. For bigger investigations, create a `create_research_plan` first. It pulls local context and gives you a checklist for source ingest, final answer/decision capture, and contradiction handling.
 8. Ingest durable sources with `ingest_source`, then use `extract_claims` to turn source text into explicit claims. Use `update_evidence` to set confidence, sources, recheck dates, and contradiction references.
-9. Run `brain_review` as the central operating view. It proposes items across maintenance, evidence, open questions, contradictions, quality, links, lifecycle, and index/cache drift. Apply one item at a time with `brain_apply_review_item`, first as dry-run. Record preference signals with `record_brain_feedback`.
-10. Periodically refresh `Knowledge/_brain.md`, `Knowledge/hot.md`, `Knowledge/index.md`, and customer timelines with `build_brain_dashboard`, `update_hot_cache`, `build_knowledge_index`, and `build_memory_timeline`.
-11. Let `brain_auto_build` process captures through the Stop hook. It may promote only atoms that pass the salience, evidence, provenance, intent, and type gates. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/`; checkpoint-derived claims stay provisional and runbooks remain review candidates until a real implemented-and-verified procedure exists.
-12. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
-13. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
-14. In a fresh Claude session, run `brain_health_check` first. It reports whether policy, hooks, generated surfaces, manifest, and action log are ready.
-15. Use `brain_schedule` for propose-only upkeep: due evidence rechecks, open contradictions, missing dashboards, and explicit next tools.
-16. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
-17. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
+9. Run `brain_review` as the central operating view, then hand `brain_calibration_review_batch` to a dedicated reviewer role that cannot use production notes, vault/semantic search, note context, or `brain_calibration_evaluate` during judgement. The batch returns only the attested R-reference, statement, bounded evidence, missing labels, and an opaque `brt-…` record token; it exposes neither capture path/fact ID nor weighted or production-stratified progress. Submit `useful` and `supported` together with `record_calibration_judgement`. One writer lock and one atomic file replacement store the pair; afterward it is immutable, while an identical retry is a no-op. Merely using the masked display while retaining production-vault access is not a defensible blind study. Use `record_calibration_label` only for an explicit dated `still_valid` recheck with a validity class.
+10. After the reviewer phase is closed, switch to the analyst role and run `brain_calibration_evaluate`. It evaluates only the seeded uniform sample, applies inverse-probability/Hájek weights, aggregates reviewers per occurrence, abstains on ties, and uses a strict chronological leakage-group split with boundary-spanning groups embargoed. It reports monotone train-only calibration, response coverage, conservative MNAR bounds, proper scoring rules, and paired cluster-bootstrap intervals. `collect_more` and `continue_shadow` are expected early outcomes. At most it can nominate a candidate for a later preregistered validation; it never changes active weights or grants a release decision.
+11. Periodically refresh `Knowledge/_brain.md`, `Knowledge/hot.md`, `Knowledge/index.md`, and customer timelines with `build_brain_dashboard`, `update_hot_cache`, `build_knowledge_index`, and `build_memory_timeline`.
+12. Let `brain_auto_build` process captures through the Stop hook. It may promote only atoms that pass the salience, evidence, provenance, intent, and type gates. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/`; checkpoint-derived claims stay provisional and runbooks remain review candidates until a real implemented-and-verified procedure exists.
+13. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
+14. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
+15. In a fresh Claude session, run `brain_health_check` first. It reports whether policy, hooks, generated surfaces, manifest, and action log are ready.
+16. Use `brain_schedule` for propose-only upkeep: due evidence rechecks, open contradictions, missing dashboards, and explicit next tools.
+17. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
+18. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
 
 ## Folder conventions
 

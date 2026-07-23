@@ -1,5 +1,6 @@
 import { basename } from 'node:path'
 import type { NoteEntry } from '../vault.ts'
+import { sanitizeKnowledgeSurfaceFrontmatter } from './knowledge-surface-sanitizer.ts'
 
 export interface NoteContext {
   content: string
@@ -76,7 +77,7 @@ export function buildNoteContext(
 
   return {
     content: entry.content,
-    frontmatter: entry.frontmatter,
+    frontmatter: sanitizeKnowledgeSurfaceFrontmatter(entry.frontmatter),
     backlinks,
     outgoingLinks,
     relatedByTags,

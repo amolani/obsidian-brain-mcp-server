@@ -540,6 +540,144 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'brain_calibration_review_batch',
+      description:
+        'Read-only, selection-blind review batch for the randomly sampled calibration universe. Shows only an attested R-reference, statement, bounded evidence, missing useful/supported labels, and an opaque record token; hides production path/fact id, status, rank, scores, sampling probability, weighted progress, and production strata. Reports only unweighted overall progress and capture integrity. Use from a reviewer role without production-vault/search/evaluator access.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          reviewer: {
+            type: 'string',
+            description: 'Required stable local reviewer id; only this reviewer’s existing labels count as answered.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum blinded observations, integer 1..200. Default 40.',
+          },
+        },
+        required: ['reviewer'],
+      },
+    },
+    {
+      name: 'record_calibration_judgement',
+      description:
+        'Dry-run-first atomic blind judgement for one attested review token. Stores useful and supported together under one writer lock; the completed reviewer/observation pair is append-only, exact repeats are unchanged, and divergent repeats fail closed.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          review_token: {
+            type: 'string',
+            description: 'Opaque brt- token returned by brain_calibration_review_batch.',
+          },
+          useful: {
+            type: 'boolean',
+            description: 'Human judgement of expected future reuse value.',
+          },
+          supported: {
+            type: 'boolean',
+            description: 'Human judgement based only on the evidence shown in the blind batch.',
+          },
+          reviewer: { type: 'string', description: 'Stable local reviewer id.' },
+          recorded_at: {
+            type: 'string',
+            description: 'Canonical UTC judgement timestamp with milliseconds.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to atomically persist both outcomes.',
+          },
+        },
+        required: [
+          'review_token',
+          'useful',
+          'supported',
+          'reviewer',
+          'recorded_at',
+        ],
+      },
+    },
+    {
+      name: 'record_calibration_label',
+      description:
+        'Dry-run-first temporal still_valid recheck for an attested review token. Primary useful/supported judgements must use record_calibration_judgement atomically.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          review_token: {
+            type: 'string',
+            description: 'Opaque brt- token returned by brain_calibration_review_batch.',
+          },
+          label: {
+            type: 'string',
+            enum: ['still_valid'],
+            description: 'Temporal validity is separate from the frozen primary judgement.',
+          },
+          value: { type: 'boolean', description: 'Human-reviewed label value.' },
+          reviewer: { type: 'string', description: 'Stable local reviewer id.' },
+          recorded_at: {
+            type: 'string',
+            description: 'Canonical UTC review timestamp with milliseconds. Required so reviews and repeated validity rechecks remain reproducible.',
+          },
+          observed_at: {
+            type: 'string',
+            description: 'Canonical UTC timestamp when the state was observed. Required for still_valid.',
+          },
+          validity_class: {
+            type: 'string',
+            enum: ['historical_event', 'durable_state', 'operational_state', 'ephemeral_state'],
+            description: 'Change regime for future validity calibration. Required for still_valid.',
+          },
+          client_id: {
+            type: 'string',
+            description: 'Optional opaque client/project identifier without prose.',
+          },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to persist the local calibration label.' },
+        },
+        required: [
+          'review_token',
+          'label',
+          'value',
+          'reviewer',
+          'recorded_at',
+          'observed_at',
+          'validity_class',
+        ],
+      },
+    },
+    {
+      name: 'brain_calibration_summary',
+      description:
+        'Read-only sample counts and Jeffreys-posterior means for useful, supported, and still_valid labels. This is diagnostic only and never changes automation policy.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'brain_calibration_evaluate',
+      description:
+        'Read-only scientific shadow evaluation over human labels from seeded uniform candidate samples. Uses inverse-probability weighting, a strict chronological leakage-group holdout with embargo, monotone train-only probability calibration, response-coverage/MNAR diagnostics, Brier score, log-loss, reliability diagnostics, and paired cluster-bootstrap intervals. It can only nominate later preregistered validation and never changes active weights, release state, or safety policy.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          label: {
+            type: 'string',
+            enum: ['all', 'useful', 'supported'],
+            description: 'Target to evaluate. Default all. still_valid remains descriptive.',
+          },
+          group_by: {
+            type: 'string',
+            enum: ['session', 'project'],
+            description: 'Leakage grouping. Default session; project is the stricter cross-project analysis.',
+          },
+          bootstrap_samples: {
+            type: 'number',
+            description: 'Cluster-bootstrap replicates, integer 100..5000. Default 5000.',
+          },
+        },
+      },
+    },
+    {
       name: 'build_memory_timeline',
       description:
         'Dry-run-first customer/project memory timeline. Writes Kunden/{Client}/_timeline.md with decisions, incidents, captures, runbooks, claims, and open points.',
@@ -1030,7 +1168,7 @@ export const TOOL_DEFINITIONS = [
     {
       name: 'brain_review',
       description:
-        'Read-only brain review orchestrator. Aggregates duplicates, broken links, frontmatter fixes, lifecycle suggestions, link suggestions, low-quality notes, open questions, contradictions, and index/cache drift into actionable review items.',
+        'Read-only brain review orchestrator. Aggregates duplicates, broken links, frontmatter fixes, lifecycle suggestions, link suggestions, low-quality notes, open questions, contradictions, blinded calibration references, and index/cache drift into actionable review items. Calibration items use attested R-references and never expose individual production status, rank, score, or an auto-generated human label.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -1499,3 +1637,28 @@ export const TOOL_DEFINITIONS = [
       },
     },
 ] as const
+
+export type McpToolMode = 'default' | 'calibration-review'
+
+const CALIBRATION_REVIEW_TOOL_NAMES = new Set([
+  'brain_calibration_review_batch',
+  'record_calibration_judgement',
+])
+
+export function parseMcpToolMode(value: unknown): McpToolMode {
+  if (value === undefined || value === '' || value === 'default') return 'default'
+  if (value === 'calibration-review') return value
+  throw new Error(
+    'OBSIDIAN_BRAIN_MCP_MODE muss "default" oder "calibration-review" sein',
+  )
+}
+
+export function toolDefinitionsForMode(mode: McpToolMode) {
+  if (mode === 'default') return TOOL_DEFINITIONS
+  return TOOL_DEFINITIONS.filter(definition =>
+    CALIBRATION_REVIEW_TOOL_NAMES.has(definition.name))
+}
+
+export function isToolAllowedInMode(mode: McpToolMode, toolName: string): boolean {
+  return mode === 'default' || CALIBRATION_REVIEW_TOOL_NAMES.has(toolName)
+}

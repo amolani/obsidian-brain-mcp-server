@@ -1,10 +1,12 @@
-import { KNOWLEDGE_SALIENCE_MODEL, type KnowledgeConfidence, type KnowledgeFactKind } from './knowledge-salience.ts'
+import type { KnowledgeConfidence, KnowledgeFactKind } from './knowledge-salience.ts'
 import {
   digestConfidence,
-  digestEvidenceScore,
+  digestEvidenceScoreCandidates,
+  isSupportedSessionDigestModel,
+  isSupportedSessionDigestSchema,
   SESSION_DIGEST_PRODUCER,
-  SESSION_DIGEST_SCHEMA,
   sessionDigestIntegrity,
+  type SessionDigestSchema,
 } from './session-digest-integrity.ts'
 
 /**
@@ -171,23 +173,30 @@ export function parseSessionDigestFacts(content: string): ParsedSessionDigest {
     integrityReason = 'Digest-Integritätsnachweis fehlt'
   } else if (attestationLineCount !== 1 || !attestation) {
     integrityReason = 'Genau ein Digest-Integritätsnachweis ist erforderlich'
-  } else if (attestation.schema !== SESSION_DIGEST_SCHEMA || attestation.producer !== SESSION_DIGEST_PRODUCER) {
+  } else if (!isSupportedSessionDigestSchema(attestation.schema) || attestation.producer !== SESSION_DIGEST_PRODUCER) {
     integrityReason = 'Digest-Schema oder Erzeuger ist nicht erlaubt'
-  } else if (modelVersion !== KNOWLEDGE_SALIENCE_MODEL.version) {
+  } else if (!isSupportedSessionDigestModel(modelVersion, attestation.schema)) {
     integrityReason = 'Digest-Modell ist nicht erlaubt'
   } else if (parsedFacts.length > 8 || parsedFacts.some(fact => !/^F[1-8]$/.test(fact.id))) {
     integrityReason = 'Digest-Fakt-IDs oder Faktanzahl sind ungültig'
   } else {
     const inconsistent = parsedFacts.find(fact => {
-      const evidence = digestEvidenceScore(fact.provenance)
-      return evidence === null
-        || evidence !== fact.evidenceScore
-        || digestConfidence(evidence) !== fact.confidence
+      const evidenceCandidates = digestEvidenceScoreCandidates(
+        fact.provenance,
+        attestation.schema,
+        modelVersion,
+      )
+      return !evidenceCandidates.includes(fact.evidenceScore)
+        || digestConfidence(fact.evidenceScore, modelVersion) !== fact.confidence
     })
     if (inconsistent) {
       integrityReason = `Evidenzmetadaten für ${inconsistent.id} sind nicht reproduzierbar`
     } else {
-      const expected = sessionDigestIntegrity(modelVersion, parsedFacts)
+      const expected = sessionDigestIntegrity(
+        modelVersion,
+        parsedFacts,
+        attestation.schema as SessionDigestSchema,
+      )
       if (expected !== attestation.integrity) {
         integrityReason = 'Digest-Inhalt stimmt nicht mit dem Integritätsnachweis überein'
       } else {

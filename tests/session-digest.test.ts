@@ -77,7 +77,7 @@ describe('session digest', () => {
           id: 'cause',
           kind: 'cause',
           statement: 'A stale lock prevented the worker from starting.',
-          evidence: 67,
+          evidence: 44,
           source: 'error_fix',
           excerpt: 'Error: worker failed; fix: stale lock removed',
         }),
@@ -100,19 +100,61 @@ describe('session digest', () => {
       ]),
     })
 
-    assert.match(section(digest, 'Root Cause'), /A stale lock prevented the worker/)
+    assert.equal(section(digest, 'Root Cause'), '- Keine belastbare Aussage erkannt')
     assert.match(section(digest, 'Verifikation'), /health check returned healthy/)
     assert.equal(section(digest, 'Entscheidung'), '- Keine belastbare Aussage erkannt')
+    assert.match(section(digest, 'Review'), /Unbestätigt: A stale lock prevented the worker/)
     assert.match(section(digest, 'Review'), /Unbestätigt: PostgreSQL will store durable audit events/)
-    assert.match(digest, /Salienz 78\/100 · Evidenz 67\/100 · medium/)
+    assert.match(digest, /Salienz 78\/100 · Evidenz 44\/100 · low/)
     assert.match(section(digest, 'Evidenz'), /error_fix:cause.*Hash `a{64}`/)
-    assert.match(digest, /Digest-Integrität: `session-digest-v1` .* Erzeuger: `knowledge-harvester` .* SHA-256: `[a-f0-9]{64}`/)
+    assert.match(digest, /Digest-Integrität: `session-digest-v2` .* Erzeuger: `knowledge-harvester` .* SHA-256: `[a-f0-9]{64}`/)
     assert.match(section(digest, 'Evidenz'), /Command: workerctl health; result: healthy/)
     assert.doesNotMatch(section(digest, 'Evidenz'), new RegExp(rawAssistantParagraph))
     assert.doesNotMatch(digest, /Ajenti|vmbr-trunk|interfaces\.d/)
     const parsed = parseSessionDigestFacts(digest)
     assert.equal(parsed.integrityStatus, 'verified')
-    assert.deepEqual(parsed.facts.map(item => item.id), ['F1', 'F3'])
+    assert.deepEqual(parsed.facts.map(item => item.id), ['F3'])
+  })
+
+  test('round-trips independent phase and error/fix provenance with one shared score', () => {
+    const mixed = fact({
+      id: 'mixed-cause',
+      kind: 'cause',
+      statement: 'A stale lock prevented the worker from starting.',
+      evidence: 58,
+      source: 'phase',
+      excerpt: 'Phase outcome identified the stale lock.',
+    })
+    mixed.provenance = [
+      {
+        ref: 'phase:worker-outcome',
+        source: 'phase',
+        hash: 'a'.repeat(64),
+        excerpt: 'Phase outcome identified the stale lock.',
+        origin: 'phase:worker',
+      },
+      {
+        ref: 'error_fix:worker-recovery',
+        source: 'error_fix',
+        hash: 'b'.repeat(64),
+        excerpt: 'Error: worker failed; fix: stale lock removed',
+        origin: 'assistant:worker-recovery',
+      },
+    ]
+
+    const digest = renderSessionDigest({
+      title: 'Restore the worker',
+      selection: selection([mixed]),
+    })
+    const parsed = parseSessionDigestFacts(digest)
+
+    assert.equal(parsed.integrityStatus, 'verified')
+    assert.equal(parsed.facts.length, 1)
+    assert.equal(parsed.facts[0].evidenceScore, 58)
+    assert.deepEqual(parsed.facts[0].provenance.map(item => item.ref), [
+      'phase:worker-outcome',
+      'error_fix:worker-recovery',
+    ])
   })
 
   test('uses the salience selector for legacy input without copying assistant blocks or command lists', () => {

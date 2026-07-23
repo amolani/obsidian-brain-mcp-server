@@ -1,9 +1,24 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { hasCompleteDigestProvenance, parseSessionDigestFacts } from '../services/session-digest-facts.ts'
+import {
+  LEGACY_SESSION_DIGEST_SCHEMA,
+  SESSION_DIGEST_MODEL_REGISTRY,
+  SESSION_DIGEST_PRODUCER,
+  sessionDigestIntegrity,
+  type DigestIntegrityFact,
+} from '../services/session-digest-integrity.ts'
 import { attestSessionDigestFixture } from './helpers.ts'
 
 describe('session digest fact parser', () => {
+  test('keeps historical salience verification in a frozen digest registry', () => {
+    assert.deepEqual(Object.keys(SESSION_DIGEST_MODEL_REGISTRY), ['knowledge-salience-v1'])
+    assert.deepEqual(
+      Object.keys(SESSION_DIGEST_MODEL_REGISTRY['knowledge-salience-v1'].evidenceVerifiers),
+      ['session-digest-v1', 'session-digest-v2'],
+    )
+  })
+
   test('parses only typed semantic bullets and joins their provenance by fact id', () => {
     const content = attestSessionDigestFixture([
       'A raw sentence outside the digest must be ignored.',
@@ -18,7 +33,7 @@ describe('session digest fact parser', () => {
       '',
       '### Offene Punkte / Constraints',
       '',
-      '- [F2] Ist die Aufbewahrungsfrist verbindlich festgelegt? _(Salienz 78/100 · Evidenz 67/100 · medium)_',
+      '- [F2] Ist die Aufbewahrungsfrist verbindlich festgelegt? _(Salienz 78/100 · Evidenz 44/100 · low)_',
       '- [F3] Audit-Ereignisse dürfen keine Zugangsdaten enthalten. _(Salienz 88/100 · Evidenz 88/100 · high)_',
       '',
       '### Review',
@@ -35,6 +50,10 @@ describe('session digest fact parser', () => {
       '### Nicht übernommen',
       '',
       '- Nicht ausgewählt: 1 redundant.',
+      '',
+      '## Kalibrierungsstichprobe',
+      '',
+      '- [C1] Diese Stichprobe darf niemals als Digest-Fakt oder Promotion erscheinen.',
     ].join('\n'))
 
     const parsed = parseSessionDigestFacts(content)
@@ -57,6 +76,7 @@ describe('session digest fact parser', () => {
     assert.match(parsed.facts[0].provenance[0].hash, /^[a-f0-9]{64}$/)
     assert.ok(parsed.facts.every(hasCompleteDigestProvenance))
     assert.ok(!parsed.facts.some(fact => fact.statement.includes('Assistentenzusammenfassung')))
+    assert.ok(!parsed.facts.some(fact => fact.statement.includes('Stichprobe')))
   })
 
   test('fails closed for arbitrary prose and malformed provenance', () => {
@@ -74,6 +94,46 @@ describe('session digest fact parser', () => {
     assert.equal(malformed.facts.length, 1)
     assert.equal(hasCompleteDigestProvenance(malformed.facts[0]), false)
     assert.notEqual(malformed.integrityStatus, 'verified')
+  })
+
+  test('keeps attested V1 error/fix digests readable after the V2 scorer migration', () => {
+    const fact: DigestIntegrityFact = {
+      id: 'F1',
+      kind: 'cause',
+      statement: 'In der Konfiguration fehlte der erforderliche Socket.',
+      salienceScore: 89,
+      evidenceScore: 67,
+      confidence: 'medium',
+      provenance: [{
+        ref: 'error_fix:legacy-config',
+        hash: 'a'.repeat(64),
+        excerpt: 'socket missing',
+      }],
+    }
+    const integrity = sessionDigestIntegrity(
+      'knowledge-salience-v1',
+      [fact],
+      LEGACY_SESSION_DIGEST_SCHEMA,
+    )
+    const parsed = parseSessionDigestFacts([
+      '## Session Digest',
+      '',
+      '_Modell: `knowledge-salience-v1`_',
+      '',
+      `_Digest-Integrität: \`${LEGACY_SESSION_DIGEST_SCHEMA}\` · Erzeuger: \`${SESSION_DIGEST_PRODUCER}\` · SHA-256: \`${integrity}\`_`,
+      '',
+      '### Root Cause',
+      '',
+      `- [F1] ${fact.statement} _(Salienz 89/100 · Evidenz 67/100 · medium)_`,
+      '',
+      '### Evidenz',
+      '',
+      `- [F1] \`${fact.provenance[0].ref}\` · Hash \`${fact.provenance[0].hash}\` — ${fact.provenance[0].excerpt}`,
+    ].join('\n'))
+
+    assert.equal(parsed.integrityStatus, 'verified')
+    assert.equal(parsed.facts[0]?.evidenceScore, 67)
+    assert.equal(hasCompleteDigestProvenance(parsed.facts[0]), true)
   })
 
   test('rejects forged model, invented ref, display hash, and post-attestation edits', () => {

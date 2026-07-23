@@ -1,6 +1,11 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { TOOL_DEFINITIONS } from '../server-tools.ts'
+import {
+  TOOL_DEFINITIONS,
+  isToolAllowedInMode,
+  parseMcpToolMode,
+  toolDefinitionsForMode,
+} from '../server-tools.ts'
 import { loadBrainPolicy } from '../services/policy.ts'
 import { TOOL_HANDLER_NAMES } from '../tool-handlers.ts'
 
@@ -22,5 +27,20 @@ describe('MCP tool registry contract', () => {
       ['auto_capture', 'create_daily_note'],
       'only the two hook-internal writers may exist outside the MCP registry',
     )
+  })
+
+  test('calibration-review mode exposes and permits only the blind review tools', () => {
+    const mode = parseMcpToolMode('calibration-review')
+    assert.deepEqual(
+      toolDefinitionsForMode(mode).map(definition => definition.name),
+      ['brain_calibration_review_batch', 'record_calibration_judgement'],
+    )
+    assert.equal(isToolAllowedInMode(mode, 'brain_calibration_review_batch'), true)
+    assert.equal(isToolAllowedInMode(mode, 'record_calibration_judgement'), true)
+    assert.equal(isToolAllowedInMode(mode, 'record_calibration_label'), false)
+    assert.equal(isToolAllowedInMode(mode, 'vault_search'), false)
+    assert.equal(isToolAllowedInMode(mode, 'get_note_context'), false)
+    assert.equal(isToolAllowedInMode(mode, 'brain_calibration_evaluate'), false)
+    assert.throws(() => parseMcpToolMode('unsafe-review'), /muss "default" oder/)
   })
 })

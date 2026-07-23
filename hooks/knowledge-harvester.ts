@@ -15,6 +15,19 @@ import { join, basename, dirname } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
+import {
+  calibrationSnapshotFingerprint,
+  calibrationSnapshotFromFact,
+  serializeCalibrationSnapshotCore,
+} from '../services/brain-calibration.ts'
+import {
+  CALIBRATION_EVALUATION_SAMPLE_SIZE,
+  CALIBRATION_CAPTURE_PRODUCER,
+  CALIBRATION_CAPTURE_SCHEMA,
+  calibrationCaptureIntegrity,
+  serializeCalibrationReviewPayload,
+  type CalibrationCaptureBundleInput,
+} from '../services/calibration-capture.ts'
 import { scoreCapture } from '../services/capture-scoring.ts'
 import { resolveClientContext, type ClientMatch } from '../services/client-resolver.ts'
 import { buildFrontmatter } from '../services/frontmatter-linter.ts'
@@ -26,6 +39,7 @@ import {
   selectSalientKnowledge,
   type KnowledgeBashEvidence,
   type KnowledgeFactKind,
+  type KnowledgeSalienceFact,
   type KnowledgeSalienceSelection,
 } from '../services/knowledge-salience.ts'
 import { renderSessionDigest } from '../services/session-digest.ts'
@@ -189,7 +203,7 @@ function detectTags(texts: readonly string[]): string[] {
 // ── Smart Title Generation ─────────────────────────────────────────
 
 function generateTitle(entries: TranscriptEntry[], cwd: string, tags: string[], client: string | null): string {
-  const datum = new Date().toISOString().split('T')[0]
+  const datum = new Date().toISOString().slice(0, 10)
 
   // Collect substantive user messages to detect the topic
   const userTopics: string[] = []
@@ -537,8 +551,130 @@ function stripSsh(cmd: string): string {
 
 // ── Note Generation ────────────────────────────────────────────────
 
-function generateNote(k: ExtractedKnowledge): string {
-  const datum = new Date().toISOString().split('T')[0]
+interface CalibrationCaptureMaterial {
+  bundle: CalibrationCaptureBundleInput
+}
+
+function calibrationReviewEvidence(
+  fact: Omit<KnowledgeSalienceFact, 'selectionScore'>,
+  sourceTypes: readonly string[],
+): Array<{ ref: string; hash: string; excerpt: string }> {
+  const allowedSources = new Set(sourceTypes)
+  const provenance = fact.provenance.filter(item => allowedSources.has(item.source))
+  const chosen = new Map<string, (typeof fact.provenance)[number]>()
+  for (const item of provenance) {
+    if (!chosen.has(item.source)) chosen.set(item.source, item)
+  }
+  for (const item of provenance) {
+    if (chosen.size >= 8) break
+    if (![...chosen.values()].some(current => current.ref === item.ref)) {
+      chosen.set(`${item.source}:${item.ref}`, item)
+    }
+  }
+  return [...chosen.values()].slice(0, 8).map(item => ({
+    ref: item.ref,
+    hash: item.hash,
+    excerpt: item.excerpt.replace(
+      /^(?:zusammenfassung|summary|erledigt)\s*:\s*/iu,
+      '',
+    ),
+  }))
+}
+
+function calibrationCaptureMaterial(
+  selection: KnowledgeSalienceSelection,
+  generatedAt: string,
+  sampleSeed: string,
+): CalibrationCaptureMaterial {
+  const population = selection.calibrationCandidates ?? selection.facts
+  const selectedRank = new Map(selection.facts.map((fact, index) => [fact.id, index + 1]))
+  const sampleSize = Math.min(CALIBRATION_EVALUATION_SAMPLE_SIZE, population.length)
+  const sampled = [...population]
+    .sort((left, right) => {
+      const leftHash = createHash('sha256')
+        .update(`${sampleSeed}\0${left.id}\0calibration-evaluation-v1`)
+        .digest('hex')
+      const rightHash = createHash('sha256')
+        .update(`${sampleSeed}\0${right.id}\0calibration-evaluation-v1`)
+        .digest('hex')
+      return leftHash.localeCompare(rightHash, 'en') || left.id.localeCompare(right.id, 'en')
+    })
+    .slice(0, sampleSize)
+  const sampledIds = new Set(sampled.map(fact => fact.id))
+  const unselectedSample = sampled.filter(fact => !selectedRank.has(fact.id))
+  const union = [
+    ...selection.facts,
+    ...unselectedSample,
+  ]
+  const inclusionProbability = population.length === 0 ? 0 : sampleSize / population.length
+  const snapshots = union.map(fact => {
+    const rank = selectedRank.get(fact.id) ?? null
+    const evaluationSample = sampledIds.has(fact.id)
+    return calibrationSnapshotFromFact(fact, {
+      generatedAt,
+      selectionStatus: rank === null ? 'sampled_unselected' : 'selected',
+      productionRank: rank,
+      evaluationSample,
+      candidatePopulationCount: population.length,
+      samplingProbability: evaluationSample ? inclusionProbability : 0,
+    })
+  })
+  const factMap = snapshots.map((snapshot, index) => {
+    const selectedPosition = selectedRank.get(snapshot.factId)
+    if (selectedPosition !== undefined) return `F${selectedPosition}:${snapshot.factId}`
+    const candidatePosition = index - selection.facts.length + 1
+    return `C${candidatePosition}:${snapshot.factId}`
+  })
+  const snapshotFingerprints = snapshots.map(snapshot =>
+    `${snapshot.factId}:${calibrationSnapshotFingerprint(snapshot)}`)
+  const snapshotPayloads = snapshots.map(serializeCalibrationSnapshotCore)
+  const snapshotsByFactId = new Map(snapshots.map(snapshot => [snapshot.factId, snapshot]))
+  const factsById = new Map(union.map(fact => [fact.id, fact]))
+  const reviewOrder = [...union].sort((left, right) => {
+    const leftHash = createHash('sha256')
+      .update(`${sampleSeed}\0${left.id}\0calibration-review-v1`)
+      .digest('hex')
+    const rightHash = createHash('sha256')
+      .update(`${sampleSeed}\0${right.id}\0calibration-review-v1`)
+      .digest('hex')
+    return leftHash.localeCompare(rightHash, 'en') || left.id.localeCompare(right.id, 'en')
+  })
+  const reviewMap = reviewOrder.map((fact, index) => `R${index + 1}:${fact.id}`)
+  const reviewPayloads = reviewOrder.map((orderedFact, index) => {
+    const fact = factsById.get(orderedFact.id)
+    if (!fact || fact.provenance.length === 0) {
+      throw new Error(`Kalibrierungsfakt ${orderedFact.id} besitzt keine prüfbare Evidenz`)
+    }
+    const snapshot = snapshotsByFactId.get(fact.id)
+    if (!snapshot) throw new Error(`Kalibrierungssnapshot ${fact.id} fehlt`)
+    return serializeCalibrationReviewPayload({
+      reviewId: `R${index + 1}`,
+      statement: fact.statement,
+      evidence: calibrationReviewEvidence(fact, snapshot.sourceTypes),
+    })
+  })
+  return {
+    bundle: {
+      sessionId: selection.sessionId,
+      modelVersion: selection.modelVersion,
+      sampleSeed,
+      selectedFactIds: selection.facts.map(fact => fact.id),
+      factMap,
+      snapshotFingerprints,
+      snapshotPayloads,
+      reviewMap,
+      reviewPayloads,
+    },
+  }
+}
+
+function generateNote(
+  k: ExtractedKnowledge,
+  generatedAt: string,
+  sampleSeed: string,
+): string {
+  const datum = generatedAt.slice(0, 10)
+  const calibration = calibrationCaptureMaterial(k.selection, generatedAt, sampleSeed)
   const hasProcedure = k.selection.facts.some(fact => fact.kind === 'change' && fact.evidenceScore >= 75)
   const allTags = ['auto-capture', ...(hasProcedure ? ['prozedur'] : []), ...k.tags]
   if (k.client) allTags.push(`kunde/${k.client.toLowerCase()}`)
@@ -563,6 +699,16 @@ function generateNote(k: ExtractedKnowledge): string {
     evidence_quality: evidenceQuality,
     knowledge_fact_count: k.selection.facts.length,
     knowledge_candidate_count: k.selection.candidateCount,
+    knowledge_fact_ids: k.selection.facts.map(fact => fact.id),
+    calibration_capture_schema: CALIBRATION_CAPTURE_SCHEMA,
+    calibration_capture_producer: CALIBRATION_CAPTURE_PRODUCER,
+    calibration_capture_integrity: calibrationCaptureIntegrity(calibration.bundle),
+    calibration_sample_seed: calibration.bundle.sampleSeed,
+    calibration_fact_map: calibration.bundle.factMap,
+    calibration_snapshot_fingerprints: calibration.bundle.snapshotFingerprints,
+    calibration_snapshot_payloads: calibration.bundle.snapshotPayloads,
+    calibration_review_map: calibration.bundle.reviewMap,
+    calibration_review_payloads: calibration.bundle.reviewPayloads,
     session_intent: k.intent.intent,
     intent_confidence: k.intent.confidence,
     client_match_method: k.clientMatch.method,
@@ -604,7 +750,13 @@ function injectCaptureMetadata(
   content: string,
   redaction: RedactionResult,
   scores: ReturnType<typeof scoreCapture>,
-  session: { sessionId: string; transcriptHash: string; entryCount: number; bashCount: number },
+  session: {
+    sessionId: string
+    transcriptHash: string
+    entryCount: number
+    bashCount: number
+    generatedAt: string
+  },
 ): string {
   const fields = buildFrontmatter({
     sensitive: redaction.count > 0,
@@ -617,6 +769,7 @@ function injectCaptureMetadata(
     transcript_hash: session.transcriptHash,
     transcript_entries: session.entryCount,
     transcript_bash_commands: session.bashCount,
+    capture_generated_at: session.generatedAt,
   })
   return content.replace(/^---\n/, `---\n${fields}`)
 }
@@ -640,6 +793,7 @@ interface SessionCaptureState {
   entryCount: number
   bashCount: number
   capturePath?: string
+  calibrationSampleSeed?: string
   updatedAt: string
   skippedReason?: string
 }
@@ -654,6 +808,11 @@ function statePath(sessionId: string): string {
 
 function safeSessionStateId(sessionId: string): string {
   if (/^(?!\.{1,2}$)[a-zA-Z0-9._-]{1,120}$/.test(sessionId)) return sessionId
+  return `session-${createHash('sha256').update(sessionId).digest('hex').slice(0, 24)}`
+}
+
+function canonicalCaptureSessionId(sessionId: string): string {
+  if (/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/.test(sessionId)) return sessionId
   return `session-${createHash('sha256').update(sessionId).digest('hex').slice(0, 24)}`
 }
 
@@ -716,7 +875,10 @@ function existingGeneratedCapture(fullPath: string, sessionId: string, allowLega
   try {
     const frontmatter = parseFrontmatter(readFileSync(fullPath, 'utf-8'))
     if (frontmatter.quelle !== 'knowledge-harvester') return false
-    if (frontmatter.session_id === sessionId) return true
+    if (
+      typeof frontmatter.session_id === 'string'
+      && canonicalCaptureSessionId(frontmatter.session_id) === sessionId
+    ) return true
     return allowLegacySession && !frontmatter.session_id
   } catch {
     return false
@@ -745,7 +907,12 @@ process.stdin.on('end', async () => {
     const transcriptPath = data.transcript_path
     const cwd = data.cwd || ''
 
-    if (!sessionId || !transcriptPath) process.exit(0)
+    if (
+      typeof sessionId !== 'string'
+      || !sessionId
+      || typeof transcriptPath !== 'string'
+      || !transcriptPath
+    ) process.exit(0)
     const currentTranscriptHash = transcriptHash(transcriptPath)
     if (shouldSkipSession(sessionId, currentTranscriptHash)) {
       log(`skip ${sessionId.slice(0, 8)}: transcript hash unchanged`)
@@ -769,7 +936,8 @@ process.stdin.on('end', async () => {
     const bashCount = entries.filter(e => e.type === 'tool_use' && e.toolName === 'Bash').length
     if (entries.length < 2) process.exit(0)
 
-    const knowledge = extractKnowledge(entries, cwd, sessionId)
+    const captureSessionId = canonicalCaptureSessionId(sessionId)
+    const knowledge = extractKnowledge(entries, cwd, captureSessionId)
     if (!knowledge) {
       log(`Session ${sessionId.slice(0, 8)}: ${entries.length} entries, ${bashCount} bash — keine ausreichend salienten Wissensatome`)
       process.exit(0)
@@ -826,12 +994,16 @@ process.stdin.on('end', async () => {
 
     const safeTitle = knowledge.title.replace(/[/\\:*?"<>|]/g, '-').slice(0, 100)
     const previousState = readSessionCaptureState(sessionId)
+    const calibrationSampleSeed = previousState?.calibrationSampleSeed
+      && /^cs-[a-f0-9]{32}$/.test(previousState.calibrationSampleSeed)
+      ? previousState.calibrationSampleSeed
+      : `cs-${randomUUID().replaceAll('-', '')}`
     const proposedTarget = `${folder}/${safeTitle}.md`
     let relativeTarget = previousState?.capturePath ?? proposedTarget
     let fullPath = vaultJoin(VAULT_PATH, relativeTarget)
     let canUpdateExisting = existingGeneratedCapture(
       fullPath,
-      sessionId,
+      captureSessionId,
       previousState?.capturePath === relativeTarget,
     )
     if (existsSync(fullPath) && !canUpdateExisting) {
@@ -844,7 +1016,12 @@ process.stdin.on('end', async () => {
     const fullDir = dirname(fullPath)
 
     mkdirSync(fullDir, { recursive: true })
-    const rawNoteContent = generateNote(knowledge)
+    const captureGeneratedAt = new Date().toISOString()
+    const rawNoteContent = generateNote(
+      knowledge,
+      captureGeneratedAt,
+      calibrationSampleSeed,
+    )
     const redaction = policy.hooks.captureSafety.secretRedaction
       ? (() => {
           const noteRedaction = redactSecrets(rawNoteContent)
@@ -878,10 +1055,11 @@ process.stdin.on('end', async () => {
       selection: knowledge.selection,
     })
     const noteContent = injectCaptureMetadata(redaction.content, redaction, scores, {
-      sessionId,
+      sessionId: captureSessionId,
       transcriptHash: currentTranscriptHash,
       entryCount: entries.length,
       bashCount,
+      generatedAt: captureGeneratedAt,
     })
     writeAtomic(fullPath, noteContent)
     markSessionCaptured({
@@ -891,6 +1069,7 @@ process.stdin.on('end', async () => {
       entryCount: entries.length,
       bashCount,
       capturePath: relativeTarget,
+      calibrationSampleSeed,
       updatedAt: new Date().toISOString(),
     })
     log(`${canUpdateExisting ? 'Updated capture' : 'Captured'}: ${relativeTarget}`)
@@ -901,14 +1080,23 @@ process.stdin.on('end', async () => {
       targets: [relativeTarget],
       summary: `${canUpdateExisting ? 'Session-Capture aktualisiert' : 'Session-Capture'}: "${knowledge.title}" (${knowledge.selection.facts.length} Wissensatome)`,
       meta: {
-        sessionId,
+        sessionId: captureSessionId,
         tags: knowledge.tags,
         client: knowledge.client,
         clientMatch: knowledge.clientMatch,
         intent: knowledge.intent,
         redactions: redaction.count,
         scores,
-        salience: knowledge.selection,
+        salience: {
+          sessionId: knowledge.selection.sessionId,
+          modelVersion: knowledge.selection.modelVersion,
+          scoreScale: knowledge.selection.scoreScale,
+          factIds: knowledge.selection.facts.map(fact => fact.id),
+          salienceScores: knowledge.selection.facts.map(fact => fact.salienceScore),
+          evidenceScores: knowledge.selection.facts.map(fact => fact.evidenceScore),
+          candidateCount: knowledge.selection.candidateCount,
+          excluded: knowledge.selection.excluded,
+        },
       },
     })
 

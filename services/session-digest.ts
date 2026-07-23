@@ -164,33 +164,48 @@ function integrityCandidate(item: KnowledgeProvenance) {
 }
 
 /** Keep the smallest bounded evidence subset that reproduces the persisted score. */
-function integrityProvenance(items: KnowledgeProvenance[], targetScore: number): KnowledgeProvenance[] {
+function integrityProvenance(
+  items: KnowledgeProvenance[],
+  targetScore: number,
+  modelVersion: string,
+): KnowledgeProvenance[] {
   const byHash = new Map<string, KnowledgeProvenance>()
   for (const item of items) {
     const current = byHash.get(item.hash)
-    const currentScore = current ? (digestEvidenceScore([integrityCandidate(current)]) ?? -1) : -1
-    const candidateScore = digestEvidenceScore([integrityCandidate(item)]) ?? -1
+    const currentScore = current
+      ? (digestEvidenceScore([integrityCandidate(current)], modelVersion) ?? -1)
+      : -1
+    const candidateScore = digestEvidenceScore(
+      [integrityCandidate(item)],
+      modelVersion,
+    ) ?? -1
     if (!current || candidateScore > currentScore) byHash.set(item.hash, item)
   }
   const unique = [...byHash.values()]
   const selected: KnowledgeProvenance[] = []
   while (selected.length < MAX_PROVENANCE_PER_FACT && unique.length > 0) {
     unique.sort((left, right) => {
-      const leftScore = digestEvidenceScore([...selected, left].map(integrityCandidate)) ?? -1
-      const rightScore = digestEvidenceScore([...selected, right].map(integrityCandidate)) ?? -1
+      const leftScore = digestEvidenceScore(
+        [...selected, left].map(integrityCandidate),
+        modelVersion,
+      ) ?? -1
+      const rightScore = digestEvidenceScore(
+        [...selected, right].map(integrityCandidate),
+        modelVersion,
+      ) ?? -1
       return rightScore - leftScore || left.ref.localeCompare(right.ref, 'en')
     })
     const next = unique.shift()
     if (!next) break
     selected.push(next)
-    if (digestEvidenceScore(selected.map(integrityCandidate)) === targetScore) break
+    if (digestEvidenceScore(selected.map(integrityCandidate), modelVersion) === targetScore) break
   }
   return selected
 }
 
 function renderedProvenance(fact: KnowledgeSalienceFact): KnowledgeProvenance[] {
   return isDurable(fact)
-    ? integrityProvenance(fact.provenance, fact.evidenceScore)
+    ? integrityProvenance(fact.provenance, fact.evidenceScore, fact.modelVersion)
     : fact.provenance.slice(0, 1)
 }
 
