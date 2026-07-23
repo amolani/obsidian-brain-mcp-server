@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
+import { loadBrainPolicy } from '../services/policy.ts'
 import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
 
 describe('brain review orchestrator', () => {
+  const originalPolicyPath = process.env.BRAIN_POLICY_PATH
   let vaultPath: string
   let vault: Vault
 
@@ -28,6 +30,8 @@ describe('brain review orchestrator', () => {
   })
 
   afterEach(() => {
+    if (originalPolicyPath === undefined) delete process.env.BRAIN_POLICY_PATH
+    else process.env.BRAIN_POLICY_PATH = originalPolicyPath
     vault.shutdown()
     cleanupVault(vaultPath)
   })
@@ -74,6 +78,26 @@ describe('brain review orchestrator', () => {
       dryRun: false,
     })
     assert.ok(existsSync(join(vaultPath, 'Knowledge', 'index.md')))
+  })
+
+  test('wrapper policy blocks every apply branch but never blocks previews', () => {
+    const policy = structuredClone(loadBrainPolicy())
+    policy.tools.brain_apply_review_item.write = false
+    const policyPath = join(vaultPath, 'review-policy.json')
+    writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf-8')
+    process.env.BRAIN_POLICY_PATH = policyPath
+
+    assert.doesNotThrow(() => vault.brainApplyReviewItem({ itemId: 'safe:broken_links', dryRun: true }))
+    assert.doesNotThrow(() => vault.brainApplyReviewItem({ itemId: 'knowledge_index:build', dryRun: true }))
+    assert.throws(
+      () => vault.brainApplyReviewItem({ itemId: 'safe:broken_links', dryRun: false }),
+      /brain_apply_review_item ist laut Policy read-only/,
+    )
+    assert.throws(
+      () => vault.brainApplyReviewItem({ itemId: 'knowledge_index:build', dryRun: false }),
+      /brain_apply_review_item ist laut Policy read-only/,
+    )
+    assert.ok(!existsSync(join(vaultPath, 'Knowledge', 'index.md')))
   })
 
   test('open contradictions are surfaced as critical but not auto-applied', () => {

@@ -1,5 +1,7 @@
 import { listSuggestions, promoteClientSuggestion, promoteTechnikSuggestion } from '../suggestions.ts'
 import type { SaveKnowledgeResult } from '../vault.ts'
+import { appendActionLog } from '../services/action-log.ts'
+import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { strings, type ToolHandlerRegistry } from './types.ts'
 
 function evidenceConfidence(value: unknown): 'low' | 'medium' | 'high' | undefined {
@@ -511,6 +513,29 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     }
   },
 
+  repair_generated_surfaces(vault, args) {
+    const result = vault.repairGeneratedSurfaces({
+      dryRun: args.dry_run !== false,
+      adoptLegacy: args.adopt_legacy === true,
+    })
+    const lines = result.surfaces.map(surface => '- `' + surface.id + '`: `' + surface.path + '`').join('\n')
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Generated Surfaces Repair Vorschau' : '# Generated Surfaces repariert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Legacy-Übernahme: ${result.adoptLegacy}`,
+          `Erkannte Legacy-Surfaces: ${result.recognizedLegacy.length > 0 ? result.recognizedLegacy.join(', ') : 'keine'}`,
+          `Repariert: ${result.repaired}`,
+          '',
+          lines,
+        ].join('\n'),
+      }],
+    }
+  },
+
   build_knowledge_inbox(vault, args) {
     const result = vault.buildKnowledgeInbox({ dryRun: args.dry_run !== false })
     return {
@@ -556,6 +581,35 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
           '```json',
           JSON.stringify(result.result, null, 2),
           '```',
+        ].join('\n'),
+      }],
+    }
+  },
+
+  brain_review_inbox_items(vault, args) {
+    const result = vault.brainReviewInboxItems({
+      itemIds: strings(args.item_ids) ?? [],
+      status: args.status as 'open' | 'accepted' | 'rejected' | 'snoozed' | 'superseded',
+      reason: args.reason as string | undefined,
+      snoozedUntil: args.snoozed_until as string | undefined,
+      dryRun: args.dry_run !== false,
+    })
+    const changes = result.changes.map(change => [
+      `- \`${change.item.id}\`: ${change.previousStatus} -> ${change.nextStatus}`,
+      change.snoozedUntil ? ` (bis ${change.snoozedUntil})` : '',
+    ].join('')).join('\n')
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          result.dryRun ? '# Knowledge Inbox Review Vorschau' : '# Knowledge Inbox Review gespeichert',
+          '',
+          `Dry-Run: ${result.dryRun}`,
+          `Status: ${result.status}`,
+          `Items: ${result.changes.length}`,
+          `Summary: ${result.summary}`,
+          '',
+          changes,
         ].join('\n'),
       }],
     }
@@ -702,6 +756,9 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
   },
 
   brain_auto_build(vault, args) {
+    if (!loadBrainPolicy().automation.duringSession.allowManualAutoBuildTool) {
+      throw new Error('Manueller brain_auto_build-Aufruf ist laut Policy deaktiviert')
+    }
     const result = vault.brainAutoBuild({
       sourcePath: typeof args.source_path === 'string' ? args.source_path : undefined,
       client: typeof args.client === 'string' ? args.client : undefined,
@@ -843,11 +900,13 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
       dryRun: args.dry_run !== false,
       jobs: strings(args.jobs),
       maxRuntimeMs: typeof args.max_runtime_ms === 'number' ? args.max_runtime_ms : undefined,
+      maxJobRuntimeMs: typeof args.max_job_runtime_ms === 'number' ? args.max_job_runtime_ms : undefined,
       lockPath: typeof args.lock_path === 'string' ? args.lock_path : undefined,
       settingsPath: typeof args.settings_path === 'string' ? args.settings_path : undefined,
       client: typeof args.client === 'string' ? args.client : undefined,
       sourcePath: typeof args.source_path === 'string' ? args.source_path : undefined,
       runAutoBuild: args.run_auto_build === true,
+      maxAutoBuildSources: typeof args.max_auto_build_sources === 'number' ? args.max_auto_build_sources : undefined,
     })
     const jobs = result.jobs.map(job => `- **${job.status}** \`${job.id}\`: ${job.summary}`).join('\n')
     const next = result.nextActions.length > 0
@@ -1005,11 +1064,12 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
   },
 
   build_project_dashboard(vault, args) {
+    if (args.dry_run === false) assertCanWriteTool('build_project_dashboard')
     return renderCustomerDashboard(vault, args.project as string, args)
   },
 
   organize_referenz(vault, args) {
-    const dryRun = args.dry_run === true
+    const dryRun = args.dry_run !== false
     const result = vault.organizeReferenz(dryRun)
 
     const movedText = result.moved.length > 0
@@ -1065,32 +1125,51 @@ export const knowledgeHandlers: ToolHandlerRegistry = {
     return { content: [{ type: 'text', text: sections.join('\n') }] }
   },
 
-  promote_suggestion(_vault, args) {
+  promote_suggestion(vault, args) {
     const type = args.type as string
     const candidate = args.candidate as string
     const canonical = args.canonical as string | undefined
     const keywords = (args.keywords as string[] | undefined) ?? []
+    const dryRun = args.dry_run !== false
 
     if (type === 'technik') {
       const parent = args.parent as string
       if (!parent) {
         return { content: [{ type: 'text', text: 'Fehler: parent muss angegeben sein für type=technik' }], isError: true }
       }
-      const result = promoteTechnikSuggestion(parent, candidate, canonical, keywords)
+      const result = promoteTechnikSuggestion(parent, candidate, canonical, keywords, [], { dryRun })
       const existedNote = result.existed ? ' (Keywords ergänzt)' : ' (neu angelegt)'
+      if (!dryRun) {
+        appendActionLog(vault.vaultPath, {
+          tool: 'promote_suggestion',
+          mode: 'apply',
+          targets: [result.path],
+          summary: `Technik-Suggestion übernommen: ${result.category}/${result.subcategory}`,
+          meta: { type, candidate, canonical: result.subcategory, existed: result.existed },
+        })
+      }
       return {
         content: [{
           type: 'text',
-          text: `Technik-Unterkategorie **${result.category}/${result.subcategory}** übernommen${existedNote}.\n\nKonfiguration: ${result.path}\n\nTipp: Lauf \`organize_referenz\` um bestehende Notes jetzt sofort in die neue Unterkategorie zu sortieren.`,
+          text: `${dryRun ? 'Vorschau: ' : ''}Technik-Unterkategorie **${result.category}/${result.subcategory}** ${dryRun ? 'würde übernommen' : 'übernommen'}${existedNote}.\n\nDry-Run: ${dryRun}\nKonfiguration: ${result.path}\n\nTipp: Lauf \`organize_referenz\` als separaten Dry-Run, um bestehende Notes zu prüfen.`,
         }],
       }
     } else if (type === 'client') {
-      const result = promoteClientSuggestion(candidate, canonical, keywords)
+      const result = promoteClientSuggestion(candidate, canonical, keywords, { dryRun })
       const existedNote = result.existed ? ' (Keywords ergänzt)' : ' (neu angelegt)'
+      if (!dryRun) {
+        appendActionLog(vault.vaultPath, {
+          tool: 'promote_suggestion',
+          mode: 'apply',
+          targets: [result.path],
+          summary: `Client-Suggestion übernommen: ${result.name}`,
+          meta: { type, candidate, canonical: result.name, existed: result.existed },
+        })
+      }
       return {
         content: [{
           type: 'text',
-          text: `Kunde **${result.name}** übernommen${existedNote}.\n\nKonfiguration: ${result.path}\n\nAb der nächsten Session werden Captures mit diesem Namen nach \`Kunden/${result.name}/\` einsortiert.`,
+          text: `${dryRun ? 'Vorschau: ' : ''}Kunde **${result.name}** ${dryRun ? 'würde übernommen' : 'übernommen'}${existedNote}.\n\nDry-Run: ${dryRun}\nKonfiguration: ${result.path}\n\nNach Anwendung werden passende Captures ab der nächsten Session nach \`Kunden/${result.name}/\` einsortiert.`,
         }],
       }
     } else {

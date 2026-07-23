@@ -15,7 +15,8 @@ export interface UpdateEvidenceOptions {
   source?: string
   confirmedBy?: string[]
   contradictedBy?: string[]
-  checkedAt?: string
+  /** `null` preserves the current value; useful for automated extraction that is not a factual review. */
+  checkedAt?: string | null
   recheckAt?: string
   expiresAt?: string
   dryRun?: boolean
@@ -74,7 +75,9 @@ export function updateEvidence(vault: Vault, options: UpdateEvidenceOptions): Ev
   const before = JSON.stringify(fm)
   if (options.confidence) fm.confidence = options.confidence
   if (options.source?.trim()) fm.quelle = options.source.trim()
-  if (options.checkedAt !== undefined) fm.checked_at = options.checkedAt || today()
+  if (options.checkedAt === null) {
+    // Automated processing is provenance, not a factual review.
+  } else if (options.checkedAt !== undefined) fm.checked_at = options.checkedAt || today()
   else fm.checked_at = fm.checked_at ?? today()
   if (options.recheckAt !== undefined) fm.recheck_at = options.recheckAt
   if (options.expiresAt !== undefined) fm.expires_at = options.expiresAt

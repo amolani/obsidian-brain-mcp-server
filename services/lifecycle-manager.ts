@@ -4,6 +4,7 @@ import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
 import { scoreNoteQuality } from './note-quality.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export type LifecycleAction = 'activate' | 'archive' | 'review'
 export type LifecycleConfidence = 'high' | 'medium' | 'low'
@@ -255,6 +256,7 @@ export function applyLifecycleUpdates(
         skipped.push({ path: suggestion.path, reason: 'Note nicht mehr im Index' })
         continue
       }
+      assertCanWriteTool('apply_lifecycle_updates', [suggestion.path])
       const fm = {
         ...entry.frontmatter,
         status: suggestion.recommendedStatus,

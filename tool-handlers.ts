@@ -14,6 +14,9 @@ const TOOL_HANDLERS: ToolHandlerRegistry = {
   ...maintenanceHandlers,
 }
 
+/** Stable, read-only registry view used by release-contract tests. */
+export const TOOL_HANDLER_NAMES = Object.freeze(Object.keys(TOOL_HANDLERS).sort())
+
 export function createToolHandler(vault: Vault) {
   return async (req: ToolCallRequest) => {
     const args = (req.params.arguments ?? {}) as Record<string, unknown>

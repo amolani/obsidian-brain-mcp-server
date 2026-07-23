@@ -2,6 +2,7 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertCanWriteTool } from './policy.ts'
 
 export interface LinkSuggestionV2 {
   source: string
@@ -178,11 +179,48 @@ function buildCandidates(vault: Vault): MentionCandidate[] {
   return [...candidates.values()]
 }
 
+function mentionTokens(value: string): Set<string> {
+  return new Set((value.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? []).filter(token => token.length >= 2))
+}
+
+function indexCandidates(candidates: MentionCandidate[]): {
+  byToken: Map<string, MentionCandidate[]>
+  fallback: MentionCandidate[]
+} {
+  const frequencies = new Map<string, number>()
+  const tokensByCandidate = new Map<MentionCandidate, string[]>()
+  for (const candidate of candidates) {
+    const tokens = [...mentionTokens(candidate.term)]
+    tokensByCandidate.set(candidate, tokens)
+    for (const token of tokens) frequencies.set(token, (frequencies.get(token) ?? 0) + 1)
+  }
+
+  const byToken = new Map<string, MentionCandidate[]>()
+  const fallback: MentionCandidate[] = []
+  for (const candidate of candidates) {
+    const tokens = tokensByCandidate.get(candidate) ?? []
+    const key = [...tokens].sort((a, b) =>
+      (frequencies.get(a) ?? 0) - (frequencies.get(b) ?? 0)
+      || b.length - a.length
+      || a.localeCompare(b)
+    )[0]
+    if (!key) {
+      fallback.push(candidate)
+      continue
+    }
+    const bucket = byToken.get(key) ?? []
+    bucket.push(candidate)
+    byToken.set(key, bucket)
+  }
+  return { byToken, fallback }
+}
+
 export function suggestLinksV2(vault: Vault, options: LinkSuggestionOptions = {}): LinkSuggestionV2[] {
   const minConfidence = options.minConfidence ?? 0.55
   const maxPerNote = options.maxPerNote ?? 5
   const maxTotal = options.maxTotal ?? 100
   const candidates = buildCandidates(vault)
+  const candidateIndex = indexCandidates(candidates)
   const results: LinkSuggestionV2[] = []
 
   for (const [source, sourceEntry] of vault.notes) {
@@ -191,8 +229,12 @@ export function suggestLinksV2(vault: Vault, options: LinkSuggestionOptions = {}
     )
     const sourceFolders = folderParts(source)
     const perSource: LinkSuggestionV2[] = []
+    const relevantCandidates = new Set<MentionCandidate>(candidateIndex.fallback)
+    for (const token of mentionTokens(sourceEntry.content)) {
+      for (const candidate of candidateIndex.byToken.get(token) ?? []) relevantCandidates.add(candidate)
+    }
 
-    for (const candidate of candidates) {
+    for (const candidate of relevantCandidates) {
       if (candidate.target === source) continue
       if (existingTargets.has(candidate.target)) continue
       if (hasExistingLiteralLink(sourceEntry.content, candidate.term)) continue
@@ -306,6 +348,7 @@ export function applyLinkSuggestions(vault: Vault, options: ApplyLinkSuggestions
     }
 
     if (changed && !dryRun) {
+      assertCanWriteTool('apply_link_suggestions', [source])
       writeFileSync(entry.path, `${split.prefix}${body}`, 'utf-8')
       vault.indexNote(entry.path, statSync(entry.path).mtimeMs)
     }

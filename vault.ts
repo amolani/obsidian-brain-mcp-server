@@ -1,6 +1,6 @@
-import { readFileSync, readdirSync, statSync, watch, unlinkSync } from 'node:fs'
-import { join, relative, extname } from 'node:path'
-import { findDuplicates as findDuplicatesService, type DuplicateMatch } from './services/duplicate-analyzer.ts'
+import { lstatSync, readFileSync, readdirSync, statSync, watch, unlinkSync } from 'node:fs'
+import { join, relative, extname, resolve } from 'node:path'
+import { findDuplicates as findDuplicatesService, type DuplicateMatch, type FindDuplicatesOptions } from './services/duplicate-analyzer.ts'
 import { findBrokenLinks as findBrokenLinksService, fixBrokenLinks as fixBrokenLinksService, type BrokenLink } from './services/broken-link-analyzer.ts'
 import { lintFrontmatter as lintFrontmatterService, fixFrontmatter as fixFrontmatterService, type FrontmatterFixOptions, type FrontmatterLintOptions, type FrontmatterProfile, type LintIssue } from './services/frontmatter-linter.ts'
 import { generateMocs as generateMocsService, type MocResult } from './services/moc-generator.ts'
@@ -53,13 +53,15 @@ import { buildCaptureReview as buildCaptureReviewService, type BuildCaptureRevie
 import { buildEvidenceDashboard as buildEvidenceDashboardService, type BuildEvidenceDashboardOptions, type EvidenceDashboardResult } from './services/evidence-dashboard.ts'
 import { buildSessionImpactReport as buildSessionImpactReportService, type BuildSessionImpactReportOptions, type SessionImpactReportResult } from './services/session-impact-report.ts'
 import { buildKnowledgeInbox as buildKnowledgeInboxService, type BuildKnowledgeInboxOptions, type KnowledgeInboxResult } from './services/knowledge-inbox.ts'
-import { brainApplyInboxItem as brainApplyInboxItemService, type BrainApplyInboxItemOptions, type BrainApplyInboxItemResult, type KnowledgeInboxItem } from './services/knowledge-inbox-actions.ts'
+import { brainApplyInboxItem as brainApplyInboxItemService, brainReviewInboxItems as brainReviewInboxItemsService, type BrainApplyInboxItemOptions, type BrainApplyInboxItemResult, type BrainReviewInboxItemsOptions, type BrainReviewInboxItemsResult, type KnowledgeInboxItem, type KnowledgeInboxItemStatus } from './services/knowledge-inbox-actions.ts'
 import { migrateBrainMetadata as migrateBrainMetadataService, type BrainMetadataMigrationResult, type MigrateBrainMetadataOptions } from './services/brain-metadata-migration.ts'
 import { buildChangeLedger as buildChangeLedgerService, type BuildChangeLedgerOptions, type ChangeLedgerResult } from './services/change-ledger.ts'
 import { runBackgroundBrain as runBackgroundBrainService, type BackgroundJobResult, type BackgroundRunOptions, type BackgroundRunResult } from './services/background-runner.ts'
+import { repairGeneratedSurfaces as repairGeneratedSurfacesService, type RepairGeneratedSurfacesOptions, type RepairGeneratedSurfacesResult } from './services/generated-surface-repair.ts'
+import { assertSafeRelativePath, vaultJoin } from './services/vault-paths.ts'
 
 // Re-export service types so existing consumers (server.ts) keep working.
-export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookOptions, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, BuildCaptureReviewOptions, CaptureReviewResult, BuildEvidenceDashboardOptions, EvidenceDashboardResult, BuildSessionImpactReportOptions, SessionImpactReportResult, BuildKnowledgeInboxOptions, KnowledgeInboxResult, BrainApplyInboxItemOptions, BrainApplyInboxItemResult, KnowledgeInboxItem, MigrateBrainMetadataOptions, BrainMetadataMigrationResult, BuildChangeLedgerOptions, ChangeLedgerResult, BackgroundRunOptions, BackgroundRunResult, BackgroundJobResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult, BrainHealthOptions, BrainHealthResult }
+export type { BrokenLink, LintIssue, FrontmatterProfile, FrontmatterLintOptions, FrontmatterFixOptions, MocResult, MaintenanceReport, DuplicateMatch, CaptureMode, CaptureV2Options, CaptureV2Result, NoteQualityScore, LinkSuggestionV2, LinkSuggestionOptions, ApplyLinkSuggestionsOptions, ApplyLinkSuggestionsResult, CustomerDashboardOptions, CustomerDashboardResult, MergeDuplicatesOptions, MergeDuplicatesResult, LifecycleAnalyzeOptions, LifecycleApplyOptions, LifecycleApplyResult, LifecycleSuggestion, SemanticSearchOptions, SemanticSearchResult, SemanticIndexStatus, RebuildSemanticIndexOptions, RebuildSemanticIndexResult, ContextPack, ContextPackOptions, RunSafeMaintenanceOptions, RunSafeMaintenanceResult, SafeMaintenanceStep, SearchParams, SearchResult, CreateNoteOptions, CreateNoteResult, VaultStats, NoteContext, TodoItem, WeeklyReview, LegacyLinkSuggestion, DailyNoteResult, GenerateRunbookOptions, GenerateRunbookResult, OrganizeReferenzResult, RenameNoteOptions, RenameNoteResult, TriageNoteOptions, TriageNoteResult, TriageInboxOptions, TriageInboxResult, ReviewQueueActionOptions, ReviewQueueActionResult, ApplyAllSafeFixesOptions, ExtractTroubleshootingPatternResult, PromoteCaptureToRunbookOptions, PromoteCaptureToRunbookResult, GeneratePostmortemOptions, GeneratePostmortemResult, IngestSourceOptions, IngestSourceResult, SaveKnowledgeOptions, SaveKnowledgeResult, SavedKnowledgeType, HotCacheResult, UpdateHotCacheOptions, BuildKnowledgeIndexOptions, KnowledgeIndexResult, FlagKnowledgeGapOptions, FlagContradictionOptions, ResolveGapOptions, KnowledgeGapResult, OpenQuestion, CreateResearchPlanOptions, ResearchPlanResult, BrainReviewOptions, BrainReviewItem, BrainReviewResult, BrainApplyReviewItemOptions, BrainApplyReviewItemResult, EvidenceConfidence, EvidenceIssue, EvidenceUpdateResult, UpdateEvidenceOptions, ExtractClaimsOptions, ExtractClaimsResult, ExtractedClaim, BuildBrainDashboardOptions, BrainDashboardResult, BuildCaptureReviewOptions, CaptureReviewResult, BuildEvidenceDashboardOptions, EvidenceDashboardResult, BuildSessionImpactReportOptions, SessionImpactReportResult, BuildKnowledgeInboxOptions, KnowledgeInboxResult, BrainApplyInboxItemOptions, BrainApplyInboxItemResult, BrainReviewInboxItemsOptions, BrainReviewInboxItemsResult, KnowledgeInboxItem, KnowledgeInboxItemStatus, MigrateBrainMetadataOptions, BrainMetadataMigrationResult, BuildChangeLedgerOptions, ChangeLedgerResult, BackgroundRunOptions, BackgroundRunResult, BackgroundJobResult, RepairGeneratedSurfacesOptions, RepairGeneratedSurfacesResult, RecordBrainFeedbackOptions, BrainFeedbackResult, BrainFeedbackSummary, BuildMemoryTimelineOptions, MemoryTimelineEvent, MemoryTimelineResult, BrainScheduleOptions, BrainScheduleItem, BrainScheduleResult, BrainAutoBuildOptions, BrainAutoBuildResult, BrainAutoBuildStep, ArchiveAutoBuildRunOptions, ArchiveAutoBuildRunResult, BuildCustomerSnapshotOptions, CustomerSnapshotResult, BrainMetrics, BrainCheckpointOptions, BrainCheckpointResult, BrainHealthOptions, BrainHealthResult }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -93,10 +95,10 @@ export class Vault {
     this.vaultPath = vaultPath
   }
 
-  async init(): Promise<void> {
+  async init(options: { quiet?: boolean } = {}): Promise<void> {
     this.scanVault()
     this.startWatcher()
-    process.stderr.write(`obsidian-brain: indexed ${this.notes.size} notes\n`)
+    if (!options.quiet) process.stderr.write(`obsidian-brain: indexed ${this.notes.size} notes\n`)
   }
 
   shutdown(): void {
@@ -127,6 +129,10 @@ export class Vault {
     }
   }
 
+  refreshIndex(): void {
+    this.scanVault()
+  }
+
   private scanDirectory(dir: string): void {
     let entries: string[]
     try {
@@ -139,10 +145,13 @@ export class Vault {
       const fullPath = join(dir, entry)
       let stat
       try {
-        stat = statSync(fullPath)
+        stat = lstatSync(fullPath)
       } catch {
         continue
       }
+      // Internal symlinks are intentionally not traversed. Besides keeping the
+      // vault boundary strict, this prevents directory cycles during startup.
+      if (stat.isSymbolicLink()) continue
       if (stat.isDirectory()) {
         this.scanDirectory(fullPath)
       } else if (extname(entry) === '.md') {
@@ -152,15 +161,25 @@ export class Vault {
   }
 
   indexNote(fullPath: string, mtimeMs: number): void {
+    const relativePath = assertSafeRelativePath(
+      relative(resolve(this.vaultPath), resolve(fullPath)).replace(/\\/g, '/'),
+    )
+    const safeFullPath = vaultJoin(this.vaultPath, relativePath)
+    if (resolve(safeFullPath) !== resolve(fullPath)) {
+      throw new Error(`Pfad liegt außerhalb des Vaults: ${fullPath}`)
+    }
+
     let raw: string
     try {
-      raw = readFileSync(fullPath, 'utf-8')
+      raw = readFileSync(safeFullPath, 'utf-8')
     } catch {
       return
     }
 
-    const relativePath = relative(this.vaultPath, fullPath)
-    const entry = parseNoteEntry(fullPath, relativePath, raw, mtimeMs)
+    const entry = parseNoteEntry(safeFullPath, relativePath, raw, mtimeMs)
+
+    const previousEntry = this.notes.get(relativePath)
+    if (previousEntry) this.removeTagsFromIndex(previousEntry)
 
     this.notes.set(relativePath, entry)
 
@@ -173,15 +192,19 @@ export class Vault {
     // Note: link index is built in buildLinkIndex() after all notes are scanned
   }
 
+  private removeTagsFromIndex(entry: NoteEntry): void {
+    for (const tag of entry.tags) {
+      const paths = this.tagIndex.get(tag)
+      paths?.delete(entry.relativePath)
+      if (paths?.size === 0) this.tagIndex.delete(tag)
+    }
+  }
+
   private removeFromIndex(relativePath: string): void {
     const entry = this.notes.get(relativePath)
     if (!entry) return
 
-    // Remove from tag index
-    for (const tag of entry.tags) {
-      this.tagIndex.get(tag)?.delete(relativePath)
-      if (this.tagIndex.get(tag)?.size === 0) this.tagIndex.delete(tag)
-    }
+    this.removeTagsFromIndex(entry)
 
     removeNoteFromLinkIndex(this.linkIndex, this.notes, relativePath)
 
@@ -204,18 +227,25 @@ export class Vault {
     try {
       this.watcher = watch(this.vaultPath, { recursive: true }, (_event, filename) => {
         if (!filename || !filename.endsWith('.md')) return
-        if (filename.startsWith('.')) return
-
-        const fullPath = join(this.vaultPath, filename)
-        const relativePath = filename
+        let relativePath: string
+        let fullPath: string
+        try {
+          relativePath = assertSafeRelativePath(filename.replace(/\\/g, '/'))
+          if (relativePath.split('/').some(segment => segment.startsWith('.'))) return
+          fullPath = vaultJoin(this.vaultPath, relativePath)
+        } catch {
+          return
+        }
 
         // Remove old entry first
         this.removeFromIndex(relativePath)
 
         // Re-index if file still exists
         try {
-          const stat = statSync(fullPath)
-          this.indexNote(fullPath, stat.mtimeMs)
+          const stat = lstatSync(fullPath)
+          if (!stat.isSymbolicLink() && stat.isFile()) {
+            this.indexNote(fullPath, stat.mtimeMs)
+          }
         } catch {
           // File was deleted, already removed from index
         }
@@ -391,6 +421,10 @@ export class Vault {
     return brainApplyInboxItemService(this, options)
   }
 
+  brainReviewInboxItems(options: BrainReviewInboxItemsOptions): BrainReviewInboxItemsResult {
+    return brainReviewInboxItemsService(this, options)
+  }
+
   migrateBrainMetadata(options: MigrateBrainMetadataOptions = {}): BrainMetadataMigrationResult {
     return migrateBrainMetadataService(this, options)
   }
@@ -401,6 +435,10 @@ export class Vault {
 
   runBackgroundBrain(options: BackgroundRunOptions = {}): BackgroundRunResult {
     return runBackgroundBrainService(this, options)
+  }
+
+  repairGeneratedSurfaces(options: RepairGeneratedSurfacesOptions = {}): RepairGeneratedSurfacesResult {
+    return repairGeneratedSurfacesService(this, options)
   }
 
   recordBrainFeedback(options: RecordBrainFeedbackOptions): BrainFeedbackResult {
@@ -526,10 +564,11 @@ export class Vault {
 
   // ── Public API: Organize Referenz into Technik ─────────────────────
 
-  organizeReferenz(dryRun: boolean = false): OrganizeReferenzResult {
+  organizeReferenz(dryRun: boolean = true): OrganizeReferenzResult {
     return organizeReferenzService({
       vaultPath: this.vaultPath,
       notes: this.notes,
+      removeNoteFromIndex: relativePath => this.removeNoteFromIndex(relativePath),
       indexNote: (fullPath, mtimeMs) => this.indexNote(fullPath, mtimeMs),
       buildLinkIndex: () => this.buildLinkIndex(),
     }, dryRun)
@@ -537,8 +576,8 @@ export class Vault {
 
   // ── Public API: Find Duplicates ────────────────────────────────────
 
-  findDuplicates(minScore: number = 40): DuplicateMatch[] {
-    return findDuplicatesService(this, minScore)
+  findDuplicates(minScore: number = 40, options: FindDuplicatesOptions = {}): DuplicateMatch[] {
+    return findDuplicatesService(this, minScore, options)
   }
 
   mergeDuplicates(options: MergeDuplicatesOptions = {}): MergeDuplicatesResult {
@@ -605,7 +644,7 @@ export class Vault {
 
   // ── Public API: Generate MOCs (Maps of Content) ────────────────────
 
-  generateMocs(dryRun: boolean = false, minNotes: number = 2): MocResult[] {
+  generateMocs(dryRun: boolean = true, minNotes: number = 2): MocResult[] {
     return generateMocsService(this, dryRun, minNotes)
   }
 

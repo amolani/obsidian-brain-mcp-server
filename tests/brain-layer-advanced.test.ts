@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
 import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
@@ -111,6 +111,24 @@ describe('advanced brain layer', () => {
     assert.equal(summary.total, 1)
     assert.equal(summary.rejected, 1)
     assert.equal(summary.byCategory.links.rejected, 1)
+    assert.ok(!readdirSync(vaultPath).some(name => name.includes('.brain-feedback.json.tmp-')))
+  })
+
+  test('corrupt feedback fails closed instead of erasing prior learning', () => {
+    const path = join(vaultPath, '.brain-feedback.json')
+    writeFileSync(path, '{ broken feedback', 'utf-8')
+
+    assert.throws(
+      () => vault.recordBrainFeedback({
+        itemId: 'safe:broken_links',
+        outcome: 'rejected',
+        category: 'links',
+        dryRun: false,
+      }),
+      /Brain-Feedback ist beschädigt/,
+    )
+    assert.equal(readFileSync(path, 'utf-8'), '{ broken feedback')
+    assert.ok(!readdirSync(vaultPath).some(name => name.includes('.brain-feedback.json.tmp-')))
   })
 
   test('memory timeline and schedule are explicit workflows', () => {

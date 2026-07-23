@@ -102,6 +102,27 @@ describe('source ingest', () => {
     assert.match(note, /Ticket Kontext/)
   })
 
+  test('corrupt source manifest fails closed before writing an output note', () => {
+    writeFileSync(join(vaultPath, '.raw', '.manifest.json'), '{ corrupt', 'utf-8')
+
+    assert.throws(
+      () => vault.ingestSource({ sourcePath: '.raw/articles/vendor-doc.md', dryRun: false }),
+      /Source-Ingest-Manifest ist beschädigt/,
+    )
+    assert.ok(!existsSync(join(vaultPath, 'Referenz', 'Quellen', 'Vendor DHCP Notes.md')))
+  })
+
+  test('does not overwrite a manifest target whose ownership marker was removed', () => {
+    const first = vault.ingestSource({ sourcePath: '.raw/articles/vendor-doc.md', dryRun: false })
+    writeFileSync(join(vaultPath, first.outputPath), '---\nstatus: aktiv\nquelle: user\n---\n\n# Personal note\n', 'utf-8')
+
+    assert.throws(
+      () => vault.ingestSource({ sourcePath: '.raw/articles/vendor-doc.md', dryRun: false, force: true }),
+      /nicht von \.raw\/articles\/vendor-doc\.md generiert/,
+    )
+    assert.match(readFileSync(join(vaultPath, first.outputPath), 'utf-8'), /# Personal note/)
+  })
+
   test('rejects sources outside .raw', () => {
     assert.throws(
       () => vault.ingestSource({ sourcePath: 'Referenz/source.md', dryRun: true }),

@@ -11,7 +11,7 @@ npm run brain-quality
 npm run release-check
 ```
 
-CI runs the same release check on GitHub Actions for Node 22 and 24.
+The minimum supported runtime is Node.js 22.18.0. CI runs the same release check on the latest Node 22 and 24 releases.
 
 ## Manual Review
 
@@ -25,7 +25,8 @@ CI runs the same release check on GitHub Actions for Node 22 and 24.
 - Capture safety is enabled: secret redaction on, risky auto-apply still blocked.
 - `migrate_brain_metadata` preview has been reviewed for existing production vaults.
 - `node cli.ts background --vault <demo-or-test-vault> --apply` writes a readable Background Run Report.
-- `node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force` completes on the release machine.
+- `node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force --enforce-baseline` passes on a machine comparable to the profile in `benchmarks/large-vault-baseline.json`; otherwise record a new three-run median explicitly and review it before updating the baseline.
+- The benchmark JSON reports `stability.status: pass`; `npm run release-check` independently exercises the bounded large-vault duplicate path at 1,100 notes.
 - `plugins/claude-code/` is clearly marked as a template, not the primary install path.
 - Generated assets and demo data contain no private vault content.
 

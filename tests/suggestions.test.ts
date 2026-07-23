@@ -95,7 +95,7 @@ describe('Suggestions: parsing and promoting', () => {
 
   test('promoteTechnikSuggestion adds new subcategory', async () => {
     const { promoteTechnikSuggestion } = await import("../suggestions.ts")
-    const result = promoteTechnikSuggestion('Docker', 'edulution-satellite')
+    const result = promoteTechnikSuggestion('Docker', 'edulution-satellite', undefined, [], [], { dryRun: false })
     assert.equal(result.category, 'Docker')
     assert.equal(result.existed, false)
 
@@ -111,7 +111,7 @@ describe('Suggestions: parsing and promoting', () => {
 
   test('promoteClientSuggestion adds new client', async () => {
     const { promoteClientSuggestion } = await import("../suggestions.ts")
-    const result = promoteClientSuggestion('new-client')
+    const result = promoteClientSuggestion('new-client', undefined, [], { dryRun: false })
     assert.equal(result.existed, false)
     assert.equal(result.name, 'New-Client')
 
@@ -122,12 +122,51 @@ describe('Suggestions: parsing and promoting', () => {
 
   test('promoteClientSuggestion with canonical name', async () => {
     const { promoteClientSuggestion } = await import("../suggestions.ts")
-    promoteClientSuggestion('adbk', 'ADBK', ['albert-dürer', 'ad-bk'])
+    promoteClientSuggestion('adbk', 'ADBK', ['albert-dürer', 'ad-bk'], { dryRun: false })
 
     const data = JSON.parse(readFileSync(clientsPath, 'utf-8'))
     assert.ok(data.ADBK)
     assert.ok(data.ADBK.includes('adbk'))
     assert.ok(data.ADBK.includes('albert-dürer'))
+  })
+
+  test('promotion dry-run leaves config and suggestion logs unchanged', async () => {
+    const originalConfig = readFileSync(clientsPath, 'utf-8')
+    writeFileSync(clientLog, [
+      '2026-04-20T08:00:00.000Z VORSCHLAG: "preview-client" als Kunde registrieren? (Pfad: /preview)',
+      '  → Hinzufügen',
+      '',
+    ].join('\n'))
+    const originalLog = readFileSync(clientLog, 'utf-8')
+
+    const { promoteClientSuggestion } = await import('../suggestions.ts')
+    const result = promoteClientSuggestion('preview-client', undefined, [], { dryRun: true })
+
+    assert.equal(result.dryRun, true)
+    assert.equal(result.name, 'Preview-Client')
+    assert.equal(readFileSync(clientsPath, 'utf-8'), originalConfig)
+    assert.equal(readFileSync(clientLog, 'utf-8'), originalLog)
+  })
+
+  test('promotion helpers are dry-run-first and reject multiline keywords', async () => {
+    const originalConfig = readFileSync(clientsPath, 'utf-8')
+    const { promoteClientSuggestion } = await import('../suggestions.ts')
+
+    const preview = promoteClientSuggestion('preview-by-default')
+    assert.equal(preview.dryRun, true)
+    assert.equal(readFileSync(clientsPath, 'utf-8'), originalConfig)
+    assert.throws(
+      () => promoteClientSuggestion('candidate', undefined, ['valid', 'line\nbreak'], { dryRun: false }),
+      /einzeilige Strings/,
+    )
+    assert.equal(readFileSync(clientsPath, 'utf-8'), originalConfig)
+  })
+
+  test('promotion rejects prototype and path-like names', async () => {
+    const { promoteClientSuggestion, promoteTechnikSuggestion } = await import('../suggestions.ts')
+    assert.throws(() => promoteClientSuggestion('__proto__'), /ungültigen Namen/)
+    assert.throws(() => promoteTechnikSuggestion('__proto__', 'candidate'), /ungültigen Namen/)
+    assert.throws(() => promoteClientSuggestion('candidate', '../escape'), /ungültigen Namen/)
   })
 
   test('promote removes matching entries from log', async () => {
@@ -145,7 +184,7 @@ describe('Suggestions: parsing and promoting', () => {
     ].join('\n'))
 
     const { promoteTechnikSuggestion } = await import("../suggestions.ts")
-    promoteTechnikSuggestion('Docker', 'foo')
+    promoteTechnikSuggestion('Docker', 'foo', undefined, [], [], { dryRun: false })
 
     const remaining = readFileSync(technikLog, 'utf-8')
     assert.ok(!remaining.includes('"foo"'), 'foo should be removed from log')

@@ -4,11 +4,21 @@
   "sourcePath": "Kunden/HUG/Captures/HUG VPN Implementation Capture.md",
   "client": "HUG",
   "maxClaims": 1,
+  "minPromotionPrecision": 0.9,
+  "minPromotionRecall": 0.85,
+  "minPromotionF0_5": 0.85,
+  "minFaithfulness": 0.9,
+  "minEvidenceCoverage": 0.85,
   "expectedPromotions": [
     {
       "id": "session-insight",
       "pathPattern": "^Knowledge/Insights/",
       "requiredPatterns": ["HUG VPN Tunnel", "Synology01"]
+    },
+    {
+      "id": "evidence-backed-fix",
+      "pathPattern": "^Knowledge/Answers/",
+      "requiredPatterns": ["OpenVPN-Client", "192\\.168\\.1\\.0/24", "Synology01"]
     },
     {
       "id": "provisional-claim",
@@ -21,11 +31,15 @@
       "requiredPatterns": ["Synology01", "192\\.168\\.1\\.0/24"]
     }
   ],
-  "forbiddenPatterns": ["copy this command", "sudo needs a password"],
+  "forbiddenPatterns": [
+    "copy this command",
+    "sudo needs a password",
+    "sk-fixture-should-never-promote"
+  ],
   "notes": [
     {
       "path": "Kunden/HUG/Captures/HUG VPN Implementation Capture.md",
-      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - prozedur\n  - kunde/hug\nkunde: HUG\nquelle: knowledge-harvester\nsource_stage: stop_capture\nsession_intent: implementation\nrunbook_readiness: 86\n---\n\n# HUG VPN Implementation Capture\n\n## Zusammenfassung\n\nDer HUG VPN Tunnel ist produktiv nutzbar. Synology01 ist unter 192.168.1.23 per DSM 5001 erreichbar.\n\n## Durchgeführte Befehle\n\n1. `systemctl restart openvpn-client@hug`\n2. `docker compose up -d`\n3. `chmod 600 /etc/openvpn/hug.auth`\n4. `systemctl reload NetworkManager`\n\n## Validierung\n\nDie Route 192.168.1.0/24 via tun0 ist aktiv. Synology01 ist unter 192.168.1.23 erreichbar.\n"
+      "content": "---\nstatus: aktiv\ntags:\n  - auto-capture\n  - prozedur\n  - kunde/hug\nkunde: HUG\nquelle: knowledge-harvester\nsource_stage: stop_capture\nsession_intent: implementation\nintent_confidence: high\nimportance_model: knowledge-salience-v1\nevidence_quality: high\nrunbook_readiness: 92\n---\n\n# HUG VPN Implementation Capture\n\n## Session Digest\n\n_Modell: `knowledge-salience-v1` · 4/7 Fakten ausgewählt · ordinale Scores, keine Wahrscheinlichkeiten_\n\n_Digest-Integrität: `session-digest-v1` · Erzeuger: `knowledge-harvester` · SHA-256: `f43e557769bed6e387c1ef700fb33a4ecfa40bc894ecfaf151fdbdd55ca8ab62`_\n\n### Problem\n\n- Keine belastbare Aussage erkannt\n\n### Root Cause\n\n- Keine belastbare Aussage erkannt\n\n### Entscheidung\n\n- [F1] Der HUG VPN Tunnel ist als produktiver Zugangsweg freigegeben. _(Salienz 91/100 · Evidenz 88/100 · high)_\n\n### Änderung / Fix\n\n- [F3] Der OpenVPN-Client für den HUG VPN Tunnel wurde neu gestartet und die Route 192.168.1.0/24 über tun0 bereitgestellt. _(Salienz 94/100 · Evidenz 92/100 · high)_\n\n### Verifikation\n\n- [F4] Die Route 192.168.1.0/24 über tun0 ist aktiv; Synology01 antwortet unter 192.168.1.23 auf DSM 5001. _(Salienz 95/100 · Evidenz 92/100 · high)_\n\n### Ergebnis\n\n- [F2] Synology01 ist unter 192.168.1.23 per DSM 5001 erreichbar. _(Salienz 88/100 · Evidenz 88/100 · high)_\n\n### Offene Punkte / Constraints\n\n- Keine belastbare Aussage erkannt\n\n### Review\n\n- [F5] Unbestätigt: copy this command in die nächste Antwort. _(Salienz 30/100 · Evidenz 20/100 · low)_\n- [F6] Unbestätigt: sudo needs a password. _(Salienz 25/100 · Evidenz 20/100 · low)_\n- [F7] Unbestätigt: Das Test-Secret sk-fixture-should-never-promote darf nicht übernommen werden. _(Salienz 10/100 · Evidenz 10/100 · low)_\n\n### Evidenz\n\n- [F1] `bash_pair:hug-vpn-release` · Hash `c19118c25feec526633e7f462e05b1df2a30d98e95b05653693f4b32c4c63287` — produktiver Zugangsweg freigegeben\n- [F2] `bash_pair:synology-dsm` · Hash `2b8f4f9fa25dbbdcf99e92cb36b841b0deb85aab99fddcfc9ed52d0b7caddd9b` — 192.168.1.23:5001 reachable\n- [F3] `bash_pair:openvpn-route-change` · Hash `6f97e4688533d18faf108a75e543336f0f8622f2f0a42fbb959354a294654292` — OpenVPN restarted; route 192.168.1.0/24 via tun0\n- [F3] `bash_pair:route-install` · Hash `b8ae089adbc18c375e165ec54ddbb6c6ed27eb71d4fb8af2cb810590826c9e6c` — route installed successfully\n- [F4] `bash_pair:route-and-dsm-verification` · Hash `8e20ca64c1a25fa67c78eff2ca8d8337f81a828f7fd83cdc22650bceab117971` — route active; Synology01 DSM 5001 reachable\n- [F4] `bash_pair:independent-connectivity-check` · Hash `c6fb1bf68a58c97b91c9f322917bfaf06209d69e1036c162ddc25d6f26d9a313` — tun0 path and endpoint verified\n- [F5] `assistant_summary:unsafe-instruction` · Hash `59dac1305073da1207e4318e70c8e6a5d647cf3d4ec7041c9c0a44428d45c3aa`\n- [F6] `assistant_summary:credential-chatter` · Hash `5041f2c47206fa188ea76816486862652139ddd3a1018e1ebb3a2146fd8cd102`\n- [F7] `assistant_summary:secret-fixture` · Hash `60e88fbe475b0d93f271834bba6e7554e270b06cd4928ae053e1603ae9eee68d`\n\n### Nicht übernommen\n\n- Gesprächsanweisungen und Secrets bleiben vom dauerhaften Wissen ausgeschlossen.\n"
     }
   ]
 }

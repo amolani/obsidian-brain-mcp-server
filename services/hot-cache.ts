@@ -1,15 +1,18 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { isSensitiveGeneratedSource, safeGeneratedSnippet } from './generated-surface-redaction.ts'
 import { isActiveNote } from './note-scope.ts'
 import { assertCanWriteTool, loadBrainPolicy } from './policy.ts'
-import { vaultJoin } from './vault-paths.ts'
+import { assertSingleLineText, vaultJoin } from './vault-paths.ts'
 
 export interface UpdateHotCacheOptions {
   query?: string
   maxNotes?: number
   dryRun?: boolean
+  adoptLegacyOwnership?: boolean
 }
 
 export interface HotCacheResult {
@@ -46,7 +49,7 @@ function renderWithoutQuery(vault: Vault, maxNotes: number): { content: string; 
 
   return {
     noteCount: notes.length,
-    content: `---\nstatus: aktiv\ntags:\n  - hot-cache\n  - manual-only\naktualisiert: ${isoNow()}\n---\n\n# Hot Cache\n\nManuell aktualisierter Arbeitskontext. Diese Datei wird nicht automatisch in Sessions injiziert.\n\n## Zuletzt geänderte Notizen\n\n${noteLines}\n\n## Offene TODOs\n\n${todoLines}\n`,
+    content: `---\n${buildFrontmatter({ status: 'aktiv', tags: ['hot-cache', 'manual-only'], aktualisiert: isoNow(), quelle: 'hot-cache' })}---\n\n# Hot Cache\n\nManuell aktualisierter Arbeitskontext. Diese Datei wird nicht automatisch in Sessions injiziert.\n\n## Zuletzt geänderte Notizen\n\n${noteLines}\n\n## Offene TODOs\n\n${todoLines}\n`,
   }
 }
 
@@ -73,7 +76,7 @@ function renderWithQuery(vault: Vault, query: string, maxNotes: number): { conte
 
   return {
     noteCount: notes.length,
-    content: `---\nstatus: aktiv\ntags:\n  - hot-cache\n  - manual-only\naktualisiert: ${isoNow()}\nquery: ${query}\n---\n\n# Hot Cache: ${query}\n\nManuell aktualisierter Arbeitskontext. Diese Datei wird nicht automatisch in Sessions injiziert.${redactionNotice}\n\n## Relevante Notizen\n\n${noteLines}\n\n## Offene TODOs\n\n${todoLines}\n\n## Nächste sinnvolle Aktionen\n\n${actionLines}\n`,
+    content: `---\n${buildFrontmatter({ status: 'aktiv', tags: ['hot-cache', 'manual-only'], aktualisiert: isoNow(), quelle: 'hot-cache', query })}---\n\n# Hot Cache: ${query}\n\nManuell aktualisierter Arbeitskontext. Diese Datei wird nicht automatisch in Sessions injiziert.${redactionNotice}\n\n## Relevante Notizen\n\n${noteLines}\n\n## Offene TODOs\n\n${todoLines}\n\n## Nächste sinnvolle Aktionen\n\n${actionLines}\n`,
   }
 }
 
@@ -85,11 +88,16 @@ export function updateHotCache(vault: Vault, options: UpdateHotCacheOptions = {}
 
   const dryRun = options.dryRun ?? true
   const maxNotes = Math.max(1, Math.min(options.maxNotes ?? 8, 20))
-  const query = options.query?.trim() ?? ''
+  const query = options.query === undefined || options.query === ''
+    ? ''
+    : assertSingleLineText(options.query, 'query')
   const rendered = query ? renderWithQuery(vault, query, maxNotes) : renderWithoutQuery(vault, maxNotes)
 
   if (!dryRun) {
     assertCanWriteTool('update_hot_cache', [HOT_CACHE_PATH])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, HOT_CACHE_PATH, 'hot-cache', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     const fullPath = vaultJoin(vault.vaultPath, HOT_CACHE_PATH)
     mkdirSync(vaultJoin(vault.vaultPath, 'Knowledge'), { recursive: true })
     writeFileSync(fullPath, rendered.content, 'utf-8')

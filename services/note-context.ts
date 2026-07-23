@@ -61,6 +61,7 @@ export function buildNoteContext(
     if (!paths) continue
     for (const relativePath of paths) {
       if (relativePath === entry.relativePath) continue
+      if (!notes.has(relativePath)) continue
       relatedMap.set(relativePath, (relatedMap.get(relativePath) ?? 0) + 1)
     }
   }
@@ -69,10 +70,9 @@ export function buildNoteContext(
     .filter(([, count]) => count >= 2)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
-    .map(([relativePath]) => {
-      const note = notes.get(relativePath)!
-      return { path: note.relativePath, title: note.title }
-    })
+    .map(([relativePath]) => notes.get(relativePath))
+    .filter((note): note is NoteEntry => !!note)
+    .map(note => ({ path: note.relativePath, title: note.title }))
 
   return {
     content: entry.content,

@@ -3,7 +3,7 @@ import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, assertSingleLineText, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export type SavedKnowledgeType = 'insight' | 'decision' | 'answer'
 
@@ -70,19 +70,21 @@ function renderKnowledgeNote(options: SaveKnowledgeOptions, tags: string[]): str
 
 export function saveKnowledge(vault: Vault, options: SaveKnowledgeOptions): SaveKnowledgeResult {
   const dryRun = options.dryRun ?? true
-  const title = options.title.trim()
-  if (!title) throw new Error('Titel darf nicht leer sein')
+  const title = assertSingleLineText(options.title, 'Titel')
   if (!options.content?.trim()) throw new Error('Content darf nicht leer sein')
 
   const defaults = TYPE_DEFAULTS[options.type]
   if (!defaults) throw new Error(`Unbekannter Knowledge-Typ: ${options.type}`)
 
-  const folder = options.folder?.trim() || defaults.folder
+  const folder = options.folder === undefined ? defaults.folder : assertSafeRelativePath(options.folder)
+  const source = options.source === undefined ? undefined : assertSingleLineText(options.source, 'source')
+  const fileStem = sanitizePathSegment(title)
+  if (!fileStem) throw new Error('Titel ergibt keinen gültigen Dateinamen')
   const path = dryRun
-    ? `${folder}/${sanitizePathSegment(title)}.md`
-    : uniqueRelativePath(vault.vaultPath, folder, `${sanitizePathSegment(title)}.md`)
+    ? `${folder}/${fileStem}.md`
+    : uniqueRelativePath(vault.vaultPath, folder, `${fileStem}.md`)
   const tags = uniqueTags(options.type, options.tags)
-  const content = renderKnowledgeNote({ ...options, title }, tags)
+  const content = renderKnowledgeNote({ ...options, title, source }, tags)
 
   if (!dryRun) {
     const tool = `save_${options.type}`

@@ -35,4 +35,22 @@ describe('intent classifier', () => {
     assert.equal(result.intent, 'research')
     assert.ok(result.reasons.some(reason => /read-only|Recherche/.test(reason)))
   })
+
+  test('detects a short command-free architecture decision as planning', () => {
+    const result = classifyIntent(
+      'Entscheidung: Wir legen Blue-Green als Migrationsverfahren und Sonntag 22:00 Uhr als Wartungsfenster fest.',
+    )
+
+    assert.equal(result.intent, 'planning')
+    assert.ok(result.score >= 4)
+  })
+
+  test('detects meeting notes without requiring shell activity', () => {
+    const result = classifyIntent(
+      'Besprechungsprotokoll: Teilnehmer haben die Agenda und den Termin für die Abnahme abgestimmt.',
+    )
+
+    assert.equal(result.intent, 'meeting')
+    assert.ok(result.score >= 5)
+  })
 })

@@ -9,6 +9,7 @@ import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { Vault } from '../vault.ts'
+import { parseFrontmatter } from '../services/note-parser.ts'
 import { createTempVault, cleanupVault } from './helpers.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -29,6 +30,40 @@ function runHarvester(vaultPath: string, stateDir: string, input: object) {
       HARVESTER_SUGGESTIONS_LOG: join(stateDir, 'suggestions.log'),
     },
   })
+}
+
+interface CaptureState {
+  capturePath?: string
+  bashCount: number
+  transcriptHash: string
+}
+
+function readCapturedSession(vaultPath: string, stateDir: string, sessionId: string): {
+  state: CaptureState
+  relativePath: string
+  content: string
+} {
+  const stateFile = join(stateDir, `${sessionId}.json`)
+  assert.ok(existsSync(stateFile), `Missing capture state for ${sessionId}`)
+  const state = JSON.parse(readFileSync(stateFile, 'utf-8')) as CaptureState
+  assert.ok(state.capturePath, `Session ${sessionId} has no capture path`)
+  return {
+    state,
+    relativePath: state.capturePath,
+    content: readFileSync(join(vaultPath, state.capturePath), 'utf-8'),
+  }
+}
+
+function assertTypedDigest(content: string): void {
+  assert.match(content, /abstraction_mode: typed_knowledge_atoms/)
+  assert.match(content, /importance_model: knowledge-salience-v\d+/)
+  assert.match(content, /importance_score: \d+/)
+  assert.match(content, /evidence_score: \d+/)
+  assert.match(content, /## Session Digest/)
+  assert.match(content, /- \[F\d+\] /, 'Digest should contain at least one typed fact')
+  assert.match(content, /Salienz \d+\/100 · Evidenz \d+\/100/)
+  assert.match(content, /### Evidenz/)
+  assert.doesNotMatch(content, /^## Zusammenfassung$/m)
 }
 
 describe('Harvester: end-to-end', () => {
@@ -66,6 +101,26 @@ describe('Harvester: end-to-end', () => {
   test('records session in state dir', () => {
     const stateFile = join(stateDir, 'test-e2e.done')
     assert.ok(existsSync(stateFile))
+  })
+
+  test('contains hostile session ids in the state dir and quotes them in frontmatter', () => {
+    const sessionId = '../escaped\nclaim_status: confirmed'
+    const escapedLegacyPath = join(dirname(stateDir), 'escaped\nclaim_status: confirmed.done')
+    const result = runHarvester(vaultPath, stateDir, {
+      session_id: sessionId,
+      transcript_path: FIXTURE,
+      cwd: '/home/amo/Documents/code/amo/adbk',
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.ok(!existsSync(escapedLegacyPath))
+    const stateFile = readdirSync(stateDir).find(name => /^session-[a-f0-9]{24}\.json$/.test(name))
+    assert.ok(stateFile)
+    const state = JSON.parse(readFileSync(join(stateDir, stateFile), 'utf-8')) as { capturePath: string }
+    const capture = readFileSync(join(vaultPath, state.capturePath), 'utf-8')
+    const frontmatter = parseFrontmatter(capture)
+    assert.equal(frontmatter.session_id, sessionId)
+    assert.equal(frontmatter.claim_status, undefined)
   })
 })
 
@@ -142,6 +197,50 @@ describe('Harvester: minimum substance filtering', () => {
   })
 })
 
+describe('Harvester: short high-value session', () => {
+  let vaultPath: string
+  let stateDir: string
+  let decisionTranscript: string
+
+  before(() => {
+    vaultPath = createTempVault()
+    stateDir = mkdtempSync(join(tmpdir(), 'harvester-short-decision-'))
+    decisionTranscript = join(stateDir, 'decision.jsonl')
+    const entries = [
+      { type: 'user', message: { content: 'Wir müssen die Aufbewahrung der Backups verbindlich festlegen.' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Entscheidung: Tägliche Backups werden 30 Tage aufbewahrt; Monatsarchive bleiben 12 Monate. Damit ist die Wiederherstellungsanforderung abgedeckt.' }] } },
+    ]
+    writeFileSync(decisionTranscript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+  })
+
+  after(() => {
+    cleanupVault(vaultPath)
+    cleanupVault(stateDir)
+  })
+
+  test('captures an explicit important decision without Bash as a typed fact', () => {
+    const result = runHarvester(vaultPath, stateDir, {
+      session_id: 'test-short-decision',
+      transcript_path: decisionTranscript,
+      cwd: '/tmp',
+    })
+    assert.equal(result.status, 0, result.stderr)
+
+    const capture = readCapturedSession(vaultPath, stateDir, 'test-short-decision')
+    const frontmatter = parseFrontmatter(capture.content)
+    assert.equal(capture.state.bashCount, 0)
+    assert.equal(frontmatter.transcript_bash_commands, 0)
+    assert.equal(frontmatter.abstraction_mode, 'typed_knowledge_atoms')
+    assert.equal(frontmatter.importance_model, 'knowledge-salience-v1')
+    assert.ok(Number(frontmatter.importance_score) >= 45)
+    assert.ok(Number(frontmatter.evidence_score) >= 45)
+    assertTypedDigest(capture.content)
+    assert.match(capture.content, /### Entscheidung\n\n- \[F\d+\] /)
+    assert.doesNotMatch(capture.content, /^## Durchgef.hrte Befehle$/m)
+    assert.doesNotMatch(capture.content, /Zusammenfassung:\s*T.gliche Backups/)
+  })
+})
+
 describe('Harvester: client resolver', () => {
   let vaultPath: string
   let stateDir: string
@@ -172,7 +271,7 @@ describe('Harvester: client resolver', () => {
     cleanupVault(stateDir)
   })
 
-  test('routes typo cwd to known customer via fuzzy resolver', () => {
+  test('keeps a fuzzy customer match neutral and marks it for review', () => {
     const result = runHarvester(vaultPath, stateDir, {
       session_id: 'test-dussledorf',
       transcript_path: transcript,
@@ -180,18 +279,19 @@ describe('Harvester: client resolver', () => {
     })
     assert.equal(result.status, 0, result.stderr)
 
-    const expectedDir = join(vaultPath, 'Kunden', 'Düsseldorf')
-    assert.ok(existsSync(expectedDir))
+    const capture = readCapturedSession(vaultPath, stateDir, 'test-dussledorf')
+    assert.ok(!capture.relativePath.startsWith('Kunden/'), 'Fuzzy matches must not route into a customer folder')
     const created = readFileSync(join(stateDir, 'log.txt'), 'utf-8')
     assert.match(created, /Fuzzy-Kunde Düsseldorf/)
-    const noteFile = readdirSync(expectedDir).find(file => file.startsWith('Düsseldorf — Docker Setup') && file.endsWith('.md'))
-    assert.ok(noteFile)
-    const notePath = join(expectedDir, noteFile)
-    const note = readFileSync(notePath, 'utf-8')
-    assert.match(note, /session_intent: implementation/)
-    assert.match(note, /sensitive: true/)
-    assert.match(note, /capture_value: \d+/)
-    assert.ok(!note.includes('supersecretvalue12345'))
+    const frontmatter = parseFrontmatter(capture.content)
+    assert.equal(frontmatter.kunde, undefined)
+    assert.equal(frontmatter.client_match_method, 'fuzzy_cwd')
+    assert.equal(frontmatter.client_match_alias, 'düsseldorf')
+    assert.equal(frontmatter.sensitive, true, 'A secret found only in source text must still mark the capture sensitive')
+    assert.ok(Number(frontmatter.redactions) >= 1)
+    assertTypedDigest(capture.content)
+    assert.match(capture.content, /### Review\n\n(?:- \[F\d+\][^\n]*\n)*- Kundenzuordnung pr.fen:/)
+    assert.ok(!capture.content.includes('supersecretvalue12345'))
   })
 })
 
@@ -244,8 +344,9 @@ describe('Harvester: unknown customer review signal', () => {
     const capture = readFileSync(capturePath, 'utf-8')
     assert.match(capture, /client_match_method: unknown_cwd/)
     assert.match(capture, /client_match_candidate: abt-ulrich-schule/)
-    assert.match(capture, /## Session Digest/)
-    assert.match(capture, /Ajenti-Konfiguration war.*bind\.mode/)
+    assertTypedDigest(capture)
+    assert.match(capture, /### Root Cause\n\n- \[F\d+\] /)
+    assert.match(capture, /### Verifikation\n\n(?:- \[F\d+\] [^\n]+\n?)+/)
     assert.match(capture, /Kunden-\/Projektkandidat aus CWD prüfen: `abt-ulrich-schule`/)
 
     const vault = new Vault(vaultPath)
@@ -383,18 +484,135 @@ describe('Harvester: capture hygiene', () => {
     const noteFile = readdirSync(dir).find(file => file.endsWith('.md'))
     assert.ok(noteFile)
     const note = readFileSync(join(dir, noteFile), 'utf-8')
-    assert.match(note, /kunde: ADBK/)
-    assert.match(note, /Realm ist ADBK\.LOCAL/)
+    const frontmatter = parseFrontmatter(note)
+    assert.equal(frontmatter.kunde, 'ADBK')
+    assert.equal(frontmatter.sensitive, true)
+    assert.ok(Number(frontmatter.redactions) >= 2)
+    assert.ok(Array.isArray(frontmatter.redaction_types))
+    assert.ok(frontmatter.redaction_types.includes('credential_label'))
+    assert.ok(frontmatter.redaction_types.includes('signed_download_url'))
+    assertTypedDigest(note)
+    assert.match(note, /### Ergebnis\n\n- \[F\d+\] /)
     assert.doesNotMatch(note, /task-notification/)
     assert.doesNotMatch(note, /toolu_test/)
     assert.doesNotMatch(note, /NETWORKBOX_JWT_SECRET/)
     assert.doesNotMatch(note, /VHS-Offenbach2026!/)
     assert.doesNotMatch(note, /download-token/)
     assert.doesNotMatch(note, /P4=signature/)
-    assert.match(note, /redaction_types:/)
-    assert.match(note, /credential_label/)
-    assert.match(note, /signed_download_url/)
     assert.doesNotMatch(note, /Pull durch/)
-    assert.doesNotMatch(note, /samba-tool domain info/)
+    assert.doesNotMatch(note, /Zusammenfassung:\s*ADBK Satellite/)
+  })
+})
+
+describe('Harvester: safe title surfaces', () => {
+  test('redacts a secret from path, capture, harvester log, action log, and daily link', () => {
+    const secret = 'supersecretvalue12345'
+    const vaultPath = createTempVault()
+    const stateDir = mkdtempSync(join(tmpdir(), 'harvester-title-secret-'))
+    try {
+      const datum = new Date().toISOString().split('T')[0]
+      const dailyPath = join(vaultPath, 'Daily', `${datum}.md`)
+      mkdirSync(dirname(dailyPath), { recursive: true })
+      writeFileSync(dailyPath, `# ${datum}\n`, 'utf-8')
+
+      const transcript = join(stateDir, 'secret-title.jsonl')
+      const entries = [
+        { type: 'user', message: { content: `password=${secret} Halte nur die Entscheidung zur Backup-Aufbewahrung fest.` } },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Entscheidung: Tägliche Backups bleiben 30 Tage erhalten; Monatsarchive bleiben 12 Monate erhalten.' }] } },
+      ]
+      writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+
+      const result = runHarvester(vaultPath, stateDir, {
+        session_id: 'test-secret-title-surfaces',
+        transcript_path: transcript,
+        cwd: '/tmp',
+      })
+      assert.equal(result.status, 0, result.stderr)
+
+      const capture = readCapturedSession(vaultPath, stateDir, 'test-secret-title-surfaces')
+      const harvesterLog = readFileSync(join(stateDir, 'log.txt'), 'utf-8')
+      const actionLogPath = join(vaultPath, '.action-log.jsonl')
+      assert.ok(existsSync(actionLogPath), 'Expected the capture and daily-link action log')
+      const actionLog = readFileSync(actionLogPath, 'utf-8')
+      const daily = readFileSync(dailyPath, 'utf-8')
+
+      const surfaces = {
+        path: capture.relativePath,
+        capture: capture.content,
+        harvesterLog,
+        actionLog,
+        daily,
+      }
+      for (const [surface, value] of Object.entries(surfaces)) {
+        assert.ok(!value.includes(secret), `${surface} leaked the title secret`)
+      }
+      assert.match(capture.relativePath, /REDACTED_SECRET/, 'The safe title should be used for the capture path')
+    } finally {
+      cleanupVault(vaultPath)
+      cleanupVault(stateDir)
+    }
+  })
+})
+
+describe('Harvester: evidence-bound Technik routing', () => {
+  test('routes from selected facts instead of an unselected Docker summary and tool tag', () => {
+    const vaultPath = createTempVault()
+    const stateDir = mkdtempSync(join(tmpdir(), 'harvester-routing-evidence-'))
+    try {
+      const transcript = join(stateDir, 'network-decision.jsonl')
+      const entries = [
+        { type: 'user', message: { content: 'Halte nur die Entscheidung zum VLAN-Routing und DNS fest.' } },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Entscheidung: VLAN 42 nutzt zentrales Routing und internes DNS für die Verwaltungsclients.' }] } },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Ergebnis: Der nur zur Diagnose verwendete Docker-Container war aktiv; dieser Nebenbefund ist fachlich ohne Bedeutung.' }] } },
+        { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'docker ps --format names' } }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', content: 'temporary-diagnostic-container' }] } },
+      ]
+      writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+
+      const result = runHarvester(vaultPath, stateDir, {
+        session_id: 'test-evidence-bound-routing',
+        transcript_path: transcript,
+        cwd: '/tmp',
+      })
+      assert.equal(result.status, 0, result.stderr)
+
+      const capture = readCapturedSession(vaultPath, stateDir, 'test-evidence-bound-routing')
+      assert.match(capture.relativePath, /^Technik\/Netzwerk\//)
+      assert.doesNotMatch(capture.relativePath, /^Technik\/Docker\//)
+      const frontmatter = parseFrontmatter(capture.content)
+      assert.ok(!Array.isArray(frontmatter.tags) || !frontmatter.tags.includes('docker'))
+    } finally {
+      cleanupVault(vaultPath)
+      cleanupVault(stateDir)
+    }
+  })
+
+  test('keeps an uncategorized selected decision neutral despite an incidental Docker command', () => {
+    const vaultPath = createTempVault()
+    const stateDir = mkdtempSync(join(tmpdir(), 'harvester-routing-neutral-'))
+    try {
+      const transcript = join(stateDir, 'neutral-decision.jsonl')
+      const entries = [
+        { type: 'user', message: { content: 'Halte nur diese Entscheidung für den Betrieb fest.' } },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Entscheidung: Das Wartungsfenster bleibt sonntags um 03:00 UTC.' }] } },
+        { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'docker ps' } }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', content: 'unrelated-container' }] } },
+      ]
+      writeFileSync(transcript, entries.map(entry => JSON.stringify(entry)).join('\n'), 'utf-8')
+
+      const result = runHarvester(vaultPath, stateDir, {
+        session_id: 'test-neutral-routing',
+        transcript_path: transcript,
+        cwd: '/tmp',
+      })
+      assert.equal(result.status, 0, result.stderr)
+
+      const capture = readCapturedSession(vaultPath, stateDir, 'test-neutral-routing')
+      assert.match(capture.relativePath, /^Referenz\//)
+      assert.doesNotMatch(capture.relativePath, /^Technik\/Docker\//)
+    } finally {
+      cleanupVault(vaultPath)
+      cleanupVault(stateDir)
+    }
   })
 })

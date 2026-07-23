@@ -1,0 +1,51 @@
+{
+  "id": "verbatim-copy-trap",
+  "type": "session_digest",
+  "description": "The digest must retain the migration decision, applied mode, and verification while paraphrasing instead of copying the complete assistant conclusion.",
+  "sessionId": "quality-verbatim-copy-trap",
+  "cwd": "/home/amo/Documents/code/amo/produktionsmigration",
+  "expectCapture": true,
+  "expectedAtoms": [
+    {
+      "id": "replica-cutover-decision",
+      "importance": "critical",
+      "kind": "decision",
+      "section": "Entscheidung",
+      "pattern": "Read.?Replica.?Umschaltplan.*(Direktwechsel|direkt\\w* Datenbankwechsel)|(?:Direktwechsel|direkt\\w* Datenbankwechsel).*Read.?Replica.?Umschaltplan"
+    },
+    {
+      "id": "migration-mode-change",
+      "importance": "high",
+      "kind": "change",
+      "section": "Änderung / Fix",
+      "pattern": "MIGRATION_MODE.*replica|replica.*MIGRATION_MODE"
+    },
+    {
+      "id": "read-write-verification",
+      "importance": "high",
+      "kind": "verification",
+      "section": "Verifikation",
+      "pattern": "Schreib.*Lesepr(ü|ue)fungen.*bestanden|Lese.*Schreibpr(ü|ue)fungen.*bestanden"
+    }
+  ],
+  "minLongAssistantBlockWords": 20,
+  "steps": [
+    {
+      "name": "final-stop",
+      "entries": [
+        { "type": "user", "message": { "content": "Validiere den geplanten Datenbank-Umschaltweg und dokumentiere nur die bleibende Entscheidung, Änderung und Verifikation." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Ich prüfe den reversiblen Umschaltweg in einer isolierten Probe." }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "printf replica > migration.mode" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "mode file written" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "./scripts/switch-replica --dry-run" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "cutover simulation ok; rollback available" }] } },
+        { "type": "assistant", "message": { "content": [{ "type": "tool_use", "name": "Bash", "input": { "command": "./scripts/verify-reads-writes --mode replica" } }] } },
+        { "type": "user", "message": { "content": [{ "type": "tool_result", "content": "writes ok; reads ok; rollback ok" }] } },
+        { "type": "user", "message": { "content": "Was davon ist als dauerhaftes Wissen relevant?" } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Abgeschlossen: Als verbindliche Entscheidung wurde der Read-Replica-Umschaltplan anstelle des direkten Datenbankwechsels gewählt und MIGRATION_MODE auf replica umgestellt, weil dieser Weg einen getesteten Rückweg erlaubt. Die Probeumschaltung wurde verifiziert: Schreib- und Leseprüfungen bestanden, anschließend wurde kontrolliert zurückgeschaltet. Der frühere Direktwechsel bleibt ausgeschlossen und ist keine gültige Betriebsoption." }] } },
+        { "type": "user", "message": { "content": "Bitte keinen Wortlaut kopieren; bewahre nur die drei atomaren Fakten." } },
+        { "type": "assistant", "message": { "content": [{ "type": "text", "text": "Verstanden. Die dauerhafte Notiz soll eine abstrahierte Entscheidung, eine Änderung und einen beobachteten Prüfnachweis enthalten." }] } }
+      ]
+    }
+  ]
+}

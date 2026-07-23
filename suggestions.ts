@@ -3,8 +3,11 @@
 //   - /tmp/technik-suggestions.log        (Technik-Unterkategorien)
 //   - /tmp/knowledge-harvester-suggestions.log  (Kunden)
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { configPaths, reloadConfig } from './config.ts'
+import { existsSync, readFileSync } from 'node:fs'
+import { configPaths, diagnoseConfigFiles, reloadConfig } from './config.ts'
+import { atomicWriteFileSync, atomicWriteJsonSync } from './services/atomic-file.ts'
+import { assertCanWriteTool } from './services/policy.ts'
+import { sanitizePathSegment } from './services/vault-paths.ts'
 
 // Resolved on each call so tests (and runtime env changes) work correctly
 function paths() {
@@ -35,6 +38,25 @@ export interface ClientSuggestion {
 export interface AllSuggestions {
   technik: TechnikSuggestion[]
   clients: ClientSuggestion[]
+}
+
+export interface PromoteSuggestionOptions {
+  dryRun?: boolean
+}
+
+export interface PromoteTechnikSuggestionResult {
+  path: string
+  category: string
+  subcategory: string
+  existed: boolean
+  dryRun: boolean
+}
+
+export interface PromoteClientSuggestionResult {
+  path: string
+  name: string
+  existed: boolean
+  dryRun: boolean
 }
 
 // ── Parse Logs ─────────────────────────────────────────────────────
@@ -106,65 +128,110 @@ export function listSuggestions(): AllSuggestions {
 
 // ── Promote Suggestions (write to JSON) ─────────────────────────────
 
+function safeLabel(value: string, label: string): string {
+  const cleaned = value.trim().normalize('NFC')
+  if (!cleaned) throw new Error(`${label} darf nicht leer sein`)
+  if (cleaned.length > 120) throw new Error(`${label} ist zu lang`)
+  if (sanitizePathSegment(cleaned) !== cleaned || ['.', '..', '__proto__', 'prototype', 'constructor'].includes(cleaned.toLowerCase())) {
+    throw new Error(`${label} enthält einen ungültigen Namen`)
+  }
+  return cleaned
+}
+
+function cleanKeywords(values: string[]): string[] {
+  return values.map(value => {
+    const cleaned = value.trim().normalize('NFC')
+    if (!cleaned || cleaned.length > 200 || /[\u0000-\u001f\u007f]/.test(cleaned)) {
+      throw new Error('Keywords müssen nicht-leere einzeilige Strings mit höchstens 200 Zeichen sein')
+    }
+    return cleaned
+  })
+}
+
+function assertConfigValid(id: 'clients' | 'categories'): void {
+  const diagnostic = diagnoseConfigFiles().find(item => item.id === id)
+  if (!diagnostic?.valid) {
+    throw new Error(`${diagnostic?.label ?? id} ist ungültig: ${diagnostic?.errors.join('; ') ?? 'Diagnose fehlt'}`)
+  }
+}
+
 export function promoteTechnikSuggestion(
   parent: string,
   candidate: string,
   canonical?: string,
   extraKeywords: string[] = [],
   extraFilenameHints: string[] = [],
-): { path: string; category: string; subcategory: string; existed: boolean } {
+  options: PromoteSuggestionOptions = {},
+): PromoteTechnikSuggestionResult {
+  const parentName = safeLabel(parent, 'parent')
+  const candidateName = safeLabel(candidate, 'candidate')
+  const dryRun = options.dryRun ?? true
   const { categoriesJson } = paths()
+  assertConfigValid('categories')
   const raw = readFileSync(categoriesJson, 'utf-8')
   const data = JSON.parse(raw) as Record<string, any>
 
-  if (!data[parent]) {
-    throw new Error(`Hauptkategorie "${parent}" existiert nicht. Gültige: ${Object.keys(data).filter(k => !k.startsWith('_')).join(', ')}`)
+  if (!Object.hasOwn(data, parentName) || !data[parentName] || typeof data[parentName] !== 'object') {
+    throw new Error(`Hauptkategorie "${parentName}" existiert nicht. Gültige: ${Object.keys(data).filter(k => !k.startsWith('_')).join(', ')}`)
   }
 
-  const subName = canonical ?? titleCase(candidate)
+  const subName = safeLabel(canonical ?? titleCase(candidateName), 'canonical')
 
-  if (!data[parent].subcategories) data[parent].subcategories = {}
-  const existed = !!data[parent].subcategories[subName]
+  if (!data[parentName].subcategories) data[parentName].subcategories = {}
+  if (!data[parentName].subcategories || typeof data[parentName].subcategories !== 'object' || Array.isArray(data[parentName].subcategories)) {
+    throw new Error(`Hauptkategorie "${parentName}" hat ungültige subcategories`)
+  }
+  const existed = Object.hasOwn(data[parentName].subcategories, subName)
 
   // Merge: preserve existing keywords if sub already exists
-  const existing = data[parent].subcategories[subName] || {}
-  const keywords = [...new Set([...(existing.keywords ?? []), candidate.toLowerCase(), ...extraKeywords])]
-  const filenameHints = [...new Set([...(existing.filenameHints ?? []), candidate.toLowerCase(), ...extraFilenameHints])]
+  const existing = data[parentName].subcategories[subName] || {}
+  const keywords = [...new Set([...(Array.isArray(existing.keywords) ? existing.keywords : []), candidateName.toLowerCase(), ...cleanKeywords(extraKeywords)])]
+  const filenameHints = [...new Set([...(Array.isArray(existing.filenameHints) ? existing.filenameHints : []), candidateName.toLowerCase(), ...cleanKeywords(extraFilenameHints)])]
 
-  data[parent].subcategories[subName] = { keywords, filenameHints }
+  data[parentName].subcategories[subName] = { keywords, filenameHints }
 
-  writeFileSync(categoriesJson, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  reloadConfig()
+  if (!dryRun) {
+    assertCanWriteTool('promote_suggestion')
+    atomicWriteJsonSync(categoriesJson, data)
+    reloadConfig()
 
-  // Clear matching entries from suggestions log so they don't resurface
-  clearTechnikSuggestion(parent, candidate)
+    // Clear matching entries from suggestions log so they don't resurface
+    clearTechnikSuggestion(parentName, candidateName)
+  }
 
-  return { path: categoriesJson, category: parent, subcategory: subName, existed }
+  return { path: categoriesJson, category: parentName, subcategory: subName, existed, dryRun }
 }
 
 export function promoteClientSuggestion(
   candidate: string,
   canonical?: string,
   extraKeywords: string[] = [],
-): { path: string; name: string; existed: boolean } {
+  options: PromoteSuggestionOptions = {},
+): PromoteClientSuggestionResult {
+  const candidateName = safeLabel(candidate, 'candidate')
+  const dryRun = options.dryRun ?? true
   const { clientsJson } = paths()
+  assertConfigValid('clients')
   const raw = readFileSync(clientsJson, 'utf-8')
   const data = JSON.parse(raw) as Record<string, any>
 
-  const name = canonical ?? titleCase(candidate)
+  const name = safeLabel(canonical ?? titleCase(candidateName), 'canonical')
 
-  const existed = !!data[name]
+  const existed = Object.hasOwn(data, name)
   const existing = Array.isArray(data[name]) ? data[name] as string[] : []
-  const keywords = [...new Set([...existing, candidate.toLowerCase(), ...extraKeywords])]
+  const keywords = [...new Set([...existing, candidateName.toLowerCase(), ...cleanKeywords(extraKeywords)])]
 
   data[name] = keywords
 
-  writeFileSync(clientsJson, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  reloadConfig()
+  if (!dryRun) {
+    assertCanWriteTool('promote_suggestion')
+    atomicWriteJsonSync(clientsJson, data)
+    reloadConfig()
 
-  clearClientSuggestion(candidate)
+    clearClientSuggestion(candidateName)
+  }
 
-  return { path: clientsJson, name, existed }
+  return { path: clientsJson, name, existed, dryRun }
 }
 
 // ── Clear specific entries from suggestion logs ────────────────────
@@ -183,7 +250,7 @@ function clearTechnikSuggestion(parent: string, candidate: string): void {
       const [, cand, par] = match
       return !(cand.toLowerCase() === candLower && par === parent)
     })
-    writeFileSync(technikLog, kept.join('\n\n'), 'utf-8')
+    atomicWriteFileSync(technikLog, kept.join('\n\n'))
   } catch { /* ignore */ }
 }
 
@@ -200,7 +267,7 @@ function clearClientSuggestion(candidate: string): void {
       if (!match) return true
       return match[1].toLowerCase() !== candLower
     })
-    writeFileSync(clientLog, kept.join('\n\n'), 'utf-8')
+    atomicWriteFileSync(clientLog, kept.join('\n\n'))
   } catch { /* ignore */ }
 }
 

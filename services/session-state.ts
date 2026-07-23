@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { atomicWriteJsonSync } from './atomic-file.ts'
 
 export interface SessionState {
   version: 1
@@ -84,7 +85,7 @@ export function readSessionState(stateDir: string, sessionId: string): SessionSt
 
 export function writeSessionState(stateDir: string, state: SessionState): void {
   mkdirSync(stateDir, { recursive: true })
-  writeFileSync(statePath(stateDir, state.sessionId), `${JSON.stringify(state, null, 2)}\n`, 'utf-8')
+  atomicWriteJsonSync(statePath(stateDir, state.sessionId), state)
 }
 
 export function recordSessionEvent(options: RecordSessionEventOptions): SessionState {

@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, statSync } from 'node:fs'
+import { stringify as stringifyYaml } from 'yaml'
 import type { Vault } from '../vault.ts'
 import { loadTagAliases } from '../config.ts'
 import { appendActionLog } from './action-log.ts'
@@ -140,6 +141,19 @@ export function normalizeTag(tag: string): string {
   return aliases[cleaned] ?? cleaned
 }
 
+function renderYamlScalar(value: unknown): string {
+  if (typeof value !== 'string') return String(value)
+  const rendered = stringifyYaml(value).trimEnd()
+  // yaml's block-scalar form spans multiple lines. JSON string syntax is also
+  // valid YAML and keeps user input on the value line, so embedded newlines can
+  // never create sibling frontmatter keys.
+  return rendered.includes('\n') ? JSON.stringify(value) : rendered
+}
+
+function renderYamlKey(key: string): string {
+  return /^[\p{L}\p{N}_-]+$/u.test(key) ? key : JSON.stringify(key)
+}
+
 export function buildFrontmatter(fm: Record<string, any>): string {
   const order = ['status', 'projekt', 'kunde', 'tags', 'datum', 'erstellt', 'aktualisiert', 'verknüpft', 'aliases', 'quelle']
   const lines: string[] = []
@@ -147,11 +161,12 @@ export function buildFrontmatter(fm: Record<string, any>): string {
 
   const emit = (key: string, val: any) => {
     if (val === undefined || val === null) return
+    const renderedKey = renderYamlKey(key)
     if (Array.isArray(val)) {
-      lines.push(`${key}:`)
-      for (const v of val) lines.push(`  - ${v}`)
+      lines.push(`${renderedKey}:`)
+      for (const v of val) lines.push(`  - ${renderYamlScalar(v)}`)
     } else {
-      lines.push(`${key}: ${val}`)
+      lines.push(`${renderedKey}: ${renderYamlScalar(val)}`)
     }
     seen.add(key)
   }

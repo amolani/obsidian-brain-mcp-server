@@ -1,11 +1,10 @@
 {
   "id": "duesseldorf-routing",
   "type": "harvester_update",
-  "description": "Regression fixture: a misspelled Duesseldorf working directory must route to the canonical customer without reorganizing folders.",
+  "description": "A fuzzy Duesseldorf working-directory match and a content mention are review evidence, not sufficient authority for physical customer routing; the four operational facts must still be retained in a neutral technical capture.",
   "sessionId": "quality-duesseldorf-routing",
   "cwd": "/home/amo/Documents/code/amo/dussledorf",
-  "expectedClient": "Düsseldorf",
-  "expectedPathIncludes": ["Kunden/Düsseldorf/"],
+  "expectedPathIncludes": ["Technik/"],
   "steps": [
     {
       "name": "final-stop",
@@ -29,5 +28,9 @@
     { "id": "opnsense-port80", "pattern": "OPNsense", "mustCapture": true },
     { "id": "traefik-resolver-missing", "pattern": "certificatesResolvers", "mustCapture": true },
     { "id": "base-domain-ip", "pattern": "10\\.119\\.0\\.4", "mustCapture": true }
+  ],
+  "forbiddenPatterns": [
+    "(^|\\n)kunde:\\s*[\"']?(Düsseldorf|Duesseldorf)",
+    "kunde/(düsseldorf|duesseldorf)"
   ]
 }

@@ -1,12 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
-import { parseFrontmatter } from './note-parser.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
+import { isAutoCaptureNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BuildCaptureReviewOptions {
   dryRun?: boolean
+  adoptLegacyOwnership?: boolean
 }
 
 export interface CaptureReviewResult {
@@ -23,10 +25,6 @@ const CAPTURE_REVIEW_PATH = 'Maintenance/Capture Review.md'
 
 function today(): string {
   return new Date().toISOString().split('T')[0]
-}
-
-function isCapture(note: NoteEntry): boolean {
-  return note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester'
 }
 
 function isPromotionCandidate(note: NoteEntry): boolean {
@@ -67,7 +65,7 @@ function uncertainClientLines(notes: NoteEntry[]): string {
 
 function renderCaptureReview(vault: Vault): CaptureReviewResult {
   const captures = [...vault.notes.values()]
-    .filter(isCapture)
+    .filter(isAutoCaptureNote)
     .sort((a, b) => b.lastModified - a.lastModified)
   const promotionCandidates = captures.filter(isPromotionCandidate)
   const uncertainClientCount = captures.filter(note => ['fuzzy_cwd', 'exact_content'].includes(String(note.frontmatter.client_match_method ?? ''))).length
@@ -129,10 +127,9 @@ export function buildCaptureReview(vault: Vault, options: BuildCaptureReviewOpti
   if (!dryRun) {
     assertCanWriteTool('build_capture_review', [CAPTURE_REVIEW_PATH])
     const fullPath = vaultJoin(vault.vaultPath, CAPTURE_REVIEW_PATH)
-    if (existsSync(fullPath)) {
-      const fm = parseFrontmatter(readFileSync(fullPath, 'utf-8'))
-      if (fm.quelle !== 'capture-review') throw new Error(`${CAPTURE_REVIEW_PATH} existiert und ist nicht auto-generiert`)
-    }
+    assertGeneratedSurfaceOwnership(vault.vaultPath, CAPTURE_REVIEW_PATH, 'capture-review', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     mkdirSync(vaultJoin(vault.vaultPath, 'Maintenance'), { recursive: true })
     writeFileSync(fullPath, result.content, 'utf-8')
     vault.indexNote(fullPath, statSync(fullPath).mtimeMs)

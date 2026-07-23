@@ -6,7 +6,7 @@
 
 Local-first MCP server for consultants, sysadmins, and technical operators who want their real work to become searchable memory: session captures, customer context, evidence-backed claims, runbooks, dashboards, and review queues.
 
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.18.0-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-ESM-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
 [![MCP](https://img.shields.io/badge/MCP-server-111827)](server.ts)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-hooks%20%2B%20tools-6B46C1)](hooks/)
@@ -64,10 +64,12 @@ YourVault/
 ├── Maintenance/Auto-Build/              # reports, reviews, feedback
 ├── Maintenance/Knowledge Inbox.md       # review queue with persistent item state
 ├── Maintenance/Background Run Report.md # unattended run report
-└── .brain-*.json                        # local manifests, feedback, state, last run
+└── .brain-*.json / .semantic-index.json # local manifests, feedback, state, caches
 ```
 
 ## Quick Start
+
+Node.js 22.18.0 or newer is required. The CLI, hooks, and MCP server run the TypeScript entrypoints directly with `node`.
 
 ```bash
 git clone https://github.com/amolani/obsidian-brain-mcp-server.git
@@ -95,7 +97,7 @@ node cli.ts repair-hooks --vault "$VAULT_PATH" --apply
 
 Register the MCP server globally for Claude Code:
 
-Node 22+ can run the TypeScript entrypoint directly:
+Node 22.18.0+ runs the TypeScript entrypoint directly:
 
 ```bash
 claude mcp add-json -s user obsidian-brain '{
@@ -106,8 +108,6 @@ claude mcp add-json -s user obsidian-brain '{
   }
 }'
 ```
-
-For Node 18-21, use the `tsx` variant in [Full Installation](#full-installation).
 
 Then open a fresh Claude Code session and run:
 
@@ -146,13 +146,41 @@ Checks: policy ok, hooks ok, auto-build manifest ok, action log ok
 > Work normally in Claude Code: debug, inspect, edit, verify
 SessionStart -> client context and daily note
 PostToolUse -> debounced long-session checkpoint -> provisional review candidates
-Stop -> Knowledge Harvester -> typed Auto-Capture -> Auto-Build Report
+Stop -> Knowledge Harvester -> salient knowledge atoms -> typed Auto-Capture -> gated Auto-Build
 
 > brain_metrics
 Auto-Captures: 18
 Auto-promoted: 42
 Auto-build usefulness score: 0.86
 ```
+
+### Before and after one troubleshooting session
+
+Consider a fictional Example Co session investigating intermittent DHCP failures.
+
+Before the session, the vault has a customer folder and a few network notes, but no dated account of this incident, no source-backed claim about the failure mode, and no review task. The useful context still lives only in the terminal conversation.
+
+During the session:
+
+1. `SessionStart` resolves the customer context and opens the daily note.
+2. The operator reproduces the failure, inspects logs, changes the relay configuration, and verifies a successful lease.
+3. A debounced checkpoint preserves substantial mid-session progress without creating a final runbook.
+4. On `Stop`, the Knowledge Harvester redacts secret-like values, ranks atomic facts by salience, and writes a typed source capture only when durable information exists.
+5. Evidence is evaluated separately: important but weakly supported facts remain visible in Review, while policy-controlled auto-build creates only derived artifacts that pass both salience and evidence gates.
+
+After the session, the result is inspectable as ordinary Markdown:
+
+| Vault artifact | What changed |
+|---|---|
+| `Daily/2026-06-18.md` | Links the work to the day it happened |
+| `Kunden/Example Co/Captures/2026-06-18-network-debug.md` | Preserves the redacted source trace, intent, scores, and outcome |
+| `Knowledge/Insights/DHCP relay failure signature.md` | Stores the reusable observation with a source backlink |
+| `Knowledge/Claims/DHCP relay requirement.md` | Starts as `provisional`, not silently confirmed |
+| `Maintenance/Session Impact/2026-06-18-network-debug.md` | Explains created, skipped, and review-required work |
+| `Maintenance/Knowledge Inbox.md` | Gives the claim and runbook preview stable, actionable IDs |
+| `Maintenance/Change Ledger.md` | Shows the recent Brain writes and their targets |
+
+The operator opens Session Impact first, previews the inbox action, and confirms or rejects it explicitly. Duplicate merges, renames, folder moves, and link rewrites remain untouched.
 
 ## Background Mode
 
@@ -173,9 +201,26 @@ node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force
 
 ## Demo Surfaces
 
+These repo-native mockups use fictional, anonymized data and mirror the generated Markdown surfaces.
+
+Session Impact explains one session's outcome; Knowledge Inbox turns uncertainty into explicit review work:
+
 <p>
-  <img src="./assets/demo-knowledge-inbox.svg" alt="Knowledge Inbox demo surface with persisted queue state and review actions" width="49%">
-  <img src="./assets/demo-background-report.svg" alt="Background Run Report demo surface with safe jobs and lock status" width="49%">
+  <img src="./assets/demo-session-impact.svg" alt="Session Impact demo with generated artifacts, guarded skips, traceability, and next review actions" width="49%">
+  <img src="./assets/demo-knowledge-inbox.svg" alt="Knowledge Inbox demo with persisted queue state and actionable review items" width="49%">
+</p>
+
+Change Ledger answers what the Brain wrote; Evidence Dashboard shows which knowledge still needs proof or rechecking:
+
+<p>
+  <img src="./assets/demo-change-ledger.svg" alt="Change Ledger demo with timestamped Brain writes, modes, summaries, and linked targets" width="49%">
+  <img src="./assets/demo-evidence-dashboard.svg" alt="Evidence Dashboard demo with missing sources, due rechecks, contradictions, and high-risk claims" width="49%">
+</p>
+
+The unattended path has its own inspectable report:
+
+<p>
+  <img src="./assets/demo-background-report.svg" alt="Background Run Report demo with safe jobs, duration, and lock status" width="70%">
 </p>
 
 ## Brain Workflow
@@ -190,7 +235,8 @@ flowchart LR
   D --> E[Long-Session Checkpoint]
   A --> F[Stop Hook]
   F --> G[Knowledge Harvester]
-  G --> H[Typed Auto-Capture Note]
+  G --> S[Salience + Evidence Selection]
+  S --> H[Typed Auto-Capture Note]
   H --> I[Policy-Controlled Auto-Build]
   E --> Q[Provisional Claims / Review Candidates]
   Q --> I
@@ -211,6 +257,7 @@ Most note systems wait for you to organize after the work is done. This one watc
 - **Claude Code-native**: MCP tools plus SessionStart, Bash PostToolUse, and Stop hooks.
 - **Obsidian-native**: plain Markdown, local folders, backlinks, frontmatter, no database lock-in.
 - **Sysadmin-friendly**: customer folders, runbooks, commands, incidents, TODOs, evidence, lifecycle state.
+- **Evidence-backed distillation**: session knowledge is ranked by explicit salience and evidence factors; important but weakly supported facts go to review instead of being treated as confirmed knowledge.
 - **Safe automation**: auto-build can write derived knowledge; risky operations stay out of automatic apply.
 - **Adaptive**: archiving noisy auto-build output teaches the next run to be stricter.
 
@@ -256,7 +303,8 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
 | `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
 | `build_session_impact_report`, `build_knowledge_inbox`, `build_change_ledger` | Explain one session's vault impact, collect review work, and show recent Brain writes |
-| `brain_apply_inbox_item`, `migrate_brain_metadata` | Dry-run-first review actions and legacy metadata repair |
+| `brain_apply_inbox_item`, `brain_review_inbox_items` | Dry-run-first single-item and safe batch review actions with persistent lifecycle state |
+| `repair_generated_surfaces`, `migrate_brain_metadata` | Rebuild owned operating surfaces, explicitly adopt narrowly recognized pre-marker surfaces, and repair legacy metadata without reorganizing notes |
 | `build_knowledge_index`, `update_hot_cache` | Knowledge map and manual hot context cache |
 | `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
 
@@ -272,6 +320,7 @@ Most note systems wait for you to organize after the work is done. This one watc
 | `triage_note` / `triage_inbox` | Inbox classification, target folders, duplicate checks, link suggestions |
 | `score_note_quality` / `list_low_quality_notes` | Quality scoring for title, metadata, tags, links, TODOs, structure, and freshness |
 | `find_broken_links` / `fix_broken_links` | Broken link detection and repair |
+| `list_suggestions` / `promote_suggestion` | Inspect hook suggestions and safely promote selected aliases/categories into config |
 | `lint_frontmatter` / `fix_frontmatter` | Profile-aware frontmatter schemas |
 | `generate_mocs`, `run_safe_maintenance`, `run_vault_maintenance` | Generated structure and safe batch maintenance |
 
@@ -286,7 +335,7 @@ Most note systems wait for you to organize after the work is done. This one watc
 | Working memory is manual | `recall_context` only runs when you ask for it |
 | Safe auto-build is allowed | Captures can become derived knowledge, reports, dashboards, timelines |
 | Risky refactors are blocked from auto-apply | Duplicate merges, renames, folder organization, broken-link rewrites, link application |
-| Every write is observable | Mutating tools append to `.action-log.jsonl` |
+| Every write is observable | Applied file mutations append to `.action-log.jsonl`; orchestration tools retain provenance through their delegated action entries |
 | Dry-run-first remains the default for risky operations | Apply modes are explicit and policy guarded |
 | Feedback changes future behavior | Archived auto-build artifacts make noisy categories stricter |
 
@@ -305,7 +354,7 @@ All files are editable JSON and live in the repo by default.
 
 ## Requirements
 
-- Node.js ≥ 22 (native TypeScript support) or Node ≥ 18 with `tsx`
+- Node.js ≥ 22.18.0
 - An Obsidian vault (structure doesn't matter — the server adapts)
 
 ## Full Installation
@@ -333,19 +382,6 @@ Globally (available in every session):
 ```bash
 claude mcp add-json -s user obsidian-brain '{
   "command": "node",
-  "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
-  "env": {
-    "VAULT_PATH": "/path/to/your/obsidian/vault"
-  }
-}'
-```
-
-For Node < 22, use `tsx` instead:
-
-```bash
-npm install -g tsx
-claude mcp add-json -s user obsidian-brain '{
-  "command": "tsx",
   "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
   "env": {
     "VAULT_PATH": "/path/to/your/obsidian/vault"
@@ -487,20 +523,22 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Generate a runbook for the linuxmuster installation."
 - "Run vault maintenance."
 
-The Knowledge Harvester runs automatically after each Claude response only when `brain-policy.json` allows `hooks.autoCapture`. If the session had substantial work (>= 3 bash commands, >= 2 procedures with outcomes), it writes a typed capture note to the appropriate folder. Captures include `knowledge_type`, `source_stage`, `session_intent`, `capture_value`, `runbook_readiness`, `review_need`, and client-match metadata so fuzzy folder typos and content-based customer matches are visible in Capture Review and Knowledge Inbox. Secret-like tokens are redacted before the capture is written.
+The Knowledge Harvester runs at `Stop` when `brain-policy.json` allows `hooks.autoCapture`. It no longer uses transcript length or Bash volume as a value proxy: a short decision without commands can be captured, while a long read-only debug session without a reproducible finding is skipped. The distiller selects at most a small set of typed atoms (`problem`, `cause`, `decision`, `change`, `verification`, `result`, `constraint`, `open_question`) and writes no raw assistant-summary or phase-narration blocks. Captures expose the versioned importance model, salience/evidence scores, provenance references, `capture_value`, `runbook_readiness`, `review_need`, intent, and routing evidence. Secret-like source values are audited and redacted before write.
+
+Only an exact customer alias as a complete CWD segment permits direct physical customer routing. Fuzzy, content-only, unknown, and ambiguous matches stay in a neutral Technik/Referenz capture path with their match reason in Review; they never silently create a confident customer assignment.
 
 When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately after a successful session capture:
 
-- promotes the capture into durable `save_insight` / `save_answer` / gap notes when clear signals exist
-- runs a quality gate before promotion: skips banal/short items and similar existing knowledge
+- promotes only typed facts with complete provenance, sufficient salience, and strong evidence; importance and evidential support remain separate axes
+- turns only a concrete `open_question` atom into a gap instead of reacting to generic words such as "prüfen" or "offen"
 - records processed source hashes in `.brain-auto-build-manifest.json` to prevent repeated promotion of the same capture
 - enforces policy limits for maximum new notes, claim count, and runtime
 - creates an Auto-Build report under `Maintenance/Auto-Build/`
 - creates a Session Impact report under `Maintenance/Session Impact/` explaining what changed, what skipped, and what needs review
-- promotes runbook candidates only from implemented procedural captures, not from checkpoints or research-only reads
+- promotes runbooks only when a strongly supported change and a strongly supported verification are both present; checkpoints and research-only reads remain review candidates
 - learns from archived auto-build artifacts and repeated rejected feedback, making noisy promotion categories stricter over time
-- extracts claims into `Knowledge/Claims/`; checkpoint and capture-derived claims start as `claim_status: provisional`
-- updates evidence metadata on the capture
+- extracts claims from structured digest atoms instead of arbitrary source sentences; checkpoint and capture-derived claims start as `claim_status: provisional`
+- updates evidence metadata without treating the automation itself as a factual reviewer (`confirmed_by` and `checked_at` remain unset)
 - refreshes `Knowledge/_brain.md`, `Knowledge/index.md`, `Knowledge/hot.md`
 - refreshes `Maintenance/Knowledge Inbox.md` with provisional claims, uncertain clients, runbook candidates, and auto-build skips
 - refreshes `Kunden/{Client}/_timeline.md` and `Kunden/{Client}/_snapshot.md` when a client was detected
@@ -517,7 +555,7 @@ Risky operations such as duplicate merges, note renames, folder reorganization, 
 - `automation.mode=auto_build` allows safe after-session writes that create derived knowledge and refresh generated surfaces.
 - `automation.duringSession.autoCheckpoint=true` enables debounced long-session checkpoints; `minMinutesBetweenCheckpoints`, `minCommandsBetweenCheckpoints`, and `maxCheckpointsPerSession` limit write frequency.
 - `automation.neverAutoApply` blocks risky refactors from automatic execution.
-- Hook auto-organization is disabled by default: `hooks.autoOrganize=false`.
+- Hook auto-organization is disabled by the V1 safety contract: `hooks.autoOrganize=false`; folder moves require an explicit dry-run-first tool call.
 - Auto-capture and daily-note creation are policy-controlled.
 - Protected folders such as `.obsidian/`, `.trash/`, `System/`, and `Templates/` are blocked for guarded writers.
 - Tool policies declare write capability, risk level, and whether dry-run-first behavior is expected.
@@ -527,17 +565,17 @@ Risky operations such as duplicate merges, note renames, folder reorganization, 
 
 Use the vault as a dry-run-first operating loop:
 
-1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note when policy allows it and detects the client from your current folder when possible. Automatic Referenz→Technik organization is disabled unless `brain-policy.json` explicitly enables it.
+1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note when policy allows it and detects the client from your current folder when possible. Automatic Referenz→Technik organization is disabled by the V1 policy contract; moves require the explicit dry-run-first `organize_referenz` tool.
 2. Before creating new knowledge, search first with `vault_search` or `semantic_search`. Use `recall_context` when you explicitly want manual working-memory recall for a topic.
 3. Capture rough knowledge with `capture_v2` in `review` or `dry_run` mode for important notes, then apply once the suggested folder/title/tags look right. Use `save_insight`, `save_decision`, or `save_answer` when you want an explicit durable memory instead of an auto-classified capture.
 4. During work, use `daily_note` for lightweight chronological notes and TODOs. Use `todo_list` or `weekly_review` to pull open work back into focus.
 5. When a question remains open or two notes disagree, use `flag_knowledge_gap` or `flag_contradiction`. Resolve it later with `resolve_gap`, so the vault keeps uncertainty visible instead of silently mixing weak facts with confirmed knowledge.
-6. After substantial terminal work, let the Stop hook harvest procedures automatically when policy allows it. For reusable operational docs, run `generate_runbook` against the topic/client after captures exist.
+6. At session `Stop`, let the hook distill durable decisions, causes, changes, checks, constraints, and open questions. No minimum command count is required. Review important/weak-evidence atoms before promotion; a verified change can become a runbook candidate automatically.
 7. For bigger investigations, create a `create_research_plan` first. It pulls local context and gives you a checklist for source ingest, final answer/decision capture, and contradiction handling.
 8. Ingest durable sources with `ingest_source`, then use `extract_claims` to turn source text into explicit claims. Use `update_evidence` to set confidence, sources, recheck dates, and contradiction references.
 9. Run `brain_review` as the central operating view. It proposes items across maintenance, evidence, open questions, contradictions, quality, links, lifecycle, and index/cache drift. Apply one item at a time with `brain_apply_review_item`, first as dry-run. Record preference signals with `record_brain_feedback`.
 10. Periodically refresh `Knowledge/_brain.md`, `Knowledge/hot.md`, `Knowledge/index.md`, and customer timelines with `build_brain_dashboard`, `update_hot_cache`, `build_knowledge_index`, and `build_memory_timeline`.
-11. Let `brain_auto_build` run automatically after captures through the Stop hook. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/` and run an incremental auto-build when command/time thresholds are reached; checkpoint-derived claims stay provisional and runbooks remain review candidates until a real implemented procedure exists.
+11. Let `brain_auto_build` process captures through the Stop hook. It may promote only atoms that pass the salience, evidence, provenance, intent, and type gates. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/`; checkpoint-derived claims stay provisional and runbooks remain review candidates until a real implemented-and-verified procedure exists.
 12. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
 13. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
 14. In a fresh Claude session, run `brain_health_check` first. It reports whether policy, hooks, generated surfaces, manifest, and action log are ready.
@@ -564,7 +602,7 @@ YourVault/
 ├── Maintenance/           # Review queues (auto-generated)
 ├── .raw/                  # Immutable source documents and ingest manifest
 ├── Inbox/                 # Unsorted captures
-├── Referenz/              # Misc reference (organized into Technik/ automatically)
+├── Referenz/              # Staging for references; organization is manual and dry-run-first
 └── Persönlich/            # Private
 ```
 
@@ -596,32 +634,39 @@ The test suite covers vault indexing, link resolution, search, templates, captur
 
 ```
 obsidian-brain-mcp-server/
-├── server.ts                      # MCP server entry point, tool registration
-├── vault.ts                       # Core Vault class (indexing, search, maintenance)
-├── technik-categories.ts          # Category classifier
-├── brain-policy.json              # Local safety policy for hooks, tools, protected paths, and manual recall
-├── clients.json                   # Client definitions (editable)
-├── technik-categories.json        # Category rules (editable)
-├── tag-aliases.json               # Tag normalization (editable)
+├── cli.ts                         # setup, background, demo, benchmark, quality, release checks
+├── server.ts                      # MCP stdio entry point
+├── server-tools.ts                # MCP tool schemas
+├── tool-handlers.ts               # domain-handler dispatch
+├── tool-handlers/                 # search, knowledge, overview, links, maintenance
+├── vault.ts                       # live Markdown index and service facade
+├── services/                      # capture, retrieval, review, auto-build, background, safety
 ├── hooks/
-│   ├── session-context.ts         # SessionStart hook
-│   ├── session-checkpoint.ts      # Long-session checkpoint hook
-│   ├── knowledge-harvester.ts     # Stop hook (captures knowledge)
-│   └── daily-note-hook.ts         # Simple daily note creator
+│   ├── session-context.ts         # SessionStart context and daily note
+│   ├── session-checkpoint.ts      # debounced long-session checkpoint
+│   ├── knowledge-harvester.ts     # Stop capture, redaction, scoring, auto-build handoff
+│   └── daily-note-hook.ts         # standalone daily-note hook
+├── brain-policy.json              # tool risks, automation limits, protected paths
+├── clients.json                   # client aliases
+├── technik-categories.json        # technical routing rules
+├── tag-aliases.json               # tag normalization
+├── demo/                          # local sample transcript
+├── docs/                          # product, quality, safety, and operations contracts
 └── tests/
-    ├── vault.test.ts
-    ├── categories.test.ts
-    ├── harvester.test.ts
-    └── fixtures/
+    ├── fixtures/                  # transcript and Brain Quality fixtures
+    └── *.test.ts                  # unit, integration, safety, and release behavior
 ```
 
 ### Architecture
 
-- **Analyzer layer**: `find_duplicates`, `find_broken_links`, `lint_frontmatter`, `generate_mocs` (dry-run), `getOverview` — pure read, no side effects.
-- **Recommender layer**: `run_vault_maintenance` orchestrates analyzers and writes a review queue to `Maintenance/{date}-review.md`.
-- **Executor layer**: `fix_broken_links`, `fix_frontmatter`, `organize_referenz`, `generate_mocs`, `apply_lifecycle_updates`, `apply_link_suggestions`, `run_safe_maintenance` — default to `dry_run=true` for safety.
+- **CLI path**: `cli.ts` parses setup and operations commands. Setup, demo, benchmark, and quality commands call their focused services directly; vault commands initialize `Vault` and use the same service layer as MCP tools.
+- **MCP path**: `server.ts` publishes schemas from `server-tools.ts`, dispatches calls through the domain registries in `tool-handlers/`, and invokes the `Vault` facade. `Vault` owns the live Markdown/tag/link index and delegates behavior to `services/`.
+- **Hook path**: SessionStart establishes local context, PostToolUse creates policy-limited checkpoints, and Stop runs the Knowledge Harvester. The Harvester parses the transcript, filters and redacts sensitive material, scores and writes the source capture, then may hand it to policy-controlled auto-build.
+- **Service layer**: focused modules implement capture, retrieval, evidence, review, generated surfaces, maintenance, auto-build, background operation, and repair. Read-only analyzers stay separate from dry-run-first executors.
+- **Policy and observability**: `brain-policy.json` defines automatic-write limits, protected paths, tool risk, and operations that may never be auto-applied. Mutating services are expected to pass policy checks and either append an entry to `.action-log.jsonl`, delegate exclusively to operations that do, or provide an explicit no-op reason.
+- **Background and review**: the background runner acquires a vault-local lock, runs the safe job set within a runtime budget, and writes Markdown/JSON results. Knowledge Inbox and Brain Review keep uncertain or risky follow-up work explicit; risky refactors never run automatically.
 
-All mutations respect the `quelle: moc-generator` / `quelle: knowledge-harvester` frontmatter marker so user-authored notes are never overwritten.
+Generated-surface builders use their `quelle` frontmatter marker to recognize output they own and avoid replacing an unrelated user note. Explicit executor tools such as rename, merge, frontmatter, and link repair are different: they may modify user-authored notes only after an explicit apply request, with dry-run-first and policy safeguards. Hooks and background jobs do not auto-apply those risky executors.
 
 ## License
 

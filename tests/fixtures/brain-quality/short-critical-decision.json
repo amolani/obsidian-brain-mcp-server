@@ -1,0 +1,83 @@
+{
+  "id": "short-critical-decision",
+  "type": "session_digest",
+  "description": "A short, command-free session with a binding operational decision must be captured despite having fewer than ten transcript entries and no Bash calls.",
+  "sessionId": "quality-short-critical-decision",
+  "cwd": "/home/amo/Documents/code/amo/migrationsplanung",
+  "expectCapture": true,
+  "expectedAtoms": [
+    {
+      "id": "blue-green-window-decision",
+      "importance": "critical",
+      "kind": "decision",
+      "section": "Entscheidung",
+      "pattern": "Blue.?Green.*Sonntag.*22:00|Sonntag.*22:00.*Blue.?Green"
+    },
+    {
+      "id": "rollback-threshold",
+      "importance": "high",
+      "kind": "constraint",
+      "section": "Offene Punkte / Constraints",
+      "pattern": "(Rollback|Rückroll|Rueckroll).*(5|fünf|fuenf).{0,20}(Fehler|Fehlerrate).{0,30}(10|zehn) Minuten|(5|fünf|fuenf).{0,20}(Fehler|Fehlerrate).{0,30}(10|zehn) Minuten.*(Rollback|Rückroll|Rueckroll)"
+    }
+  ],
+  "minLongAssistantBlockWords": 18,
+  "steps": [
+    {
+      "name": "final-stop",
+      "entries": [
+        {
+          "type": "user",
+          "message": {
+            "content": "Wir müssen das Migrationsverfahren und ein verbindliches Wartungsfenster festlegen. Es stehen Direktmigration und Blue-Green zur Wahl."
+          }
+        },
+        {
+          "type": "assistant",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Blue-Green reduziert das Rückrollrisiko, während die Direktmigration kürzer, aber schwerer reversibel wäre."
+              }
+            ]
+          }
+        },
+        {
+          "type": "user",
+          "message": {
+            "content": "Entscheidung: Wir verwenden Blue-Green am Sonntag um 22:00 Uhr. Wenn die Fehlerrate in den ersten zehn Minuten über fünf Prozent steigt, führen wir den Rollback aus."
+          }
+        },
+        {
+          "type": "assistant",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Verbindlich festgehalten ist die Blue-Green-Migration im Wartungsfenster Sonntag 22:00 Uhr. Der direkte Wechsel ist verworfen. Die Rückrollbedingung greift bei mehr als fünf Prozent Fehlerrate innerhalb der ersten zehn Minuten."
+              }
+            ]
+          }
+        },
+        {
+          "type": "user",
+          "message": {
+            "content": "Bitte halte nur die Entscheidung und die Rückrollbedingung fest, nicht unsere gesamte Diskussion."
+          }
+        },
+        {
+          "type": "assistant",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "Die bindende Entscheidung und ihre Abbruchbedingung sind die einzigen dauerhaften Informationen dieser Session."
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,12 +2,14 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { join } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { ACTION_LOG_FILE, appendActionLog } from './action-log.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BuildChangeLedgerOptions {
   dryRun?: boolean
   limit?: number
+  adoptLegacyOwnership?: boolean
 }
 
 export interface ChangeLedgerResult {
@@ -61,6 +63,9 @@ export function buildChangeLedger(vault: Vault, options: BuildChangeLedgerOption
 
   if (!dryRun) {
     assertCanWriteTool('build_change_ledger', [CHANGE_LEDGER_PATH])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, CHANGE_LEDGER_PATH, 'change-ledger', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     mkdirSync(join(vault.vaultPath, 'Maintenance'), { recursive: true })
     const fullPath = vaultJoin(vault.vaultPath, CHANGE_LEDGER_PATH)
     writeFileSync(fullPath, content, 'utf-8')

@@ -107,7 +107,7 @@ export function captureV2(
   options: CaptureV2Options = {},
 ): CaptureV2Result {
   const mode = options.mode ?? 'fast'
-  const dryRun = options.dryRun ?? (mode === 'review')
+  const dryRun = options.dryRun ?? true
   const contentLower = content.toLowerCase()
   const { title, body } = extractTitleAndBody(content)
   const tags = new Set<string>()

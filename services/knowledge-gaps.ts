@@ -5,7 +5,7 @@ import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
 import { isActiveNote } from './note-scope.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, assertSingleLineText, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface FlagKnowledgeGapOptions {
   question: string
@@ -83,8 +83,7 @@ function existingOpenGapPath(vault: Vault, title: string): string | null {
 
 export function flagKnowledgeGap(vault: Vault, options: FlagKnowledgeGapOptions): KnowledgeGapResult {
   const dryRun = options.dryRun ?? true
-  const question = options.question.trim()
-  if (!question) throw new Error('Frage darf nicht leer sein')
+  const question = assertSingleLineText(options.question, 'Frage')
 
   const tags = [...new Set(['knowledge-gap', 'open-question', ...(options.tags ?? [])].map(normalizeTag))]
   const title = question.endsWith('?') ? question : `${question}?`
@@ -127,13 +126,14 @@ export function flagKnowledgeGap(vault: Vault, options: FlagKnowledgeGapOptions)
 
 export function flagContradiction(vault: Vault, options: FlagContradictionOptions): KnowledgeGapResult {
   const dryRun = options.dryRun ?? true
-  const title = options.title.trim()
-  if (!title) throw new Error('Titel darf nicht leer sein')
+  const title = assertSingleLineText(options.title, 'Titel')
   if (!options.claimA?.trim() || !options.claimB?.trim()) throw new Error('Beide Aussagen müssen gesetzt sein')
 
+  const fileStem = sanitizePathSegment(title)
+  if (!fileStem) throw new Error('Titel ergibt keinen gültigen Dateinamen')
   const path = dryRun
-    ? `Knowledge/Contradictions/${sanitizePathSegment(title)}.md`
-    : uniqueRelativePath(vault.vaultPath, 'Knowledge/Contradictions', `${sanitizePathSegment(title)}.md`)
+    ? `Knowledge/Contradictions/${fileStem}.md`
+    : uniqueRelativePath(vault.vaultPath, 'Knowledge/Contradictions', `${fileStem}.md`)
   const tags = ['contradiction', 'open-question'].map(normalizeTag)
   const sources = options.sources?.length
     ? options.sources.map(source => `- ${source}`).join('\n')
@@ -180,9 +180,8 @@ export function listOpenQuestions(vault: Vault): OpenQuestion[] {
 
 export function resolveGap(vault: Vault, options: ResolveGapOptions): KnowledgeGapResult {
   const dryRun = options.dryRun ?? true
-  const path = options.path.trim()
+  const path = assertSafeRelativePath(options.path)
   const resolution = options.resolution.trim()
-  if (!path) throw new Error('Pfad darf nicht leer sein')
   if (!resolution) throw new Error('Resolution darf nicht leer sein')
 
   const fullPath = vaultJoin(vault.vaultPath, path)

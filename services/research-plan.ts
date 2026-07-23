@@ -3,7 +3,7 @@ import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSingleLineText, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface CreateResearchPlanOptions {
   topic: string
@@ -33,8 +33,7 @@ function renderSourceLines(sources: string[] = []): string {
 
 export function createResearchPlan(vault: Vault, options: CreateResearchPlanOptions): ResearchPlanResult {
   const dryRun = options.dryRun ?? true
-  const topic = options.topic.trim()
-  if (!topic) throw new Error('Topic darf nicht leer sein')
+  const topic = assertSingleLineText(options.topic, 'Topic')
 
   const question = options.question?.trim() || topic
   const pack = vault.buildContextPack({ query: topic, maxNotes: 6, includeLinked: true })
@@ -46,9 +45,11 @@ export function createResearchPlan(vault: Vault, options: CreateResearchPlanOpti
     ? pack.openTodos.slice(0, 10).map(todo => `- [ ] [[${todo.path}]]: ${todo.text}`).join('\n')
     : '- Keine offenen TODOs im Kontext'
   const scope = options.scope?.trim() || 'Lokale Vault-Recherche zuerst; externe Quellen nur manuell und quellenkritisch ergänzen.'
+  const fileStem = sanitizePathSegment(topic)
+  if (!fileStem) throw new Error('Topic ergibt keinen gültigen Dateinamen')
   const path = dryRun
-    ? `Knowledge/Research/${sanitizePathSegment(topic)}.md`
-    : uniqueRelativePath(vault.vaultPath, 'Knowledge/Research', `${sanitizePathSegment(topic)}.md`)
+    ? `Knowledge/Research/${fileStem}.md`
+    : uniqueRelativePath(vault.vaultPath, 'Knowledge/Research', `${fileStem}.md`)
   const tags = ['research-plan', 'open-question'].map(normalizeTag)
   const content = `---\n${buildFrontmatter({
     status: 'open',

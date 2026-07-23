@@ -3,8 +3,13 @@ import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter, normalizeTag } from './frontmatter-linter.ts'
-import { isActiveNote } from './note-scope.ts'
+import { isActiveNote, isAutoCaptureNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
+import {
+  hasCompleteDigestProvenance,
+  parseSessionDigestFacts,
+  type ParsedDigestFact,
+} from './session-digest-facts.ts'
 import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface ExtractClaimsOptions {
@@ -25,6 +30,9 @@ export interface ExtractedClaim {
   claimStatus: ClaimStatus
   sourceStage: SourceStage
   contradictionCandidates: string[]
+  factKind?: ParsedDigestFact['kind']
+  evidenceScore?: number
+  evidenceRefs?: string[]
 }
 
 export interface ExtractClaimsResult {
@@ -59,6 +67,52 @@ function claimSentences(content: string, maxClaims: number): string[] {
     .filter(line => !isOperationalInstruction(line))
     .filter(line => !/\?$/.test(line))
   return [...new Set(candidates)].slice(0, maxClaims)
+}
+
+const AUTO_CLAIM_MIN_EVIDENCE = 75
+const AUTO_CLAIM_MIN_SALIENCE = 60
+const STRUCTURED_CLAIM_KINDS = new Set<ParsedDigestFact['kind']>([
+  'cause',
+  'decision',
+  'change',
+  'verification',
+  'result',
+  'constraint',
+])
+
+interface ClaimCandidate {
+  claim: string
+  confidence: ExtractedClaim['confidence']
+  factKind?: ParsedDigestFact['kind']
+  evidenceScore?: number
+  evidenceRefs?: string[]
+}
+
+function confidenceFromEvidence(score: number): ExtractedClaim['confidence'] {
+  if (score >= 75) return 'high'
+  if (score >= 45) return 'medium'
+  return 'low'
+}
+
+function minimumAutoClaimSalience(fact: ParsedDigestFact): number {
+  return fact.kind === 'result' ? 70 : AUTO_CLAIM_MIN_SALIENCE
+}
+
+function structuredClaimCandidates(content: string, strictAutoCapture: boolean): ClaimCandidate[] | null {
+  const digest = parseSessionDigestFacts(content)
+  if (!digest.hasDigest) return strictAutoCapture ? [] : null
+  return digest.facts
+    .filter(fact => STRUCTURED_CLAIM_KINDS.has(fact.kind))
+    .filter(hasCompleteDigestProvenance)
+    .filter(fact => fact.evidenceScore >= (strictAutoCapture ? AUTO_CLAIM_MIN_EVIDENCE : 45))
+    .filter(fact => !strictAutoCapture || fact.salienceScore >= minimumAutoClaimSalience(fact))
+    .map(fact => ({
+      claim: fact.statement,
+      confidence: confidenceFromEvidence(fact.evidenceScore),
+      factKind: fact.kind,
+      evidenceScore: fact.evidenceScore,
+      evidenceRefs: fact.provenance.map(item => item.ref),
+    }))
 }
 
 function isConversationOrStatusNoise(line: string): boolean {
@@ -147,7 +201,10 @@ function renderClaimNote(claim: ExtractedClaim): string {
     source_stage: claim.sourceStage,
     claim_status: claim.claimStatus,
     confidence: claim.confidence,
-    checked_at: today(),
+    checked_at: claim.sourceStage === 'manual' && claim.claimStatus === 'confirmed' ? today() : undefined,
+    fact_kind: claim.factKind,
+    evidence_score: claim.evidenceScore,
+    evidence_refs: claim.evidenceRefs,
     contradicted_by: claim.contradictionCandidates,
   })}---\n\n# Claim: ${claim.claim.slice(0, 80)}\n\n${claim.claim}\n\n## Quelle\n\n[[${claim.source}|${basename(claim.source)}]]\n\n## Potenzielle Widersprüche\n\n${contradictions}\n`
 }
@@ -157,22 +214,27 @@ export function extractClaims(vault: Vault, options: ExtractClaimsOptions): Extr
   const { source, content } = readSource(vault, options.path)
   const sourceStage = options.sourceStage ?? inferSourceStage(vault, source)
   const claimStatus = options.claimStatus ?? (sourceStage === 'manual' ? 'confirmed' : 'provisional')
+  const sourceNote = vault.notes.get(source)
+  const strictAutoCapture = sourceStage === 'stop_capture' || (!!sourceNote && isAutoCaptureNote(sourceNote))
+  const structured = structuredClaimCandidates(content, strictAutoCapture)
+  const candidates: ClaimCandidate[] = structured ?? claimSentences(content, Math.max(1, Math.min(options.maxClaims ?? 8, 20)))
+    .map(claim => ({ claim, confidence: 'medium' }))
   const existing = dryRun ? new Set<string>() : existingClaimKeys(vault)
   const seen = new Set<string>()
-  const claims = claimSentences(content, Math.max(1, Math.min(options.maxClaims ?? 8, 20)))
-    .filter(claim => {
-      const key = normalizeClaim(claim)
+  const claims = candidates
+    .slice(0, Math.max(1, Math.min(options.maxClaims ?? 8, 20)))
+    .filter(candidate => {
+      const key = normalizeClaim(candidate.claim)
       if (!key || seen.has(key) || existing.has(key)) return false
       seen.add(key)
       return true
     })
-    .map(claim => ({
-      claim,
+    .map(candidate => ({
+      ...candidate,
       source,
-      confidence: 'medium' as const,
       claimStatus,
       sourceStage,
-      contradictionCandidates: contradictionCandidates(vault, claim),
+      contradictionCandidates: contradictionCandidates(vault, candidate.claim),
     }))
   const written: string[] = []
 
@@ -204,7 +266,7 @@ function inferSourceStage(vault: Vault, source: string): SourceStage {
   const note = vault.notes.get(source)
   if (!note) return 'manual'
   if (source.startsWith('Knowledge/Checkpoints/') || note.tags.includes('checkpoint') || note.frontmatter.source_stage === 'checkpoint') return 'checkpoint'
-  if (note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester' || note.frontmatter.source_stage === 'stop_capture') return 'stop_capture'
+  if (isAutoCaptureNote(note)) return 'stop_capture'
   if (String(note.frontmatter.quelle ?? '').includes('brain-auto-build')) return 'auto_build'
   return 'manual'
 }

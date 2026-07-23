@@ -2,7 +2,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Vault } from '../vault.ts'
-import { loadBrainPolicy } from './policy.ts'
+import { diagnoseConfigFiles } from '../config.ts'
+import { isRecognizedLegacyGeneratedSurface } from './generated-surface-ownership.ts'
+import { parseFrontmatter } from './note-parser.ts'
+import { diagnoseBrainPolicy, loadBrainPolicy } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export type BrainHealthStatus = 'ok' | 'warn' | 'fail'
@@ -51,6 +54,79 @@ function fileExists(vault: Vault, relativePath: string): boolean {
   }
 }
 
+const GENERATED_SURFACES = [
+  ['brain_dashboard', 'Knowledge/_brain.md', 'brain-dashboard'],
+  ['knowledge_index', 'Knowledge/index.md', 'knowledge-index'],
+  ['hot_cache', 'Knowledge/hot.md', 'hot-cache'],
+  ['capture_review', 'Maintenance/Capture Review.md', 'capture-review'],
+  ['evidence_dashboard', 'Knowledge/evidence.md', 'evidence-dashboard'],
+  ['knowledge_inbox', 'Maintenance/Knowledge Inbox.md', 'knowledge-inbox'],
+  ['change_ledger', 'Maintenance/Change Ledger.md', 'change-ledger'],
+  ['background_report', 'Maintenance/Background Run Report.md', 'brain-run-background'],
+] as const
+
+function generatedSurfaceCheck(vault: Vault, id: string, relativePath: string, owner: string): BrainHealthCheck {
+  const fullPath = vaultJoin(vault.vaultPath, relativePath)
+  if (!existsSync(fullPath)) {
+    return { id, label: relativePath, status: 'warn', message: 'noch nicht erzeugt; repair_generated_surfaces oder Background-Run verwenden' }
+  }
+  try {
+    const frontmatter = parseFrontmatter(readFileSync(fullPath, 'utf-8'))
+    if (frontmatter.quelle !== owner) {
+      if (isRecognizedLegacyGeneratedSurface(vault.vaultPath, relativePath, owner)) {
+        return {
+          id,
+          label: relativePath,
+          status: 'warn',
+          message: `erkennbare Legacy-Surface ohne Ownership-Marker; repair_generated_surfaces mit adopt_legacy=true explizit prüfen/anwenden (${owner})`,
+        }
+      }
+      return {
+        id,
+        label: relativePath,
+        status: 'fail',
+        message: `Ownership-Marker ungültig: erwartet quelle=${owner}, gefunden ${String(frontmatter.quelle ?? '(keiner)')}`,
+      }
+    }
+    const ageDays = Math.max(0, (Date.now() - statSync(fullPath).mtimeMs) / 86_400_000)
+    return ageDays > 7
+      ? { id, label: relativePath, status: 'warn', message: `generator-owned, aber seit ${Math.floor(ageDays)} Tagen nicht aktualisiert` }
+      : { id, label: relativePath, status: 'ok', message: `generator-owned und aktuell (${owner})` }
+  } catch (err) {
+    return {
+      id,
+      label: relativePath,
+      status: 'fail',
+      message: `nicht sicher diagnostizierbar: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+}
+
+function autoBuildManifestCheck(vault: Vault): BrainHealthCheck {
+  const relativePath = '.brain-auto-build-manifest.json'
+  const path = vaultJoin(vault.vaultPath, relativePath)
+  if (!existsSync(path)) return { id: 'auto_build_manifest', label: 'Auto-build manifest', status: 'warn', message: 'noch kein Auto-Build-Lauf erfasst' }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { version?: unknown; sources?: unknown }
+    if (parsed.version !== 1 || !parsed.sources || typeof parsed.sources !== 'object' || Array.isArray(parsed.sources)) {
+      throw new Error('version=1 und sources-Objekt erforderlich')
+    }
+    for (const [source, entry] of Object.entries(parsed.sources as Record<string, unknown>)) {
+      if (!entry || typeof entry !== 'object' || typeof (entry as Record<string, unknown>).hash !== 'string') {
+        throw new Error(`ungültiger Source-Eintrag: ${source}`)
+      }
+    }
+    return { id: 'auto_build_manifest', label: 'Auto-build manifest', status: 'ok', message: `${Object.keys(parsed.sources).length} Source-Einträge, Schema v1` }
+  } catch (error) {
+    return {
+      id: 'auto_build_manifest',
+      label: 'Auto-build manifest',
+      status: 'fail',
+      message: `beschädigt; Auto-Build bleibt fail-closed: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+}
+
 function readClaudeSettings(): unknown | null {
   const home = process.env.HOME
   if (!home) return null
@@ -78,6 +154,7 @@ function nextActions(checks: BrainHealthCheck[]): string[] {
 }
 
 export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {}): BrainHealthResult {
+  const policyDiagnostic = diagnoseBrainPolicy()
   const policy = loadBrainPolicy()
   const checks: BrainHealthCheck[] = []
   const add = (id: string, label: string, status: BrainHealthStatus, message: string) => {
@@ -91,6 +168,28 @@ export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {})
     add('vault_path', 'Vault path', 'fail', `Nicht lesbar: ${vault.vaultPath}`)
   }
 
+  add(
+    'policy_config',
+    'Brain policy',
+    policyDiagnostic.valid ? 'ok' : 'fail',
+    policyDiagnostic.valid
+      ? `gültig: ${policyDiagnostic.path}`
+      : `${policyDiagnostic.path}: ${policyDiagnostic.errors.join('; ')}`,
+  )
+  for (const diagnostic of diagnoseConfigFiles()) {
+    const status: BrainHealthStatus = !diagnostic.valid
+      ? 'fail'
+      : diagnostic.warnings.length > 0
+        ? 'warn'
+        : 'ok'
+    const detail = diagnostic.errors.length > 0
+      ? diagnostic.errors.join('; ')
+      : diagnostic.warnings.length > 0
+        ? diagnostic.warnings.join('; ')
+        : `${diagnostic.entryCount} Einträge`
+    add(`config_${diagnostic.id}`, diagnostic.label, status, `${detail}; ${diagnostic.path}`)
+  }
+
   add('index', 'Vault index', vault.notes.size > 0 ? 'ok' : 'warn', `${vault.notes.size} Notizen indexiert`)
   add('working_memory', 'Working memory', policy.workingMemory.mode === 'manual_only' && !policy.workingMemory.allowAutomaticRecall ? 'ok' : 'warn', `mode=${policy.workingMemory.mode}, automatic=${policy.workingMemory.allowAutomaticRecall}`)
   add('auto_capture_policy', 'Auto-capture policy', policy.hooks.autoCapture ? 'ok' : 'warn', policy.hooks.autoCapture ? 'hooks.autoCapture=true' : 'hooks.autoCapture=false')
@@ -98,22 +197,29 @@ export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {})
   add('checkpoint_policy', 'Long-session policy', policy.automation.duringSession.autoCheckpoint ? 'ok' : 'warn', `autoCheckpoint=${policy.automation.duringSession.autoCheckpoint}, minCommands=${policy.automation.duringSession.minCommandsBetweenCheckpoints}, minMinutes=${policy.automation.duringSession.minMinutesBetweenCheckpoints}`)
   add('risky_auto_apply', 'Risky auto-apply block', policy.automation.neverAutoApply.includes('merge_duplicates') && policy.automation.neverAutoApply.includes('rename_note') ? 'ok' : 'warn', `neverAutoApply=${policy.automation.neverAutoApply.join(', ')}`)
 
-  const requiredTools = ['brain_auto_build', 'archive_auto_build_run', 'brain_checkpoint', 'brain_metrics', 'brain_run_background', 'record_brain_feedback', 'build_capture_review', 'build_evidence_dashboard', 'build_session_impact_report', 'build_knowledge_inbox', 'brain_apply_inbox_item', 'migrate_brain_metadata', 'build_change_ledger']
+  const requiredTools = ['brain_auto_build', 'archive_auto_build_run', 'brain_checkpoint', 'brain_metrics', 'brain_run_background', 'record_brain_feedback', 'build_capture_review', 'build_evidence_dashboard', 'build_session_impact_report', 'repair_generated_surfaces', 'build_knowledge_inbox', 'brain_apply_inbox_item', 'brain_review_inbox_items', 'migrate_brain_metadata', 'build_change_ledger', 'promote_suggestion']
   for (const tool of requiredTools) {
     add(`tool_policy_${tool}`, `Tool policy ${tool}`, policy.tools[tool] ? 'ok' : 'fail', policy.tools[tool] ? `risk=${policy.tools[tool].risk}, write=${policy.tools[tool].write}` : 'Tool fehlt in brain-policy.json')
   }
 
-  const surfaces = [
-    ['brain_dashboard', 'Knowledge/_brain.md'],
-    ['knowledge_index', 'Knowledge/index.md'],
-    ['hot_cache', 'Knowledge/hot.md'],
-  ] as const
-  for (const [id, path] of surfaces) {
-    add(id, path, fileExists(vault, path) ? 'ok' : 'warn', fileExists(vault, path) ? 'vorhanden' : 'noch nicht erzeugt')
-  }
+  for (const [id, path, owner] of GENERATED_SURFACES) checks.push(generatedSurfaceCheck(vault, id, path, owner))
 
-  add('auto_build_manifest', 'Auto-build manifest', fileExists(vault, '.brain-auto-build-manifest.json') ? 'ok' : 'warn', fileExists(vault, '.brain-auto-build-manifest.json') ? 'vorhanden' : 'noch kein Auto-Build-Lauf erfasst')
+  checks.push(autoBuildManifestCheck(vault))
   add('action_log', 'Action log', fileExists(vault, '.action-log.jsonl') ? 'ok' : 'warn', fileExists(vault, '.action-log.jsonl') ? 'vorhanden' : 'noch keine geloggte Schreibaktion')
+
+  const semantic = vault.semanticIndexStatus()
+  const semanticFileExists = fileExists(vault, semantic.path)
+  const semanticDrift = semantic.missingNotes.length + semantic.staleNotes.length + semantic.extraNotes.length
+  add(
+    'semantic_index',
+    'Semantic index',
+    !semanticFileExists || (semantic.exists && semanticDrift === 0) ? 'ok' : 'warn',
+    !semanticFileExists
+      ? 'optionaler Cache noch nicht gebaut; Semantic Search nutzt lokalen On-Demand-Fallback'
+      : semantic.exists
+      ? `${semantic.indexedNotes}/${semantic.totalNotes} indexiert; missing=${semantic.missingNotes.length}, stale=${semantic.staleNotes.length}, extra=${semantic.extraNotes.length}`
+      : 'Datei vorhanden, aber ungültig; rebuild_semantic_index als Dry-Run prüfen',
+  )
 
   if (options.checkHooks !== false) {
     const settings = readClaudeSettings()

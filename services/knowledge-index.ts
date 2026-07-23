@@ -1,11 +1,13 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BuildKnowledgeIndexOptions {
   dryRun?: boolean
+  adoptLegacyOwnership?: boolean
 }
 
 export interface KnowledgeIndexResult {
@@ -30,7 +32,7 @@ function topTags(vault: Vault): string[] {
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 20)
-    .map(([tag, count]) => `- #${tag} (${count})`)
+    .map(([tag, count]) => `- \`#${tag}\` (${count})`)
 }
 
 function recentNotes(vault: Vault): string[] {
@@ -63,7 +65,7 @@ function renderKnowledgeIndex(vault: Vault): string {
   ]
   const folderLines = folders.map(([label, prefix]) => `- ${label}: ${countByPrefix(vault, prefix)} Notizen`)
 
-  return `---\nstatus: aktiv\ntags:\n  - knowledge-index\naktualisiert: ${new Date().toISOString()}\n---\n\n# Knowledge Index\n\n## Bereiche\n\n${folderLines.join('\n')}\n\n## Häufige Tags\n\n${linesOrEmpty(topTags(vault))}\n\n## Zuletzt aktive Notizen\n\n${linesOrEmpty(recentNotes(vault))}\n\n## Offene Wissenslücken\n\n${linesOrEmpty(openKnowledgeQuestions(vault))}\n`
+  return `---\nstatus: aktiv\ntags:\n  - knowledge-index\naktualisiert: ${new Date().toISOString()}\nquelle: knowledge-index\n---\n\n# Knowledge Index\n\n## Bereiche\n\n${folderLines.join('\n')}\n\n## Häufige Tags\n\n${linesOrEmpty(topTags(vault))}\n\n## Zuletzt aktive Notizen\n\n${linesOrEmpty(recentNotes(vault))}\n\n## Offene Wissenslücken\n\n${linesOrEmpty(openKnowledgeQuestions(vault))}\n`
 }
 
 export function buildKnowledgeIndex(vault: Vault, options: BuildKnowledgeIndexOptions = {}): KnowledgeIndexResult {
@@ -73,6 +75,9 @@ export function buildKnowledgeIndex(vault: Vault, options: BuildKnowledgeIndexOp
 
   if (!dryRun) {
     assertCanWriteTool('build_knowledge_index', [INDEX_PATH])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, INDEX_PATH, 'knowledge-index', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     const fullPath = vaultJoin(vault.vaultPath, INDEX_PATH)
     mkdirSync(vaultJoin(vault.vaultPath, 'Knowledge'), { recursive: true })
     writeFileSync(fullPath, content, 'utf-8')

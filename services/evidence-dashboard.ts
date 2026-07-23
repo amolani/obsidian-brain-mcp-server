@@ -1,13 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { evidenceReport, type EvidenceIssue } from './evidence.ts'
-import { parseFrontmatter } from './note-parser.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BuildEvidenceDashboardOptions {
   dryRun?: boolean
+  adoptLegacyOwnership?: boolean
 }
 
 export interface EvidenceDashboardResult {
@@ -92,10 +93,9 @@ ${issueLines(group(report.issues, 'Widerspruch referenziert').slice(0, 25))}
   if (!dryRun) {
     assertCanWriteTool('build_evidence_dashboard', [EVIDENCE_DASHBOARD_PATH])
     const fullPath = vaultJoin(vault.vaultPath, EVIDENCE_DASHBOARD_PATH)
-    if (existsSync(fullPath)) {
-      const fm = parseFrontmatter(readFileSync(fullPath, 'utf-8'))
-      if (fm.quelle !== 'evidence-dashboard') throw new Error(`${EVIDENCE_DASHBOARD_PATH} existiert und ist nicht auto-generiert`)
-    }
+    assertGeneratedSurfaceOwnership(vault.vaultPath, EVIDENCE_DASHBOARD_PATH, 'evidence-dashboard', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     mkdirSync(vaultJoin(vault.vaultPath, 'Knowledge'), { recursive: true })
     writeFileSync(fullPath, content, 'utf-8')
     vault.indexNote(fullPath, statSync(fullPath).mtimeMs)

@@ -26,6 +26,7 @@ export interface OrganizeReferenzResult {
 export interface ReferenzOrganizerContext {
   vaultPath: string
   notes: Map<string, NoteEntry>
+  removeNoteFromIndex(relativePath: string): void
   indexNote(fullPath: string, mtimeMs: number): void
   buildLinkIndex(): void
 }
@@ -42,7 +43,7 @@ function isProcessable(relativePath: string): boolean {
   return false
 }
 
-export function organizeReferenz(ctx: ReferenzOrganizerContext, dryRun: boolean = false): OrganizeReferenzResult {
+export function organizeReferenz(ctx: ReferenzOrganizerContext, dryRun: boolean = true): OrganizeReferenzResult {
   const moved: OrganizeReferenzMove[] = []
   const skipped: OrganizeReferenzSkip[] = []
 
@@ -78,7 +79,7 @@ export function organizeReferenz(ctx: ReferenzOrganizerContext, dryRun: boolean 
 
       try {
         renameSync(entry.path, targetPath)
-        ctx.notes.delete(relativePath)
+        ctx.removeNoteFromIndex(relativePath)
         const stat = statSync(targetPath)
         ctx.indexNote(targetPath, stat.mtimeMs)
       } catch (err) {

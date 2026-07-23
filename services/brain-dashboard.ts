@@ -1,13 +1,15 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
 import { evidenceReport } from './evidence.ts'
-import { isActiveNote } from './note-scope.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
+import { isActiveNote, isAutoCaptureNote } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export interface BuildBrainDashboardOptions {
   dryRun?: boolean
+  adoptLegacyOwnership?: boolean
 }
 
 export interface BrainDashboardResult {
@@ -40,7 +42,7 @@ export function buildBrainDashboard(vault: Vault, options: BuildBrainDashboardOp
   const researchPlans = [...vault.notes.keys()].filter(path => path.startsWith('Knowledge/Research/'))
   const recentCaptures = [...vault.notes.values()]
     .filter(isActiveNote)
-    .filter(note => note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester')
+    .filter(isAutoCaptureNote)
     .sort((a, b) => b.lastModified - a.lastModified)
     .slice(0, 10)
     .map(note => note.relativePath)
@@ -54,13 +56,10 @@ export function buildBrainDashboard(vault: Vault, options: BuildBrainDashboardOp
 
   if (!dryRun) {
     assertCanWriteTool('build_brain_dashboard', [DASHBOARD_PATH])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, DASHBOARD_PATH, 'brain-dashboard', {
+      allowRecognizedLegacy: options.adoptLegacyOwnership === true,
+    })
     const fullPath = vaultJoin(vault.vaultPath, DASHBOARD_PATH)
-    if (existsSync(fullPath)) {
-      const existing = vault.notes.get(DASHBOARD_PATH)
-      if (existing && existing.frontmatter.quelle !== 'brain-dashboard') {
-        throw new Error(`${DASHBOARD_PATH} existiert und ist nicht auto-generiert`)
-      }
-    }
     mkdirSync(vaultJoin(vault.vaultPath, 'Knowledge'), { recursive: true })
     writeFileSync(fullPath, content, 'utf-8')
     vault.indexNote(fullPath, statSync(fullPath).mtimeMs)

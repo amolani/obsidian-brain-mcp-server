@@ -5,7 +5,7 @@ import { appendActionLog } from './action-log.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
 import { parseFrontmatter, stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { assertSafeRelativePath, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, assertSingleLineText, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface RenameNoteOptions {
   path: string
@@ -49,13 +49,16 @@ function folderOf(relativePath: string): string {
 }
 
 function targetPathFor(entry: NoteEntry, options: RenameNoteOptions): { target: string; newTitle: string } {
-  const newTitle = (options.newTitle?.trim() || entry.title).trim()
+  const newTitle = options.newTitle === undefined
+    ? assertSingleLineText(entry.title, 'Titel')
+    : assertSingleLineText(options.newTitle, 'new_title')
   const folder = options.targetFolder !== undefined
     ? assertSafeRelativePath(options.targetFolder.trim() || '')
     : folderOf(entry.relativePath)
   const fileName = options.newTitle
     ? `${sanitizePathSegment(newTitle)}.md`
     : basename(entry.relativePath)
+  if (options.newTitle && !sanitizePathSegment(newTitle)) throw new Error('new_title ergibt keinen gültigen Dateinamen')
   return {
     target: assertSafeRelativePath(folder ? `${folder}/${fileName}` : fileName),
     newTitle,

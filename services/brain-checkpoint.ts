@@ -1,9 +1,10 @@
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { redactSecrets } from './secret-redaction.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSafePathSegment, assertSafeRelativePath, assertSingleLineText, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface BrainCheckpointOptions {
   title?: string
@@ -28,14 +29,31 @@ function nowStamp(): string {
 export function brainCheckpoint(vault: Vault, options: BrainCheckpointOptions): BrainCheckpointResult {
   const dryRun = options.dryRun ?? true
   if (!options.summary?.trim()) throw new Error('summary ist erforderlich')
-  const title = options.title?.trim() || `Session Checkpoint ${nowStamp()}`
+  const title = options.title === undefined
+    ? `Session Checkpoint ${nowStamp()}`
+    : assertSingleLineText(options.title, 'title')
+  const client = options.client === undefined ? undefined : assertSafePathSegment(options.client, 'client')
+  const sourcePath = options.sourcePath === undefined ? undefined : assertSafeRelativePath(options.sourcePath)
   const folder = 'Knowledge/Checkpoints'
   const redaction = redactSecrets(options.summary.trim())
   const redactionTypes = redaction.types.length > 0 ? redaction.types : ['none']
+  const fileStem = sanitizePathSegment(title)
+  if (!fileStem) throw new Error('title ergibt keinen gültigen Dateinamen')
   const path = dryRun
-    ? `${folder}/${sanitizePathSegment(title)}.md`
-    : uniqueRelativePath(vault.vaultPath, folder, `${sanitizePathSegment(title)}.md`)
-  const content = `---\nstatus: aktiv\ntags:\n  - checkpoint\n  - session\n${options.client ? `kunde: ${options.client}\n` : ''}aktualisiert: ${new Date().toISOString()}\nquelle: brain-checkpoint\nknowledge_type: checkpoint\nsource_stage: checkpoint\nsensitive: ${redaction.count > 0}\nredactions: ${redaction.count}\nredaction_types:\n${redactionTypes.map(type => `  - ${type}`).join('\n')}\n---\n\n# ${title}\n\n${redaction.content}\n${options.sourcePath ? `\nQuelle: [[${options.sourcePath}]]\n` : ''}`
+    ? `${folder}/${fileStem}.md`
+    : uniqueRelativePath(vault.vaultPath, folder, `${fileStem}.md`)
+  const content = `---\n${buildFrontmatter({
+    status: 'aktiv',
+    tags: ['checkpoint', 'session'],
+    ...(client ? { kunde: client } : {}),
+    aktualisiert: new Date().toISOString(),
+    quelle: 'brain-checkpoint',
+    knowledge_type: 'checkpoint',
+    source_stage: 'checkpoint',
+    sensitive: redaction.count > 0,
+    redactions: redaction.count,
+    redaction_types: redactionTypes,
+  })}---\n\n# ${title}\n\n${redaction.content}\n${sourcePath ? `\nQuelle: [[${sourcePath}]]\n` : ''}`
   let autoBuild: unknown
 
   if (!dryRun) {
@@ -50,14 +68,14 @@ export function brainCheckpoint(vault: Vault, options: BrainCheckpointOptions): 
       mode: 'apply',
       targets: [path],
       summary: `Brain Checkpoint geschrieben: ${path}`,
-      meta: { client: options.client, sourcePath: options.sourcePath, redactions: redaction.count },
+      meta: { client, sourcePath, redactions: redaction.count },
     })
   }
 
   if (options.runAutoBuild) {
     autoBuild = vault.brainAutoBuild({
-      sourcePath: options.sourcePath ?? (!dryRun ? path : undefined),
-      client: options.client,
+      sourcePath: sourcePath ?? (!dryRun ? path : undefined),
+      client,
       dryRun,
     })
   }

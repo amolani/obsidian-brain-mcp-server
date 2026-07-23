@@ -4,6 +4,7 @@ import { appendActionLog } from './action-log.ts'
 import { scoreCapture } from './capture-scoring.ts'
 import { buildFrontmatter } from './frontmatter-linter.ts'
 import { classifyIntent } from './intent-classifier.ts'
+import { isAutoCaptureNote } from './note-scope.ts'
 import { stripFrontmatter } from './note-parser.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
@@ -22,10 +23,6 @@ export interface BrainMetadataMigrationResult {
   dryRun: boolean
   scanned: number
   changed: BrainMetadataMigrationChange[]
-}
-
-function isCapture(note: NoteEntry): boolean {
-  return note.tags.includes('auto-capture') || note.frontmatter.quelle === 'knowledge-harvester'
 }
 
 function isClaim(note: NoteEntry): boolean {
@@ -49,7 +46,7 @@ export function migrateBrainMetadata(vault: Vault, options: MigrateBrainMetadata
     const next = { ...note.frontmatter }
     const fields: string[] = []
 
-    if (isCapture(note)) {
+    if (isAutoCaptureNote(note)) {
       const intent = note.frontmatter.session_intent
         ? { intent: String(note.frontmatter.session_intent), confidence: String(note.frontmatter.intent_confidence ?? 'low') }
         : classifyIntent(note.content, note.tags)

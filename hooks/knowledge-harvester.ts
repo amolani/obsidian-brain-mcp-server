@@ -4,23 +4,32 @@
 // Reads full transcript to capture procedural knowledge.
 // Smart title from CWD + detected services.
 // Auto-places notes in correct Kunden/ folder.
-// Auto-tags from commands used.
+// Auto-tags from selected, evidenced knowledge only.
 // Uses assistant summaries ("Erledigt:", bullet lists) as note content.
 // Incremental per-session capture: unchanged transcript hashes are skipped,
 // changed transcripts update the generated capture instead of blocking forever.
 
-import { createHash } from 'node:crypto'
-import { writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, statSync, readFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, unlinkSync, statSync, readFileSync } from 'node:fs'
+import { join, basename, dirname } from 'node:path'
 import { classifyNote } from '../technik-categories.ts'
 import { configPaths, loadClients } from '../config.ts'
 import { appendActionLog } from '../services/action-log.ts'
 import { scoreCapture } from '../services/capture-scoring.ts'
 import { resolveClientContext, type ClientMatch } from '../services/client-resolver.ts'
+import { buildFrontmatter } from '../services/frontmatter-linter.ts'
 import { classifyIntent, type ClassifiedIntent } from '../services/intent-classifier.ts'
+import { parseFrontmatter } from '../services/note-parser.ts'
 import { assertCanWriteTool, loadBrainPolicy } from '../services/policy.ts'
 import { redactSecrets, type RedactionResult } from '../services/secret-redaction.ts'
+import {
+  selectSalientKnowledge,
+  type KnowledgeBashEvidence,
+  type KnowledgeFactKind,
+  type KnowledgeSalienceSelection,
+} from '../services/knowledge-salience.ts'
 import { renderSessionDigest } from '../services/session-digest.ts'
+import { uniqueRelativePath, vaultJoin } from '../services/vault-paths.ts'
 import { Vault } from '../vault.ts'
 
 if (!process.env.VAULT_PATH) {
@@ -73,8 +82,11 @@ interface TranscriptEntry {
   role: string
   type: 'text' | 'tool_use' | 'tool_result'
   content: string
+  id?: string
+  toolUseId?: string
   toolName?: string
   isError?: boolean
+  exitCode?: number
 }
 
 function parseTranscript(path: string): TranscriptEntry[] {
@@ -104,6 +116,7 @@ function parseTranscript(path: string): TranscriptEntry[] {
               role: entryRole,
               type: 'tool_use',
               content: typeof block.input === 'string' ? block.input : JSON.stringify(block.input),
+              id: typeof block.id === 'string' ? block.id : undefined,
               toolName: block.name,
             })
           } else if (block.type === 'tool_result') {
@@ -114,7 +127,9 @@ function parseTranscript(path: string): TranscriptEntry[] {
               role: 'tool',
               type: 'tool_result',
               content: text,
+              toolUseId: typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined,
               isError: block.is_error === true || /^Error:|Exit code [^0]/.test(text.slice(0, 100)),
+              exitCode: Number(text.match(/(?:exit code|exited with code)\s+(-?\d+)/i)?.[1] ?? (block.is_error === true ? 1 : 0)),
             })
           }
         }
@@ -160,15 +175,12 @@ function logSuggestion(candidate: string, cwd: string, client?: string | null): 
 
 // ── Auto-Tag Detection from Commands ───────────────────────────────
 
-function detectTags(entries: TranscriptEntry[]): string[] {
+function detectTags(texts: readonly string[]): string[] {
   const tags = new Set<string>()
-  for (const entry of entries) {
-    if (entry.type !== 'tool_use' || entry.toolName !== 'Bash') continue
-    let cmd = ''
-    try { cmd = JSON.parse(entry.content).command || '' } catch { cmd = entry.content }
-    const cmdLower = cmd.toLowerCase()
+  for (const text of texts) {
+    const textLower = text.toLowerCase()
     for (const [pattern, tag] of Object.entries(COMMAND_TAGS)) {
-      if (cmdLower.includes(pattern)) tags.add(tag)
+      if (textLower.includes(pattern)) tags.add(tag)
     }
   }
   return [...tags]
@@ -176,9 +188,7 @@ function detectTags(entries: TranscriptEntry[]): string[] {
 
 // ── Smart Title Generation ─────────────────────────────────────────
 
-function generateTitle(entries: TranscriptEntry[], cwd: string, tags: string[]): string {
-  const text = entries.filter(entry => entry.type === 'text').map(entry => entry.content).join('\n')
-  const client = detectClient(cwd, text).client
+function generateTitle(entries: TranscriptEntry[], cwd: string, tags: string[], client: string | null): string {
   const datum = new Date().toISOString().split('T')[0]
 
   // Collect substantive user messages to detect the topic
@@ -241,6 +251,8 @@ interface ExtractedKnowledge {
   summaries: string[]
   phases: Phase[]
   intent: ClassifiedIntent
+  selection: KnowledgeSalienceSelection
+  routingActions: string[]
 }
 
 function cleanCaptureText(text: string): string {
@@ -251,13 +263,15 @@ function cleanCaptureText(text: string): string {
     .trim()
 }
 
-function isNoisyCaptureText(text: string): boolean {
+function isNoisyCaptureText(text: string, speaker: 'assistant' | 'user' = 'assistant'): boolean {
   const trimmed = cleanCaptureText(text).replace(/^[-*#\s>\d.]+/, '').trim()
   if (!trimmed) return true
-  return /^<(command|system|local-command|user-prompt|task-notification)\b/i.test(trimmed)
-    || /^(ok|okay|okey|alles klar|verstanden|nicht ganz|hier|sag|sobald|wenn|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe)\b/i.test(trimmed)
-    || /^(eine sache stimmt nicht|spurensuche-ergebnis|compose-syntax|pull durch|files stehen|damit ist die vorbereitung komplett|heute abend)\b/i.test(trimmed)
-    || /\b(sag bescheid|ich warte|ich melde mich|willst du|kannst du|soll ich|zum selber-ausführen|zum selber-ausfuehren)\b/i.test(trimmed)
+  if (/^<(command|system|local-command|user-prompt|task-notification)\b/i.test(trimmed)) return true
+  if (/^(ok|okay|okey|alles klar|verstanden)\b[.!\s]*$/i.test(trimmed)) return true
+  if (speaker === 'user') return false
+  return /^(?:nicht ganz|hier|sag|sobald|wenn|bitte|alternativ|kopier|kopiere|führe|fuehre|prüfe|pruefe)\b/i.test(trimmed)
+    || /^(?:eine sache stimmt nicht|spurensuche-ergebnis|compose-syntax|pull durch|files stehen|damit ist die vorbereitung komplett|heute abend)\b/i.test(trimmed)
+    || /\b(?:sag bescheid|ich warte|ich melde mich|willst du|kannst du|soll ich|zum selber-ausführen|zum selber-ausfuehren)\b/i.test(trimmed)
 }
 
 function isReadOnlyOrInspectionCommand(cmd: string): boolean {
@@ -268,6 +282,105 @@ function isReadOnlyOrInspectionCommand(cmd: string): boolean {
 
 function isSensitiveOrVerboseCommand(cmd: string): boolean {
   return /<<|cat\s*>\s*\.?env\b|NETWORKBOX_|JWT_SECRET|DB_PASSWORD|MONGO_URI|auth-user-pass|password|passwd|secret|token/i.test(cmd)
+}
+
+function commandFromEntry(entry: TranscriptEntry): string {
+  try {
+    const parsed = JSON.parse(entry.content) as { command?: unknown }
+    return typeof parsed.command === 'string' ? parsed.command : entry.content
+  } catch {
+    return entry.content
+  }
+}
+
+function pairedBashEvidence(entries: TranscriptEntry[]): KnowledgeBashEvidence[] {
+  const pending: Array<{ command: string; id: string; toolUseId?: string }> = []
+  const pairs: KnowledgeBashEvidence[] = []
+
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]
+    if (entry.type === 'tool_use' && entry.toolName === 'Bash') {
+      pending.push({
+        command: commandFromEntry(entry),
+        // Persist our own bounded ID. Tool-use IDs are transport metadata and
+        // must not become a path/log surface for user-controlled input.
+        id: `bash-${index}`,
+        toolUseId: entry.id,
+      })
+      continue
+    }
+    if (entry.type !== 'tool_result' || pending.length === 0) continue
+
+    const exactIndex = entry.toolUseId
+      ? pending.findIndex(item => item.toolUseId === entry.toolUseId)
+      : -1
+    if (entry.toolUseId && exactIndex < 0) continue
+    const pairIndex = exactIndex >= 0 ? exactIndex : pending.length - 1
+    const pendingCommand = pending.splice(pairIndex, 1)[0]
+    pairs.push({
+      id: pendingCommand.id,
+      command: pendingCommand.command,
+      result: entry.content,
+      isError: entry.isError,
+      exitCode: entry.exitCode,
+    })
+  }
+
+  return pairs
+}
+
+function selectedRoutingActions(
+  selection: KnowledgeSalienceSelection,
+  bashEvidence: readonly KnowledgeBashEvidence[],
+): string[] {
+  const selectedRefs = new Set(
+    selection.facts.flatMap(fact => fact.provenance
+      .filter(item => item.source === 'bash_pair')
+      .map(item => item.ref)),
+  )
+
+  return bashEvidence
+    .filter(pair => !!pair.id && selectedRefs.has(`bash_pair:${pair.id}`))
+    .map(pair => stripSsh(pair.command))
+    .filter(command => command.length >= 3 && !isSensitiveOrVerboseCommand(command))
+    .map(command => command.slice(0, 250))
+}
+
+function taskFromEntries(entries: TranscriptEntry[]): string {
+  return entries
+    .filter(entry => entry.role === 'user' && entry.type === 'text')
+    .map(entry => cleanCaptureText(entry.content).replace(/\s+/g, ' ').trim())
+    .find(text => text.length >= 12 && !isNoisyCaptureText(text, 'user'))
+    ?.slice(0, 300) ?? ''
+}
+
+function explicitlyRequestedFactKinds(entries: TranscriptEntry[]): Set<KnowledgeFactKind> | null {
+  const userTexts = entries
+    .filter(entry => entry.role === 'user' && entry.type === 'text')
+    .map(entry => cleanCaptureText(entry.content))
+    .reverse()
+
+  for (const text of userTexts) {
+    if (!/\b(?:nur|only)\b/i.test(text)) continue
+    const kinds = new Set<KnowledgeFactKind>()
+    const mappings: Array<[KnowledgeFactKind, RegExp]> = [
+      ['decision', /(?:entscheidung|decision)/i],
+      ['cause', /(?:ursache|root cause)/i],
+      ['change', /(?:änderung|aenderung|change|fix)/i],
+      ['verification', /(?:verifikation|validierung|prüfung|pruefung|prüfnachweis|pruefnachweis|verification)/i],
+      ['constraint', /(?:[a-zäöüß]*bedingung|constraint|voraussetzung|schwellenwert|threshold)/i],
+      ['open_question', /(?:offene frage|open question)/i],
+      ['problem', /(?:problem|fehler|incident)/i],
+      ['result', /(?:ergebnis|result|befund)/i],
+    ]
+    for (const [kind, pattern] of mappings) if (pattern.test(text)) kinds.add(kind)
+    if (kinds.size > 0) return kinds
+  }
+  return null
+}
+
+function hasSemanticSignal(text: string): boolean {
+  return /\b(?:zusammenfassung|summary|entscheidung|entschieden|beschlossen|decision|decided|ursache|root cause|because|weil|ergebnis|result|befund|verifiziert|validiert|verified|confirmed|test(?:s)? (?:passed|bestanden)|änderung|aenderung|geändert|geaendert|umgestellt|eingetragen|vorbereitet|verschoben|konfiguriert|installiert|behoben|fixed|offen(?:e|er|es)?|open question|todo|muss|muessen|must|constraint|fehlt|fehlgeschlagen|failed|funktioniert|works?|erreichbar|active|running)\b/i.test(text)
 }
 
 // Extract "phases" = work-blocks between user messages
@@ -281,15 +394,21 @@ function extractPhases(entries: TranscriptEntry[]): Phase[] {
 
   const flushPhase = () => {
     if (!inPhase || !currentUserRequest) return
-    // Pick best outcome: last substantial assistant text, or final assistant text
-    const outcome = currentAssistantTexts
-      .filter(t => t.length > 40)
-      .pop() || ''
-    // Only save if there was actual work (commands or substantial outcome)
-    if (currentCmdCount > 0 || outcome.length > 60) {
+    // Keep the bounded semantic outcomes of a phase, not just the final chat
+    // message. An explicit root cause or decision can otherwise disappear when
+    // a later assistant message only reports cleanup or next steps. The
+    // salience layer atomizes this evidence before anything is rendered.
+    const substantial = currentAssistantTexts.filter(text => text.length > 40)
+    const semanticOutcomes = substantial.filter(hasSemanticSignal)
+    const outcome = semanticOutcomes
+      .slice(-4)
+      .join('\n')
+    // Short, explicit decisions and findings can be more valuable than long
+    // shell-heavy sessions, so phase retention is based on semantic substance.
+    if (currentCmdCount > 0 || outcome.length > 20 || hasSemanticSignal(currentUserRequest)) {
       phases.push({
         userRequest: currentUserRequest,
-        outcome: outcome.slice(0, 500),
+        outcome: outcome.slice(0, 1800),
         commandCount: currentCmdCount,
         hadError: currentHadError,
       })
@@ -304,7 +423,7 @@ function extractPhases(entries: TranscriptEntry[]): Phase[] {
       flushPhase()
       // Start new phase
       const text = cleanCaptureText(entry.content)
-      if (text.length >= 10 && !isNoisyCaptureText(text)) {
+      if (text.length >= 10 && !isNoisyCaptureText(text, 'user')) {
         currentUserRequest = text.slice(0, 200).replace(/\n+/g, ' ').trim()
         inPhase = true
       } else {
@@ -326,90 +445,81 @@ function extractPhases(entries: TranscriptEntry[]): Phase[] {
   return phases
 }
 
-function extractKnowledge(entries: TranscriptEntry[], cwd: string): ExtractedKnowledge | null {
-  const procedures: string[] = []
+function extractKnowledge(entries: TranscriptEntry[], cwd: string, sessionId: string): ExtractedKnowledge | null {
+  const bashEvidence = pairedBashEvidence(entries)
+  const procedures = bashEvidence
+    .filter(pair => !pair.isError && (pair.exitCode === undefined || pair.exitCode === 0))
+    .map(pair => stripSsh(pair.command))
+    .filter(command => command.length >= 15 && !isReadOnlyOrInspectionCommand(command) && !isSensitiveOrVerboseCommand(command))
+    .map(command => command.slice(0, 250))
   const errorFixes: string[] = []
   const summaries: string[] = []
 
-  let lastBashCmd = ''
-  let lastError = ''
-
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i]
-
-    // Track Bash commands
-    if (entry.type === 'tool_use' && entry.toolName === 'Bash') {
-      try { lastBashCmd = JSON.parse(entry.content).command || entry.content } catch { lastBashCmd = entry.content }
-    }
-
-    // Track errors
-    if (entry.type === 'tool_result' && entry.isError && lastBashCmd) {
-      lastError = lastBashCmd.slice(0, 150)
-    }
-
-    // Detect Error → Fix cycle
-    if (lastError && entry.type === 'tool_use' && entry.toolName === 'Bash') {
-      let fixCmd = ''
-      try { fixCmd = JSON.parse(entry.content).command || '' } catch { fixCmd = entry.content }
-      const nextResult = entries[i + 1]
-      if (nextResult?.type === 'tool_result' && !nextResult.isError) {
-        // Strip SSH wrapper
-        const innerError = stripSsh(lastError)
-        const innerFix = stripSsh(fixCmd)
-        errorFixes.push(`**Fehler:** \`${innerError}\`\n**Fix:** \`${innerFix.slice(0, 200)}\``)
-        lastError = ''
-      }
-    }
-
-    // Collect successful Bash commands (not reads/checks)
-    if (entry.type === 'tool_result' && !entry.isError && lastBashCmd) {
-      const cmd = stripSsh(lastBashCmd)
-      const isRead = isReadOnlyOrInspectionCommand(cmd)
-      const sensitiveOrVerbose = isSensitiveOrVerboseCommand(cmd)
-      if (cmd.length >= 15 && !isRead && !sensitiveOrVerbose) {
-        if (cmd.length > 15) procedures.push(cmd.slice(0, 250))
-      }
-      lastBashCmd = ''
-    }
-
-    // Collect assistant summaries (the "Erledigt:", bullet-point messages)
-    if (entry.role === 'assistant' && entry.type === 'text' && entry.content.length > 80) {
+  for (const entry of entries) {
+    // Assistant text is evidence input, never note output. The salience layer
+    // atomizes and abstracts it before anything is persisted.
+    if (entry.role === 'assistant' && entry.type === 'text' && entry.content.length > 20) {
       const text = cleanCaptureText(entry.content)
       if (isNoisyCaptureText(text)) continue
-      // Prioritize structured summaries
-      if (/erledigt|zusammenfassung|befund|ergebnis|empfehlung|durchgelaufen|konfiguriert|installiert|eingerichtet|eingetragen|wiederhergestellt|verschoben|ersetzt|umgestellt|abgeschlossen/i.test(text)) {
-        summaries.push(text.slice(0, 800))
-      }
+      if (hasSemanticSignal(text)) summaries.push(text.slice(0, 1200))
+      if (/(?:fehler|error)\s*:?[\s\S]*(?:fix|lösung|loesung|workaround)\s*:/i.test(text)) errorFixes.push(text.slice(0, 800))
     }
   }
 
-  const tags = detectTags(entries)
   const resolverText = entries
     .filter(entry => entry.type === 'text')
     .map(entry => entry.content)
     .join('\n')
   const clientMatch = detectClient(cwd, resolverText)
-  const client = clientMatch.client
+  // Only an exact path segment is strong enough for physical customer routing.
+  // Content and fuzzy matches remain review candidates in neutral folders.
+  const client = clientMatch.method === 'exact_cwd' && clientMatch.confidence === 'high'
+    ? clientMatch.client
+    : null
 
-  // Need minimum substance. Read-only investigation sessions can be valuable
-  // when the assistant produced a concrete finding summary, even if no commands
-  // should be promoted as reusable procedure steps.
-  const bashCommandCount = entries.filter(entry => entry.type === 'tool_use' && entry.toolName === 'Bash').length
-  const hasSubstantiveSummary = summaries.some(summary => summary.length >= 120)
-  if (procedures.length < 2 && !hasSubstantiveSummary) return null
-  const totalSignals = procedures.length + errorFixes.length + summaries.length
-  if (totalSignals < 3 && !(hasSubstantiveSummary && bashCommandCount >= 3)) return null
-
-  const title = generateTitle(entries, cwd, tags)
   const phases = extractPhases(entries)
+  const task = taskFromEntries(entries)
+  const requestedKinds = explicitlyRequestedFactKinds(entries)
+  const hasExplicitCause = summaries.some(summary => /\b(?:root cause|ursache)\b/i.test(summary))
+  const factBudget = requestedKinds
+    ? Math.max(1, Math.min(7, requestedKinds.size))
+    : phases.length === 1 && hasExplicitCause
+      ? 3
+      : phases.length === 1
+        ? 5
+        : Math.max(4, Math.min(7, phases.length * 2))
+  const selection = selectSalientKnowledge({
+    sessionId,
+    task,
+    phases,
+    assistantSummaries: summaries,
+    errorFixes,
+    bashEvidence,
+    maxFacts: factBudget,
+    minSalienceScore: 45,
+    allowedKinds: requestedKinds ? [...requestedKinds] : undefined,
+  })
+  if (selection.facts.length === 0) return null
+
+  // Routing and durable tags only see selected facts and Bash actions that
+  // provide provenance for one of those exact facts. Incidental commands and
+  // unselected assistant prose cannot decide a Technik folder.
+  const routingActions = selectedRoutingActions(selection, bashEvidence)
+  const routingFacts = selection.facts.map(fact => fact.statement)
+  const tags = detectTags([...routingFacts, ...routingActions])
+
+  // Titles are used in paths and logs before note-level redaction. Redact at
+  // creation so no downstream surface ever receives a raw credential value.
+  const title = redactSecrets(generateTitle(entries, cwd, tags, client)).content
+
   const intentContent = [
-    summaries.join('\n\n'),
+    task,
+    selection.facts.map(fact => fact.statement).join('\n'),
     procedures.map((procedure, i) => `${i + 1}. \`${procedure}\``).join('\n'),
-    errorFixes.join('\n\n'),
   ].join('\n\n')
   const intent = classifyIntent(intentContent, tags)
 
-  return { title, client, clientMatch, tags, procedures, errorFixes, summaries, phases, intent }
+  return { title, client, clientMatch, tags, procedures, errorFixes, summaries, phases, intent, selection, routingActions }
 }
 
 function stripSsh(cmd: string): string {
@@ -429,26 +539,44 @@ function stripSsh(cmd: string): string {
 
 function generateNote(k: ExtractedKnowledge): string {
   const datum = new Date().toISOString().split('T')[0]
-  const allTags = ['auto-capture', 'prozedur', ...k.tags]
+  const hasProcedure = k.selection.facts.some(fact => fact.kind === 'change' && fact.evidenceScore >= 75)
+  const allTags = ['auto-capture', ...(hasProcedure ? ['prozedur'] : []), ...k.tags]
   if (k.client) allTags.push(`kunde/${k.client.toLowerCase()}`)
-  const tagBlock = allTags.map(t => `  - ${t}`).join('\n')
+  const salienceScores = k.selection.facts.map(fact => fact.salienceScore)
+  const evidenceScores = k.selection.facts.map(fact => fact.evidenceScore)
+  const importanceScore = Math.max(0, ...salienceScores)
+  const importanceMean = Math.round(salienceScores.reduce((sum, score) => sum + score, 0) / Math.max(1, salienceScores.length))
+  const evidenceScore = Math.round(evidenceScores.reduce((sum, score) => sum + score, 0) / Math.max(1, evidenceScores.length))
+  const evidenceQuality = evidenceScore >= 75 ? 'high' : evidenceScore >= 45 ? 'medium' : 'low'
+  const frontmatter = buildFrontmatter({
+    status: 'aktiv',
+    tags: allTags,
+    datum,
+    quelle: 'knowledge-harvester',
+    knowledge_type: 'capture',
+    source_stage: 'stop_capture',
+    abstraction_mode: 'typed_knowledge_atoms',
+    importance_model: k.selection.modelVersion,
+    importance_score: importanceScore,
+    importance_mean: importanceMean,
+    evidence_score: evidenceScore,
+    evidence_quality: evidenceQuality,
+    knowledge_fact_count: k.selection.facts.length,
+    knowledge_candidate_count: k.selection.candidateCount,
+    session_intent: k.intent.intent,
+    intent_confidence: k.intent.confidence,
+    client_match_method: k.clientMatch.method,
+    client_match_confidence: k.clientMatch.confidence,
+    client_match_reason: k.clientMatch.reason,
+    ...(k.clientMatch.candidate ? { client_match_candidate: k.clientMatch.candidate } : {}),
+    ...(k.clientMatch.matched ? { client_match_alias: k.clientMatch.matched } : {}),
+    ...(k.client ? { kunde: k.client } : {}),
+  })
 
   const sections: string[] = []
 
   sections.push(`---
-status: aktiv
-tags:
-${tagBlock}
-datum: ${datum}
-quelle: knowledge-harvester
-knowledge_type: capture
-source_stage: stop_capture
-session_intent: ${k.intent.intent}
-intent_confidence: ${k.intent.confidence}
-client_match_method: ${k.clientMatch.method}
-client_match_confidence: ${k.clientMatch.confidence}
-${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\n` : ''}${k.clientMatch.matched ? `client_match_alias: ${k.clientMatch.matched}\n` : ''}${k.client ? `kunde: ${k.client}\n` : ''}
----
+${frontmatter}---
 
 # ${k.title}
 
@@ -456,29 +584,6 @@ ${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\
 > Automatisch aus Session erfasst am ${datum}.`)
 
   sections.push(`\n## Intent\n\n- Intent: ${k.intent.intent}\n- Confidence: ${k.intent.confidence}\n${k.intent.reasons.map(reason => `- ${reason}`).join('\n')}`)
-
-  // Ablauf - human-readable phase-by-phase narrative (TOP)
-  if (k.phases.length > 0) {
-    const phaseList = k.phases.map((p, i) => {
-      const header = `### ${i + 1}. ${p.userRequest.slice(0, 100)}`
-      const parts: string[] = [header]
-      if (p.outcome) {
-        parts.push(p.outcome.slice(0, 400))
-      }
-      const meta: string[] = []
-      if (p.commandCount > 0) meta.push(`${p.commandCount} Befehl${p.commandCount > 1 ? 'e' : ''}`)
-      if (p.hadError) meta.push('mit Fehler-Workaround')
-      if (meta.length > 0) parts.push(`*(${meta.join(', ')})*`)
-      return parts.join('\n\n')
-    }).join('\n\n')
-    sections.push(`\n## Ablauf\n\n${phaseList}`)
-  }
-
-  // Summaries (raw assistant summary messages - kept for reference)
-  if (k.summaries.length > 0) {
-    const best = k.summaries.slice(-3)
-    sections.push(`\n## Zusammenfassung\n\n${best.join('\n\n---\n\n')}`)
-  }
 
   sections.push(`\n${renderSessionDigest({
     title: k.title,
@@ -489,28 +594,10 @@ ${k.clientMatch.candidate ? `client_match_candidate: ${k.clientMatch.candidate}\
     summaries: k.summaries,
     procedures: k.procedures,
     errorFixes: k.errorFixes,
+    selection: k.selection,
   })}`)
 
-  // Error fixes (high-value knowledge)
-  if (k.errorFixes.length > 0) {
-    const fixes = k.errorFixes.slice(0, 10).map((f, i) => `### ${i + 1}.\n${f}`).join('\n\n')
-    sections.push(`\n## Fehler und Workarounds\n\n${fixes}`)
-  }
-
-  // Procedures (condensed)
-  if (k.procedures.length > 0) {
-    const steps = k.procedures.slice(0, 20).map((p, i) => `${i + 1}. \`${p}\``).join('\n')
-    sections.push(`\n## Durchgeführte Befehle\n\n${steps}`)
-    if (k.procedures.length > 20) {
-      sections.push(`\n> ...und ${k.procedures.length - 20} weitere Schritte.`)
-    }
-  }
-
   return sections.join('\n')
-}
-
-function yamlList(values: string[]): string {
-  return values.length > 0 ? values.map(value => `  - ${value}`).join('\n') : '  - none'
 }
 
 function injectCaptureMetadata(
@@ -519,19 +606,19 @@ function injectCaptureMetadata(
   scores: ReturnType<typeof scoreCapture>,
   session: { sessionId: string; transcriptHash: string; entryCount: number; bashCount: number },
 ): string {
-  const fields = [
-    `sensitive: ${redaction.count > 0}`,
-    `redactions: ${redaction.count}`,
-    `redaction_types:\n${yamlList(redaction.types)}`,
-    `capture_value: ${scores.captureValue}`,
-    `runbook_readiness: ${scores.runbookReadiness}`,
-    `review_need: ${scores.reviewNeed}`,
-    `session_id: ${session.sessionId}`,
-    `transcript_hash: ${session.transcriptHash}`,
-    `transcript_entries: ${session.entryCount}`,
-    `transcript_bash_commands: ${session.bashCount}`,
-  ].join('\n')
-  return content.replace(/^---\n/, `---\n${fields}\n`)
+  const fields = buildFrontmatter({
+    sensitive: redaction.count > 0,
+    redactions: redaction.count,
+    redaction_types: redaction.types.length > 0 ? redaction.types : ['none'],
+    capture_value: scores.captureValue,
+    runbook_readiness: scores.runbookReadiness,
+    review_need: scores.reviewNeed,
+    session_id: session.sessionId,
+    transcript_hash: session.transcriptHash,
+    transcript_entries: session.entryCount,
+    transcript_bash_commands: session.bashCount,
+  })
+  return content.replace(/^---\n/, `---\n${fields}`)
 }
 
 function cwdExcluded(cwd: string, patterns: string[]): boolean {
@@ -558,11 +645,16 @@ interface SessionCaptureState {
 }
 
 function donePath(sessionId: string): string {
-  return join(STATE_DIR, `${sessionId}.done`)
+  return join(STATE_DIR, `${safeSessionStateId(sessionId)}.done`)
 }
 
 function statePath(sessionId: string): string {
-  return join(STATE_DIR, `${sessionId}.json`)
+  return join(STATE_DIR, `${safeSessionStateId(sessionId)}.json`)
+}
+
+function safeSessionStateId(sessionId: string): string {
+  if (/^(?!\.{1,2}$)[a-zA-Z0-9._-]{1,120}$/.test(sessionId)) return sessionId
+  return `session-${createHash('sha256').update(sessionId).digest('hex').slice(0, 24)}`
 }
 
 function transcriptHash(path: string): string {
@@ -588,8 +680,8 @@ function readSessionCaptureState(sessionId: string): SessionCaptureState | null 
 
 function markSessionCaptured(state: SessionCaptureState): void {
   mkdirSync(STATE_DIR, { recursive: true })
-  writeFileSync(statePath(state.sessionId), `${JSON.stringify(state, null, 2)}\n`, 'utf-8')
-  writeFileSync(donePath(state.sessionId), state.updatedAt)
+  writeAtomic(statePath(state.sessionId), `${JSON.stringify(state, null, 2)}\n`)
+  writeAtomic(donePath(state.sessionId), state.updatedAt)
   // Cleanup old state files
   try {
     const files = readdirSync(STATE_DIR)
@@ -604,14 +696,28 @@ function shouldSkipSession(sessionId: string, hash: string): boolean {
   return !!state && !!hash && state.transcriptHash === hash
 }
 
-function existingGeneratedCapture(fullPath: string): boolean {
+function writeAtomic(path: string, content: string): void {
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomUUID()}`
+  try {
+    writeFileSync(temporaryPath, content, 'utf-8')
+    renameSync(temporaryPath, path)
+  } catch (error) {
+    try {
+      unlinkSync(temporaryPath)
+    } catch {
+      // The temporary file may already have been renamed or never created.
+    }
+    throw error
+  }
+}
+
+function existingGeneratedCapture(fullPath: string, sessionId: string, allowLegacySession: boolean): boolean {
   if (!existsSync(fullPath)) return false
   try {
-    const content = readFileSync(fullPath, 'utf-8')
-    return /(^|\n)tags:\n(?:  - .+\n)*  - auto-capture/m.test(content)
-      || /(^|\n)knowledge_type: capture\n/.test(content)
-      || /(^|\n)source_stage: stop_capture\n/.test(content)
-      || /Auto-Capture/.test(content)
+    const frontmatter = parseFrontmatter(readFileSync(fullPath, 'utf-8'))
+    if (frontmatter.quelle !== 'knowledge-harvester') return false
+    if (frontmatter.session_id === sessionId) return true
+    return allowLegacySession && !frontmatter.session_id
   } catch {
     return false
   }
@@ -660,20 +766,17 @@ process.stdin.on('end', async () => {
     }
 
     const entries = parseTranscript(transcriptPath)
-    if (entries.length < 10) process.exit(0)
-
-    // Only capture work sessions (>= 3 bash commands)
     const bashCount = entries.filter(e => e.type === 'tool_use' && e.toolName === 'Bash').length
-    if (bashCount < 3) process.exit(0)
+    if (entries.length < 2) process.exit(0)
 
-    const knowledge = extractKnowledge(entries, cwd)
+    const knowledge = extractKnowledge(entries, cwd, sessionId)
     if (!knowledge) {
-      log(`Session ${sessionId.slice(0, 8)}: ${entries.length} entries, ${bashCount} bash — not enough substance`)
+      log(`Session ${sessionId.slice(0, 8)}: ${entries.length} entries, ${bashCount} bash — keine ausreichend salienten Wissensatome`)
       process.exit(0)
     }
 
     // If no client detected, check if we can suggest one
-    if (!knowledge.client) {
+    if (!knowledge.client && knowledge.clientMatch.method === 'none') {
       const suggestion = suggestClientFromCwd(cwd)
       if (suggestion) {
         knowledge.clientMatch = {
@@ -689,11 +792,13 @@ process.stdin.on('end', async () => {
         log(`Session ${sessionId.slice(0, 8)}: Unbekannter Pfad — Vorschlag "${suggestion}" geloggt`)
       }
     } else if (knowledge.clientMatch.method === 'fuzzy_cwd' && knowledge.clientMatch.candidate) {
-      logSuggestion(knowledge.clientMatch.candidate, cwd, knowledge.client)
-      log(`Session ${sessionId.slice(0, 8)}: Fuzzy-Kunde ${knowledge.client} über "${knowledge.clientMatch.candidate}" erkannt`)
+      logSuggestion(knowledge.clientMatch.candidate, cwd, knowledge.clientMatch.client)
+      log(`Session ${sessionId.slice(0, 8)}: Fuzzy-Kunde ${knowledge.clientMatch.client} über "${knowledge.clientMatch.candidate}" als Review-Kandidat erkannt`)
+    } else if (['ambiguous_cwd', 'ambiguous_content'].includes(knowledge.clientMatch.method)) {
+      log(`Session ${sessionId.slice(0, 8)}: Kundenzuordnung bewusst offen — ${knowledge.clientMatch.reason}`)
     }
 
-    log(`Session ${sessionId.slice(0, 8)}: "${knowledge.title}" — ${knowledge.procedures.length} steps, ${knowledge.errorFixes.length} fixes, tags: [${knowledge.tags.join(',')}]`)
+    log(`Session ${sessionId.slice(0, 8)}: "${knowledge.title}" — ${knowledge.selection.facts.length}/${knowledge.selection.candidateCount} Wissensatome, ${knowledge.procedures.length} belegte Änderungen, tags: [${knowledge.tags.join(',')}]`)
 
     // Determine folder:
     // 1. If client detected → Kunden/{Client}
@@ -703,8 +808,14 @@ process.stdin.on('end', async () => {
     if (knowledge.client) {
       folder = `Kunden/${knowledge.client}`
     } else {
-      const content = knowledge.summaries.join('\n') + '\n' + knowledge.procedures.join('\n')
-      const classification = classifyNote(knowledge.title, content, knowledge.tags)
+      const content = [
+        ...knowledge.selection.facts.map(fact => fact.statement),
+        ...knowledge.routingActions,
+      ].join('\n')
+      // The chat-derived title is not classification evidence. If no Technik
+      // category is supported by the selected evidence, classifyNote abstains
+      // and the capture remains in the neutral Referenz folder.
+      const classification = classifyNote('', content, knowledge.tags)
       if (classification.category) {
         folder = classification.subcategory
           ? `Technik/${classification.category}/${classification.subcategory}`
@@ -714,30 +825,36 @@ process.stdin.on('end', async () => {
     }
 
     const safeTitle = knowledge.title.replace(/[/\\:*?"<>|]/g, '-').slice(0, 100)
-    const fullDir = join(VAULT_PATH, folder)
-    const fullPath = join(fullDir, `${safeTitle}.md`)
-    const relativeTarget = `${folder}/${safeTitle}.md`
-    assertCanWriteTool('auto_capture', [relativeTarget])
     const previousState = readSessionCaptureState(sessionId)
-    const canUpdateExisting = previousState?.capturePath === relativeTarget || existingGeneratedCapture(fullPath)
+    const proposedTarget = `${folder}/${safeTitle}.md`
+    let relativeTarget = previousState?.capturePath ?? proposedTarget
+    let fullPath = vaultJoin(VAULT_PATH, relativeTarget)
+    let canUpdateExisting = existingGeneratedCapture(
+      fullPath,
+      sessionId,
+      previousState?.capturePath === relativeTarget,
+    )
     if (existsSync(fullPath) && !canUpdateExisting) {
-      log(`Note already exists and is not a generated capture: ${fullPath}`)
-      markSessionCaptured({
-        version: 2,
-        sessionId,
-        transcriptHash: currentTranscriptHash,
-        entryCount: entries.length,
-        bashCount,
-        updatedAt: new Date().toISOString(),
-        skippedReason: 'target exists and is not generated capture',
-      })
-      process.exit(0)
+      relativeTarget = uniqueRelativePath(VAULT_PATH, folder, `${safeTitle}.md`)
+      fullPath = vaultJoin(VAULT_PATH, relativeTarget)
+      canUpdateExisting = false
+      log(`Capture target collision; using ${relativeTarget}`)
     }
+    assertCanWriteTool('auto_capture', [relativeTarget])
+    const fullDir = dirname(fullPath)
 
     mkdirSync(fullDir, { recursive: true })
     const rawNoteContent = generateNote(knowledge)
     const redaction = policy.hooks.captureSafety.secretRedaction
-      ? redactSecrets(rawNoteContent)
+      ? (() => {
+          const noteRedaction = redactSecrets(rawNoteContent)
+          const sourceAudit = redactSecrets(entries.map(entry => entry.content).join('\n'))
+          return {
+            content: noteRedaction.content,
+            count: noteRedaction.count + sourceAudit.count,
+            types: [...new Set([...noteRedaction.types, ...sourceAudit.types])],
+          }
+        })()
       : { content: rawNoteContent, count: 0, types: [] }
     if (redaction.count > 0 && policy.hooks.captureSafety.blockOnSecret) {
       log(`Session ${sessionId.slice(0, 8)}: Secret erkannt, Capture durch captureSafety.blockOnSecret blockiert`)
@@ -758,6 +875,7 @@ process.stdin.on('end', async () => {
       intent: knowledge.intent,
       clientMatchMethod: knowledge.clientMatch.method,
       redactionCount: redaction.count,
+      selection: knowledge.selection,
     })
     const noteContent = injectCaptureMetadata(redaction.content, redaction, scores, {
       sessionId,
@@ -765,7 +883,7 @@ process.stdin.on('end', async () => {
       entryCount: entries.length,
       bashCount,
     })
-    writeFileSync(fullPath, noteContent, 'utf-8')
+    writeAtomic(fullPath, noteContent)
     markSessionCaptured({
       version: 2,
       sessionId,
@@ -775,13 +893,13 @@ process.stdin.on('end', async () => {
       capturePath: relativeTarget,
       updatedAt: new Date().toISOString(),
     })
-    log(`${canUpdateExisting ? 'Updated capture' : 'Captured'}: ${folder}/${safeTitle}.md`)
+    log(`${canUpdateExisting ? 'Updated capture' : 'Captured'}: ${relativeTarget}`)
 
     appendActionLog(VAULT_PATH, {
       tool: 'auto_capture',
       mode: 'apply',
       targets: [relativeTarget],
-      summary: `${canUpdateExisting ? 'Session-Capture aktualisiert' : 'Session-Capture'}: "${knowledge.title}" (${knowledge.procedures.length} Schritte, ${knowledge.errorFixes.length} Workarounds)`,
+      summary: `${canUpdateExisting ? 'Session-Capture aktualisiert' : 'Session-Capture'}: "${knowledge.title}" (${knowledge.selection.facts.length} Wissensatome)`,
       meta: {
         sessionId,
         tags: knowledge.tags,
@@ -790,22 +908,28 @@ process.stdin.on('end', async () => {
         intent: knowledge.intent,
         redactions: redaction.count,
         scores,
+        salience: knowledge.selection,
       },
     })
 
     // Append to daily note
     const datum = new Date().toISOString().split('T')[0]
-    const dailyPath = join(VAULT_PATH, 'Daily', `${datum}.md`)
-    if (!canUpdateExisting && policy.hooks.appendDailyCaptureLink && existsSync(dailyPath)) {
-      assertCanWriteTool('daily_note', [`Daily/${datum}.md`])
-      appendFileSync(dailyPath, `\n- Auto-Capture: [[${folder}/${safeTitle}|${knowledge.title}]]\n`)
-      appendActionLog(VAULT_PATH, {
-        tool: 'daily_note',
-        mode: 'apply',
-        targets: [`Daily/${datum}.md`],
-        summary: `Auto-Capture-Link in Daily Note eingetragen`,
-        meta: { link: relativeTarget },
-      })
+    const dailyRelativePath = `Daily/${datum}.md`
+    try {
+      const dailyPath = vaultJoin(VAULT_PATH, dailyRelativePath)
+      if (!canUpdateExisting && policy.hooks.appendDailyCaptureLink && existsSync(dailyPath)) {
+        assertCanWriteTool('daily_note', [dailyRelativePath])
+        appendFileSync(dailyPath, `\n- Auto-Capture: [[${relativeTarget.replace(/\.md$/, '')}|${knowledge.title}]]\n`)
+        appendActionLog(VAULT_PATH, {
+          tool: 'daily_note',
+          mode: 'apply',
+          targets: [dailyRelativePath],
+          summary: `Auto-Capture-Link in Daily Note eingetragen`,
+          meta: { link: relativeTarget },
+        })
+      }
+    } catch (error) {
+      log(`Daily-Link übersprungen: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     if (policy.automation.mode === 'auto_build') {

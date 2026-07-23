@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "profile": "reference-linux-node24-5k-v1",
+  "description": "Median of three warm local runs on the V1 reference profile. Enforce only on a comparable release machine; CI always enforces the deterministic work bound.",
+  "notes": 5000,
+  "runs": 3,
+  "statistic": "median",
+  "tolerancePercent": 20,
+  "timings": {
+    "duplicateScanMs": 633,
+    "dashboardDryRunMs": 850,
+    "backgroundDryRunMs": 800
+  },
+  "deterministicWork": {
+    "duplicateScanMode": "blocked",
+    "maxCandidatesPerNote": 256,
+    "expectedScoredPairs": 640809,
+    "absoluteMaximumScoredPairs": 1280000,
+    "maxDuplicateResults": 20,
+    "maxLinkSuggestionResults": 100
+  }
+}

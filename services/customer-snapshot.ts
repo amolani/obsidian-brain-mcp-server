@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { safeGeneratedSnippet, isSensitiveGeneratedSource } from './generated-surface-redaction.ts'
 import { isActiveNote, isGeneratedCustomerSurface } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, vaultJoin } from './vault-paths.ts'
+import { assertSafePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface BuildCustomerSnapshotOptions {
   client: string
@@ -76,8 +78,7 @@ function isSnapshotNoiseLine(line: string): boolean {
 
 export function buildCustomerSnapshot(vault: Vault, options: BuildCustomerSnapshotOptions): CustomerSnapshotResult {
   const dryRun = options.dryRun ?? true
-  const client = sanitizePathSegment(options.client.trim())
-  if (!client) throw new Error('client ist erforderlich')
+  const client = assertSafePathSegment(options.client, 'client')
   const notes = notesForClient(vault, client)
   const todos = notes.flatMap(note => note.todos.filter(todo => !todo.done).map(todo => ({ note, todo })))
   const decisions = notes.filter(note => note.tags.includes('decision') || /entscheidung/i.test(note.title))
@@ -87,15 +88,12 @@ export function buildCustomerSnapshot(vault: Vault, options: BuildCustomerSnapsh
   const systems = contentLines(notes, /system|server|firewall|proxmox|linuxmuster|docker|opnsense|switch|vlan/i)
   const todoLines = todos.slice(0, 20).map(item => `- [ ] ${safeGeneratedSnippet(item.note, item.todo.text)} ([[${item.note.relativePath}|${item.note.title}]])`).join('\n') || '- Keine offenen TODOs'
   const path = `Kunden/${client}/_snapshot.md`
-  const content = `---\nstatus: aktiv\ntags:\n  - snapshot\n  - kunde\nkunde: ${client}\naktualisiert: ${today()}\nquelle: customer-snapshot\n---\n\n# ${client} State Snapshot\n\n## Aktuelle Systeme / Komponenten\n\n${systems}\n\n## Offene TODOs\n\n${todoLines}\n\n## Entscheidungen\n\n${links(decisions)}\n\n## Risiken / bekannte Probleme\n\n${risks}\n\n## Relevante Runbooks\n\n${links(runbooks)}\n\n## Offene Fragen\n\n${questions.slice(0, 12).map(q => `- [${q.type}] [[${q.path}|${q.title}]]`).join('\n') || '- Keine offenen Fragen'}\n\n## Relevante Notizen\n\n${links(notes, 30)}\n`
+  const content = `---\n${buildFrontmatter({ status: 'aktiv', tags: ['snapshot', 'kunde'], kunde: client, aktualisiert: today(), quelle: 'customer-snapshot' })}---\n\n# ${client} State Snapshot\n\n## Aktuelle Systeme / Komponenten\n\n${systems}\n\n## Offene TODOs\n\n${todoLines}\n\n## Entscheidungen\n\n${links(decisions)}\n\n## Risiken / bekannte Probleme\n\n${risks}\n\n## Relevante Runbooks\n\n${links(runbooks)}\n\n## Offene Fragen\n\n${questions.slice(0, 12).map(q => `- [${q.type}] [[${q.path}|${q.title}]]`).join('\n') || '- Keine offenen Fragen'}\n\n## Relevante Notizen\n\n${links(notes, 30)}\n`
 
   if (!dryRun) {
     assertCanWriteTool('build_customer_snapshot', [path])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, path, 'customer-snapshot')
     const fullPath = vaultJoin(vault.vaultPath, path)
-    const existing = vault.notes.get(path)
-    if (existsSync(fullPath) && existing && existing.frontmatter.quelle !== 'customer-snapshot') {
-      throw new Error(`${path} existiert und ist nicht auto-generiert`)
-    }
     mkdirSync(vaultJoin(vault.vaultPath, `Kunden/${client}`), { recursive: true })
     writeFileSync(fullPath, content, 'utf-8')
     vault.indexNote(fullPath, statSync(fullPath).mtimeMs)

@@ -1,10 +1,12 @@
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import type { Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { assertCanWriteTool } from './policy.ts'
-import { sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
+import { assertSafeRelativePath, assertSingleLineText, sanitizePathSegment, uniqueRelativePath, vaultJoin } from './vault-paths.ts'
 
 export interface SourceManifestEntry {
   hash: string
@@ -49,20 +51,39 @@ function today(): string {
 }
 
 function readManifest(vaultPath: string): SourceManifest {
+  const path = vaultJoin(vaultPath, MANIFEST_PATH)
+  if (!existsSync(path)) return { sources: {} }
   try {
-    const path = vaultJoin(vaultPath, MANIFEST_PATH)
-    if (!existsSync(path)) return { sources: {} }
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<SourceManifest>
-    return { sources: parsed.sources ?? {} }
-  } catch {
-    return { sources: {} }
+    if (!parsed.sources || typeof parsed.sources !== 'object' || Array.isArray(parsed.sources)) {
+      throw new Error('sources-Objekt erforderlich')
+    }
+    for (const [source, entry] of Object.entries(parsed.sources)) {
+      if (!entry || typeof entry !== 'object' || typeof entry.hash !== 'string' || typeof entry.outputPath !== 'string') {
+        throw new Error(`ungültiger Source-Eintrag: ${source}`)
+      }
+    }
+    return { sources: parsed.sources }
+  } catch (error) {
+    throw new Error(`Source-Ingest-Manifest ist beschädigt (${MANIFEST_PATH}): ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
 function writeManifest(vaultPath: string, manifest: SourceManifest): void {
   const path = vaultJoin(vaultPath, MANIFEST_PATH)
   mkdirSync(vaultJoin(vaultPath, '.raw'), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8')
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomUUID()}`
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8')
+    renameSync(temporaryPath, path)
+  } catch (error) {
+    try {
+      unlinkSync(temporaryPath)
+    } catch {
+      // The temporary file may already have been renamed or never created.
+    }
+    throw error
+  }
 }
 
 function sha256(content: string): string {
@@ -72,14 +93,14 @@ function sha256(content: string): string {
 function normalizeSourcePath(sourcePath: string): string {
   const clean = sourcePath.replace(/\\/g, '/').replace(/^\/+/, '')
   if (!clean.startsWith('.raw/')) throw new Error('ingest_source verarbeitet nur Quellen unter .raw/')
-  return clean
+  return assertSafeRelativePath(clean)
 }
 
 function titleFromSource(sourcePath: string, content: string, explicit?: string): string {
-  if (explicit?.trim()) return explicit.trim()
+  if (explicit !== undefined) return assertSingleLineText(explicit, 'title')
   const h1 = content.match(/^#\s+(.+)$/m)?.[1]?.trim()
-  if (h1) return h1.slice(0, 100)
-  return basename(sourcePath).replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || `Source ${today()}`
+  if (h1) return assertSingleLineText(h1.slice(0, 100), 'Source-Titel')
+  return assertSingleLineText(basename(sourcePath).replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || `Source ${today()}`, 'Source-Titel')
 }
 
 function extractHeadings(content: string): string[] {
@@ -138,16 +159,14 @@ function renderSourceNote(result: Omit<IngestSourceResult, 'dryRun' | 'skipped' 
     : '- (keine externen Links erkannt)'
 
   return `---
-status: aktiv
-tags:
-  - source
-  - ingest
-  - ${result.profile}
-datum: ${today()}
-quelle: ${result.sourcePath}
-source_hash: ${result.hash}
-profile: ${result.profile}
----
+${buildFrontmatter({
+    status: 'aktiv',
+    tags: ['source', 'ingest', result.profile],
+    datum: today(),
+    quelle: result.sourcePath,
+    source_hash: result.hash,
+    profile: result.profile,
+  })}---
 
 # Source: ${result.title}
 
@@ -184,11 +203,13 @@ export function ingestSource(vault: Vault, options: IngestSourceOptions): Ingest
   const existing = manifest.sources[sourcePath]
   const title = titleFromSource(sourcePath, content, options.title)
   const profile = normalizeProfile(options.profile)
-  const outputFolder = options.outputFolder ?? 'Referenz/Quellen'
+  const outputFolder = options.outputFolder === undefined ? 'Referenz/Quellen' : assertSafeRelativePath(options.outputFolder)
+  const fileStem = sanitizePathSegment(title)
+  if (!fileStem) throw new Error('title ergibt keinen gültigen Dateinamen')
   const outputPath = existing?.outputPath ?? (
     dryRun
-      ? `${outputFolder}/${sanitizePathSegment(title)}.md`
-      : uniqueRelativePath(vault.vaultPath, outputFolder, `${sanitizePathSegment(title)}.md`)
+      ? `${outputFolder}/${fileStem}.md`
+      : uniqueRelativePath(vault.vaultPath, outputFolder, `${fileStem}.md`)
   )
   const baseResult = {
     sourcePath,
@@ -201,7 +222,9 @@ export function ingestSource(vault: Vault, options: IngestSourceOptions): Ingest
     profile,
   }
 
-  if (existing && existing.hash === hash && !options.force) {
+  if (existing) assertGeneratedSurfaceOwnership(vault.vaultPath, existing.outputPath, sourcePath)
+
+  if (existing && existing.hash === hash && existsSync(vaultJoin(vault.vaultPath, existing.outputPath)) && !options.force) {
     return {
       dryRun,
       skipped: true,
@@ -222,6 +245,7 @@ export function ingestSource(vault: Vault, options: IngestSourceOptions): Ingest
   }
 
   assertCanWriteTool('ingest_source', [sourcePath, outputPath, MANIFEST_PATH])
+  assertGeneratedSurfaceOwnership(vault.vaultPath, outputPath, sourcePath)
   const noteContent = renderSourceNote(baseResult)
   const fullOutputPath = vaultJoin(vault.vaultPath, outputPath)
   mkdirSync(vaultJoin(vault.vaultPath, outputFolder), { recursive: true })

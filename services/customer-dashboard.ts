@@ -1,8 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { appendActionLog } from './action-log.ts'
+import { buildFrontmatter } from './frontmatter-linter.ts'
+import { assertGeneratedSurfaceOwnership } from './generated-surface-ownership.ts'
 import { safeGeneratedSnippet } from './generated-surface-redaction.ts'
-import { isActiveNote, isGeneratedCustomerSurfacePath } from './note-scope.ts'
+import { isActiveNote, isAutoCaptureNote, isGeneratedCustomerSurfacePath } from './note-scope.ts'
+import { assertCanWriteTool } from './policy.ts'
 import { assertSafeRelativePath, sanitizePathSegment, vaultJoin } from './vault-paths.ts'
 
 export interface CustomerDashboardOptions {
@@ -114,7 +117,7 @@ function renderDashboard(client: string, notes: CustomerNote[]): CustomerDashboa
   const todos = openTodos(notes)
   const recents = recentNotes(notes)
   const runbooks = notes.filter(n => n.entry.tags.includes('runbook') || n.entry.title.toLowerCase().startsWith('runbook'))
-  const captures = notes.filter(n => n.entry.tags.includes('auto-capture') || n.entry.frontmatter?.quelle === 'knowledge-harvester')
+  const captures = notes.filter(n => isAutoCaptureNote(n.entry))
   const issues = knownIssues(notes)
   const tags = topTags(notes)
   const path = `${customerPrefix(client)}_dashboard.md`
@@ -131,14 +134,7 @@ function renderDashboard(client: string, notes: CustomerNote[]): CustomerDashboa
   const issueLines = issues.map(issue => `- ${issue.text} (${link(issue.note)})`).join('\n') || 'Keine bekannten Issues erkannt.'
 
   const content = `---
-status: aktiv
-tags:
-  - dashboard
-  - kunde
-kunde: ${client}
-aktualisiert: ${datum}
-quelle: customer-dashboard
----
+${buildFrontmatter({ status: 'aktiv', tags: ['dashboard', 'kunde'], kunde: client, aktualisiert: datum, quelle: 'customer-dashboard' })}---
 
 # ${client} Dashboard
 
@@ -211,12 +207,8 @@ export function buildCustomerDashboard(
 
   if (!dryRun) {
     const fullPath = vaultJoin(vault.vaultPath, result.path)
-    if (existsSync(fullPath)) {
-      const existing = readFileSync(fullPath, 'utf-8')
-      if (!/^---[\s\S]*?quelle:\s*customer-dashboard/m.test(existing)) {
-        throw new Error(`Dashboard existiert und ist nicht auto-generiert: ${result.path}`)
-      }
-    }
+    assertCanWriteTool('build_customer_context', [result.path])
+    assertGeneratedSurfaceOwnership(vault.vaultPath, result.path, 'customer-dashboard')
     mkdirSync(vaultJoin(vault.vaultPath, customerPrefix(client)), { recursive: true })
     writeFileSync(fullPath, result.content, 'utf-8')
     const stat = statSync(fullPath)

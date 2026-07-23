@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import type { NoteEntry, Vault } from '../vault.ts'
 import { loadCategories, loadTagAliases } from '../config.ts'
 import { appendActionLog } from './action-log.ts'
+import { atomicWriteJsonSync } from './atomic-file.ts'
+import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
 export type WeightedVector = Map<string, number>
@@ -361,7 +363,8 @@ export function rebuildSemanticIndex(
   const status = statusFromStoredIndex(vault, stored, provider)
 
   if (!dryRun) {
-    writeFileSync(indexPath(vault), `${JSON.stringify(stored, null, 2)}\n`, 'utf-8')
+    assertCanWriteTool('rebuild_semantic_index', [SEMANTIC_INDEX_FILE])
+    atomicWriteJsonSync(indexPath(vault), stored)
     appendActionLog(vault.vaultPath, {
       tool: 'rebuild_semantic_index',
       mode: 'apply',
