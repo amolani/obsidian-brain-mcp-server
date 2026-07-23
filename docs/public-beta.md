@@ -62,6 +62,11 @@ For production scheduling, see [Production Setup](production-setup.md).
 - Legacy captures/claims can be backfilled with `migrate_brain_metadata` dry-run first.
 - Background jobs use a lock and keep merge/rename/folder/link/gap actions out of automatic apply.
 - Reviewed Knowledge Inbox items are persisted in `.brain-knowledge-inbox-state.json`.
+- Calibration review supports a blind, role-separated workflow: `brain_calibration_review_batch` returns opaque record tokens and no production path, fact ID, weighted progress, or production strata. `record_calibration_judgement` stores useful+supported atomically and freezes the pair. Hidden sample payloads do not enter normal search, semantic context, links, promotion, or action logs. Each isolated reviewer process must use `OBSIDIAN_BRAIN_MCP_MODE=calibration-review` plus its fixed registered `BRAIN_CALIBRATION_REVIEWER_ID`; the server injects that identity and the judgement UTC timestamp. Its public schemas expose neither selector, and conflicting caller values are rejected. Default mode hides and rejects both reviewer-only tools.
+- Calibration Capture V3 binds the complete candidate-ID universe and reconstructs the seeded sample exactly; legacy V2 is read-only and cannot enter a sealed campaign.
+- Exploratory calibration evaluation is read-only shadow analysis and can never change weights or authorize a release.
+- Confirmatory campaigns are explicitly registered before review, closed after the fixed reviewer roster completes every enrolled observation, and consumed once with `brain_calibration_evaluate_sealed`. Registration apply requires the exact root and timestamp from the reviewed preview; closure commits its root externally before writing its recoverable local copy. Enrollment, closure, and result roots are written as create-only receipts outside the vault. Calling this irreversible requires independent append-only/WORM retention for that external directory; an ordinary writable directory is only tamper-evident. Reviewer IDs are process-bound pseudonyms rather than signatures, and source/runtime hashes still assume a trusted host.
+- The global campaign lock pauses Harvester calibration writes, temporal labels, and exploratory diagnostics from registration through sealed evaluation. Capture resumes after the result receipt and does not alter the consumed frame.
 - Legacy fixed surfaces can be adopted only through explicit `repair_generated_surfaces` apply with `adopt_legacy=true` and a strict multi-signal signature; manual files remain protected.
 
 ## Good First Commands
@@ -78,6 +83,12 @@ build_evidence_dashboard
 repair_generated_surfaces
 migrate_brain_metadata
 brain_review
+brain_calibration_review_batch
+brain_calibration_summary
+brain_calibration_evaluate
+brain_calibration_register_campaign
+brain_calibration_close_campaign
+brain_calibration_evaluate_sealed
 ```
 
 ## Scale Check

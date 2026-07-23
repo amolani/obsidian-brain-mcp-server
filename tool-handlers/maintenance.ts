@@ -32,6 +32,10 @@ export const maintenanceHandlers: ToolHandlerRegistry = {
         `  ${item.title}`,
         `  Kategorie: ${item.category}; Confidence: ${item.confidence}; Aktion: ${item.action.kind}`,
         item.targets.length > 0 ? `  Targets: ${item.targets.map(target => `\`${target}\``).join(', ')}` : '',
+        item.action.tool ? `  Tool: \`${item.action.tool}\`` : '',
+        item.action.args?.source_path && item.action.args?.fact_id
+          ? `  Selektoren: source_path=\`${String(item.action.args.source_path)}\`, fact_id=\`${String(item.action.args.fact_id)}\``
+          : '',
         `  ${item.detail}`,
       ].filter(Boolean).join('\n')).join('\n\n')
       : 'Keine Review-Items gefunden.'

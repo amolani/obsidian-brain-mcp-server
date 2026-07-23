@@ -8,6 +8,8 @@ import { listLowQualityNotes } from './note-quality.ts'
 import { isActivePath } from './note-scope.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
+import { brainCalibrationReviewBatch } from './brain-calibration-review.ts'
+import { getBrainCalibrationCampaignPhase } from './brain-calibration-campaign.ts'
 
 export type BrainReviewSeverity = 'critical' | 'high' | 'medium' | 'low'
 export type BrainReviewActionKind =
@@ -63,6 +65,8 @@ export interface BrainApplyReviewItemResult {
   result: unknown
 }
 
+const MAX_CALIBRATION_REVIEW_ITEMS = 200
+
 function cleanId(value: string): string {
   return value.replace(/[^a-zA-Z0-9._/-]+/g, '_').replace(/^_+|_+$/g, '')
 }
@@ -97,10 +101,16 @@ function recommendedNextActions(items: BrainReviewItem[]): string[] {
   const critical = items.filter(item => item.severity === 'critical')
   const applyable = items.filter(item => item.action.kind !== 'none')
   const openQuestions = items.filter(item => item.category === 'open_question' || item.category === 'contradiction')
+  const calibration = items.filter(item => item.category === 'calibration')
 
   if (critical.length > 0) actions.push(`${critical.length} kritische Review-Items zuerst manuell prüfen.`)
   if (applyable.length > 0) actions.push(`${applyable.length} sichere Aktion(en) können einzeln mit brain_apply_review_item als Dry-Run geprüft werden.`)
   if (openQuestions.length > 0) actions.push(`${openQuestions.length} offene Fragen/Widersprüche klären, bevor daraus dauerhafte Entscheidungen entstehen.`)
+  if (calibration.length > 0) {
+    actions.push(
+      `${calibration.length} verblindete Kalibrierungsbeobachtung(en) mit brain_calibration_review_batch prüfen.`,
+    )
+  }
   if (items.length === 0) actions.push('Keine Review-Items gefunden. Knowledge Index und Hot Cache bei Bedarf manuell aktualisieren.')
   return actions
 }
@@ -122,6 +132,51 @@ function addSafeMaintenanceItem(items: BrainReviewItem[], step: SafeMaintenanceS
 export function brainReview(vault: Vault, options: BrainReviewOptions = {}): BrainReviewResult {
   const includeLow = options.includeLow === true
   const items: BrainReviewItem[] = []
+
+  // The general analyst queue must neither enter the frozen reviewer archive
+  // nor become unusable after the one-shot campaign has been consumed.
+  if (getBrainCalibrationCampaignPhase(vault) === 'unregistered') {
+    const calibrationBatch = brainCalibrationReviewBatch(vault, {
+      limit: MAX_CALIBRATION_REVIEW_ITEMS,
+    })
+    for (const error of calibrationBatch.integrity.errors) {
+      items.push({
+        id: error.path === '.brain-calibration.json'
+          ? itemId('calibration_dataset', 'quarantine')
+          : itemId('calibration_integrity', error.path),
+        severity: 'high',
+        category: 'calibration_integrity',
+        title: error.path === '.brain-calibration.json'
+          ? 'Kalibrierungsdataset quarantänisiert'
+          : 'Kalibrierungs-Capture quarantänisiert',
+        detail: error.message,
+        targets: [error.path],
+        confidence: 'high',
+        action: { kind: 'none' },
+      })
+    }
+    for (const review of calibrationBatch.items) {
+      items.push({
+        id: itemId(
+          'calibration',
+          review.recordArgs.review_token,
+        ),
+        severity: 'low',
+        category: 'calibration',
+        title: `Verblindete Kalibrierung · ${review.reviewReference}`,
+        detail:
+          `Fehlende Labels: ${review.missingLabels.join(', ')}. `
+          + 'Aussage und Evidenz ausschließlich über brain_calibration_review_batch lesen.',
+        targets: [],
+        confidence: 'high',
+        action: {
+          kind: 'none',
+          tool: 'record_calibration_judgement',
+          args: review.recordArgs,
+        },
+      })
+    }
+  }
 
   const duplicates = findDuplicates(vault, 60, { maxResults: 20 })
   for (const duplicate of duplicates) {

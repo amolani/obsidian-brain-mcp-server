@@ -72,6 +72,24 @@ describe('brain policy', () => {
     assert.equal(policy.automation.duringSession.maxCheckpointsPerSession, 6)
     assert.equal(policy.tools.archive_auto_build_run.requiresDryRunDefault, true)
     assert.equal(policy.tools.brain_health_check.write, false)
+    assert.equal(policy.tools.record_calibration_label.requiresDryRunDefault, true)
+    assert.equal(policy.tools.record_calibration_judgement.requiresDryRunDefault, true)
+    assert.equal(policy.tools.brain_calibration_review_batch.write, false)
+    assert.equal(policy.tools.brain_calibration_summary.write, false)
+    assert.equal(policy.tools.brain_calibration_evaluate.write, false)
+    assert.equal(
+      policy.tools.brain_calibration_register_campaign.requiresDryRunDefault,
+      true,
+    )
+    assert.equal(
+      policy.tools.brain_calibration_close_campaign.requiresDryRunDefault,
+      true,
+    )
+    assert.equal(policy.tools.brain_calibration_evaluate_sealed.write, true)
+    assert.equal(
+      policy.tools.brain_calibration_evaluate_sealed.requiresDryRunDefault,
+      false,
+    )
     assert.ok(policy.automation.neverAutoApply.includes('merge_duplicates'))
     assert.ok(policy.automation.neverAutoApply.includes('rename_note'))
   })

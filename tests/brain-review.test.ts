@@ -118,4 +118,24 @@ describe('brain review orchestrator', () => {
       /keine automatische Aktion/,
     )
   })
+
+  test('quarantines an unreadable calibration dataset without bricking general review', () => {
+    writeFileSync(join(vaultPath, '.brain-calibration.json'), JSON.stringify({
+      schemaVersion: 2,
+      entries: [{
+        observationId: 'ko-000000000000000000000000',
+        label: 'useful',
+        value: true,
+        reviewer: 'reviewer',
+        recordedAt: '2026-07-23T10:00:00.000Z',
+        snapshot: { modelVersion: 'unknown-future-model' },
+      }],
+    }), 'utf-8')
+
+    const review = vault.brainReview({ includeLow: true })
+    const quarantine = review.items.find(item => item.id === 'calibration_dataset:quarantine')
+    assert.ok(quarantine)
+    assert.equal(quarantine.category, 'calibration_integrity')
+    assert.ok(review.items.some(item => item.id === 'knowledge_index:build'))
+  })
 })

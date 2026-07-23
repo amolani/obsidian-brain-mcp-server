@@ -5,6 +5,7 @@ import type { NoteEntry, Vault } from '../vault.ts'
 import { loadCategories, loadTagAliases } from '../config.ts'
 import { appendActionLog } from './action-log.ts'
 import { atomicWriteJsonSync } from './atomic-file.ts'
+import { sanitizeKnowledgeSurfaceFrontmatter } from './knowledge-surface-sanitizer.ts'
 import { assertCanWriteTool } from './policy.ts'
 import { vaultJoin } from './vault-paths.ts'
 
@@ -181,7 +182,11 @@ class LocalKeywordVectorProvider implements VectorProvider {
     addWeighted(vector, entry.tags.join(' '), 4)
     addWeighted(vector, headings(entry.content), 3)
     addWeighted(vector, entry.outgoingLinks.join(' '), 1.5)
-    addWeighted(vector, JSON.stringify(entry.frontmatter), 1.5)
+    addWeighted(
+      vector,
+      JSON.stringify(sanitizeKnowledgeSurfaceFrontmatter(entry.frontmatter)),
+      1.5,
+    )
     addWeighted(vector, bodyText(entry.content), 1)
     return vector
   }
@@ -258,7 +263,7 @@ function noteHash(entry: NoteEntry): string {
   return createHash('sha256')
     .update(entry.title)
     .update('\n')
-    .update(JSON.stringify(entry.frontmatter))
+    .update(JSON.stringify(sanitizeKnowledgeSurfaceFrontmatter(entry.frontmatter)))
     .update('\n')
     .update(entry.tags.join('\n'))
     .update('\n')

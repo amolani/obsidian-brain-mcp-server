@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { closeSync, fsyncSync, openSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+
+function fsyncDirectory(path: string): void {
+  const descriptor = openSync(path, 'r')
+  try {
+    fsyncSync(descriptor)
+  } finally {
+    closeSync(descriptor)
+  }
+}
 
 /**
  * Replace a file without exposing a partially written target. The temporary
@@ -16,6 +26,7 @@ export function atomicWriteFileSync(path: string, content: string): void {
     closeSync(descriptor)
     descriptor = null
     renameSync(temporaryPath, path)
+    fsyncDirectory(dirname(path))
   } catch (error) {
     if (descriptor !== null) {
       try {

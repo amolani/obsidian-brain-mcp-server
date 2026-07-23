@@ -1,4 +1,5 @@
 import type { NoteEntry } from '../vault.ts'
+import { sanitizeKnowledgeSurfaceFrontmatter } from './knowledge-surface-sanitizer.ts'
 
 export interface SearchParams {
   query?: string
@@ -35,7 +36,9 @@ function scoreEntry(entry: NoteEntry, query: string): number {
   if (entry.title.toLowerCase().includes(query)) score += 10
   if (entry.tags.some(tag => tag.includes(query))) score += 5
 
-  const fmStr = JSON.stringify(entry.frontmatter).toLowerCase()
+  const fmStr = JSON.stringify(
+    sanitizeKnowledgeSurfaceFrontmatter(entry.frontmatter),
+  ).toLowerCase()
   if (fmStr.includes(query)) score += 3
 
   const contentLower = entry.content.toLowerCase()

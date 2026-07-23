@@ -540,6 +540,202 @@ export const TOOL_DEFINITIONS = [
       },
     },
     {
+      name: 'brain_calibration_review_batch',
+      description:
+        'Read-only, selection-blind review batch for the randomly sampled calibration universe. Shows only an attested R-reference, statement, bounded evidence, missing useful/supported labels, and an opaque record token; hides production path/fact id, status, rank, scores, sampling probability, weighted progress, and production strata. Reports only unweighted overall progress and capture integrity. Available only in calibration-review mode; the reviewer identity is bound at server startup through BRAIN_CALIBRATION_REVIEWER_ID and cannot be selected by the caller.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          limit: {
+            type: 'number',
+            description: 'Maximum blinded observations, integer 1..200. Default 40.',
+          },
+        },
+      },
+    },
+    {
+      name: 'record_calibration_judgement',
+      description:
+        'Dry-run-first atomic blind judgement for one attested review token. Stores useful and supported together under one writer lock; the completed reviewer/observation pair is append-only, exact repeats are unchanged, and divergent repeats fail closed. Available only in calibration-review mode; reviewer identity and UTC recording time are injected by the server.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          review_token: {
+            type: 'string',
+            description: 'Opaque brt- token returned by brain_calibration_review_batch.',
+          },
+          useful: {
+            type: 'boolean',
+            description: 'Human judgement of expected future reuse value.',
+          },
+          supported: {
+            type: 'boolean',
+            description: 'Human judgement based only on the evidence shown in the blind batch.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false to atomically persist both outcomes.',
+          },
+        },
+        required: [
+          'review_token',
+          'useful',
+          'supported',
+        ],
+      },
+    },
+    {
+      name: 'record_calibration_label',
+      description:
+        'Dry-run-first temporal still_valid recheck for an attested review token. Primary useful/supported judgements must use record_calibration_judgement atomically.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          review_token: {
+            type: 'string',
+            description: 'Opaque brt- token returned by brain_calibration_review_batch.',
+          },
+          label: {
+            type: 'string',
+            enum: ['still_valid'],
+            description: 'Temporal validity is separate from the frozen primary judgement.',
+          },
+          value: { type: 'boolean', description: 'Human-reviewed label value.' },
+          reviewer: { type: 'string', description: 'Stable local reviewer id.' },
+          recorded_at: {
+            type: 'string',
+            description: 'Canonical UTC review timestamp with milliseconds. Required so reviews and repeated validity rechecks remain reproducible.',
+          },
+          observed_at: {
+            type: 'string',
+            description: 'Canonical UTC timestamp when the state was observed. Required for still_valid.',
+          },
+          validity_class: {
+            type: 'string',
+            enum: ['historical_event', 'durable_state', 'operational_state', 'ephemeral_state'],
+            description: 'Change regime for future validity calibration. Required for still_valid.',
+          },
+          client_id: {
+            type: 'string',
+            description: 'Optional opaque client/project identifier without prose.',
+          },
+          dry_run: { type: 'boolean', description: 'Default true. Set false to persist the local calibration label.' },
+        },
+        required: [
+          'review_token',
+          'label',
+          'value',
+          'reviewer',
+          'recorded_at',
+          'observed_at',
+          'validity_class',
+        ],
+      },
+    },
+    {
+      name: 'brain_calibration_summary',
+      description:
+        'Read-only sample counts and Jeffreys-posterior means for useful, supported, and still_valid labels. This is diagnostic only and never changes automation policy.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'brain_calibration_evaluate',
+      description:
+        'Read-only exploratory shadow evaluation over human labels from seeded uniform candidate samples. It is unavailable while an irreversible campaign is active, because looking at growing outcomes would contaminate that campaign. Uses inverse-probability weighting, a strict chronological leakage-group holdout with embargo, monotone train-only probability calibration, response-coverage/MNAR diagnostics, Brier score, log-loss, reliability diagnostics, and paired cluster-bootstrap intervals. It never changes active weights, release state, or safety policy.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          label: {
+            type: 'string',
+            enum: ['all', 'useful', 'supported'],
+            description: 'Target to evaluate. Default all. still_valid remains descriptive.',
+          },
+          group_by: {
+            type: 'string',
+            enum: ['session', 'project'],
+            description: 'Leakage grouping. Default session; project is the stricter cross-project analysis.',
+          },
+          bootstrap_samples: {
+            type: 'number',
+            description: 'Cluster-bootstrap replicates, integer 100..5000. Default 5000.',
+          },
+        },
+      },
+    },
+    {
+      name: 'brain_calibration_register_campaign',
+      description:
+        'Dry-run-first enrollment seal created before any campaign review. Freezes the complete attested evaluation frame, reviewer roster, label-independent chronological cutoff, grouping, gates, models, implementation hashes, and bootstrap plan. Apply requires a configured external create-only anchor directory and stable vault id. There is deliberately no unseal or overwrite operation.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          campaign_id: {
+            type: 'string',
+            description: 'Stable opaque campaign identifier, for example campaign-2026-q3.',
+          },
+          reviewers: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Fixed non-empty roster of stable opaque reviewer ids.',
+          },
+          group_by: {
+            type: 'string',
+            enum: ['session', 'project'],
+            description: 'Preregistered leakage grouping. project is stricter; default project.',
+          },
+          bootstrap_samples: {
+            type: 'number',
+            description: 'Preregistered paired cluster-bootstrap replicates, integer 100..5000. Default 5000.',
+          },
+          expected_registration_root: {
+            type: 'string',
+            description: 'Required when dry_run=false: exact Registration-Root returned by the reviewed dry-run.',
+          },
+          expected_registered_at: {
+            type: 'string',
+            description: 'Required when dry_run=false: exact Registrierungszeit returned by the same reviewed dry-run.',
+          },
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false only with the exact root and timestamp from the reviewed dry-run; any intervening drift is rejected.',
+          },
+        },
+        required: ['campaign_id', 'reviewers'],
+      },
+    },
+    {
+      name: 'brain_calibration_close_campaign',
+      description:
+        'Dry-run-first data-closure seal after every preregistered reviewer has submitted one atomic useful+supported judgement for every enrolled observation. Freezes the exact label events, links the closure root to enrollment, and writes a second external create-only anchor. No outcome metrics are returned.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          dry_run: {
+            type: 'boolean',
+            description: 'Default true. Set false only when the reviewer phase is complete.',
+          },
+        },
+      },
+    },
+    {
+      name: 'brain_calibration_evaluate_sealed',
+      description:
+        'Consumes the externally anchored closed campaign exactly once using only its frozen frame, labels, fixed cutoff, grouping, gates, models, and bootstrap plan. It accepts no analysis choices, persists and anchors the aggregate result before returning it, and exact retries replay that receipt. It never changes active weights or authorizes a release.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          confirm: {
+            type: 'boolean',
+            description: 'Must be true to consume the closed campaign and create the irreversible result receipt.',
+          },
+        },
+        required: ['confirm'],
+      },
+    },
+    {
       name: 'build_memory_timeline',
       description:
         'Dry-run-first customer/project memory timeline. Writes Kunden/{Client}/_timeline.md with decisions, incidents, captures, runbooks, claims, and open points.',
@@ -1030,7 +1226,7 @@ export const TOOL_DEFINITIONS = [
     {
       name: 'brain_review',
       description:
-        'Read-only brain review orchestrator. Aggregates duplicates, broken links, frontmatter fixes, lifecycle suggestions, link suggestions, low-quality notes, open questions, contradictions, and index/cache drift into actionable review items.',
+        'Read-only brain review orchestrator. Aggregates duplicates, broken links, frontmatter fixes, lifecycle suggestions, link suggestions, low-quality notes, open questions, contradictions, blinded calibration references, and index/cache drift into actionable review items. Calibration items use attested R-references and never expose individual production status, rank, score, or an auto-generated human label.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -1499,3 +1695,51 @@ export const TOOL_DEFINITIONS = [
       },
     },
 ] as const
+
+export type McpToolMode = 'default' | 'calibration-review'
+
+const CALIBRATION_REVIEW_TOOL_NAMES = new Set([
+  'brain_calibration_review_batch',
+  'record_calibration_judgement',
+])
+
+export function parseMcpToolMode(value: unknown): McpToolMode {
+  if (value === undefined || value === '' || value === 'default') return 'default'
+  if (value === 'calibration-review') return value
+  throw new Error(
+    'OBSIDIAN_BRAIN_MCP_MODE muss "default" oder "calibration-review" sein',
+  )
+}
+
+export function parseCalibrationReviewerId(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error(
+      'BRAIN_CALIBRATION_REVIEWER_ID ist im MCP-Modus calibration-review erforderlich',
+    )
+  }
+  const normalized = value.normalize('NFC').trim()
+  if (
+    !normalized
+    || normalized.length > 64
+    || /[\u0000-\u001f\u007f]/.test(normalized)
+    || !/^[\p{L}\p{N}][\p{L}\p{N}._:@-]*$/u.test(normalized)
+  ) {
+    throw new Error(
+      'BRAIN_CALIBRATION_REVIEWER_ID ist keine gültige opake Reviewer-ID',
+    )
+  }
+  return normalized
+}
+
+export function toolDefinitionsForMode(mode: McpToolMode) {
+  return TOOL_DEFINITIONS.filter(definition =>
+    mode === 'calibration-review'
+      ? CALIBRATION_REVIEW_TOOL_NAMES.has(definition.name)
+      : !CALIBRATION_REVIEW_TOOL_NAMES.has(definition.name))
+}
+
+export function isToolAllowedInMode(mode: McpToolMode, toolName: string): boolean {
+  return mode === 'calibration-review'
+    ? CALIBRATION_REVIEW_TOOL_NAMES.has(toolName)
+    : !CALIBRATION_REVIEW_TOOL_NAMES.has(toolName)
+}

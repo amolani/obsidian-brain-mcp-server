@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto'
+import {
+  applyEvidenceConflictCeiling,
+  EVIDENCE_SCORING_MODEL,
+  scoreEvidence,
+  type EvidenceProvenanceSource,
+} from './evidence-scoring.ts'
 import { redactSecrets } from './secret-redaction.ts'
 
 /**
@@ -9,6 +15,7 @@ import { redactSecrets } from './secret-redaction.ts'
 export const KNOWLEDGE_SALIENCE_MODEL = {
   version: 'knowledge-salience-v1',
   scoreScale: 'ordinal_0_100_not_probability',
+  evidenceModelVersion: EVIDENCE_SCORING_MODEL.version,
   weights: {
     taskRelevance: 0.3,
     decisionOutcomeUtility: 0.25,
@@ -34,11 +41,7 @@ export type KnowledgeFactKind =
 
 export type KnowledgeConfidence = 'low' | 'medium' | 'high'
 
-export type KnowledgeProvenanceSource =
-  | 'phase'
-  | 'assistant_summary'
-  | 'error_fix'
-  | 'bash_pair'
+export type KnowledgeProvenanceSource = EvidenceProvenanceSource
 
 export interface KnowledgeSessionPhase {
   id?: string
@@ -94,6 +97,16 @@ export interface KnowledgeFactFactors {
   specificity: number
 }
 
+export function scoreKnowledgeSalienceFactors(factors: KnowledgeFactFactors): number {
+  return Math.round(
+    factors.taskRelevance * KNOWLEDGE_SALIENCE_MODEL.weights.taskRelevance * 100
+      + factors.decisionOutcomeUtility * KNOWLEDGE_SALIENCE_MODEL.weights.decisionOutcomeUtility * 100
+      + factors.noveltyInformativeness * KNOWLEDGE_SALIENCE_MODEL.weights.noveltyInformativeness * 100
+      + factors.reusability * KNOWLEDGE_SALIENCE_MODEL.weights.reusability * 100
+      + factors.specificity * KNOWLEDGE_SALIENCE_MODEL.weights.specificity * 100,
+  )
+}
+
 export interface KnowledgeProvenance {
   ref: string
   source: KnowledgeProvenanceSource
@@ -133,6 +146,12 @@ export interface KnowledgeSalienceSelection {
   modelVersion: string
   scoreScale: typeof KNOWLEDGE_SALIENCE_MODEL.scoreScale
   facts: KnowledgeSalienceFact[]
+  /**
+   * Safe, deduplicated pre-selection universe. This is used only to draw a
+   * seeded, blinded calibration sample; it is never rendered as
+   * durable knowledge or consumed by downstream automation.
+   */
+  calibrationCandidates?: Array<Omit<KnowledgeSalienceFact, 'selectionScore'>>
   candidateCount: number
   excluded: {
     unsafeOrNoisy: number
@@ -808,28 +827,7 @@ function specificity(statement: string): number {
 }
 
 function evidenceScore(provenanceItems: KnowledgeProvenance[]): number {
-  const strengths: Record<KnowledgeProvenanceSource, number> = {
-    assistant_summary: 0.36,
-    phase: 0.5,
-    // Error/fix blocks originate in assistant prose unless independently
-    // backed by tool evidence; relabelling the prose must not raise confidence.
-    error_fix: 0.44,
-    bash_pair: 0.88,
-  }
-  // A transcript span may arrive as phase, summary and parsed error/fix.
-  // Equal content hashes OR equal stable origin IDs are a single unit.
-  const independent: KnowledgeProvenance[] = []
-  for (const item of [...provenanceItems].sort((a, b) => strengths[b.source] - strengths[a.source])) {
-    const duplicate = independent.some(existing =>
-      existing.hash === item.hash
-        || (!!existing.origin && !!item.origin && existing.origin === item.origin))
-    if (!duplicate) independent.push(item)
-  }
-  const maxStrength = independent.reduce((max, item) => Math.max(max, strengths[item.source]), 0)
-  const sourceTypes = new Set(independent.map(item => item.source)).size
-  const corroboration = Math.min(0.12, Math.max(0, independent.length - 1) * 0.04)
-    + Math.min(0.08, Math.max(0, sourceTypes - 1) * 0.04)
-  return Math.round(clamp(maxStrength + corroboration) * 100)
+  return scoreEvidence(provenanceItems) ?? 0
 }
 
 function confidenceForEvidence(score: number): KnowledgeConfidence {
@@ -846,15 +844,9 @@ function draftFact(candidate: Candidate, knownKnowledge: string[]): DraftFact {
     reusability: round(reusability(candidate.statement, candidate.kind)),
     specificity: round(specificity(candidate.statement)),
   }
-  const salienceScore = Math.round(
-    factors.taskRelevance * KNOWLEDGE_SALIENCE_MODEL.weights.taskRelevance * 100
-      + factors.decisionOutcomeUtility * KNOWLEDGE_SALIENCE_MODEL.weights.decisionOutcomeUtility * 100
-      + factors.noveltyInformativeness * KNOWLEDGE_SALIENCE_MODEL.weights.noveltyInformativeness * 100
-      + factors.reusability * KNOWLEDGE_SALIENCE_MODEL.weights.reusability * 100
-      + factors.specificity * KNOWLEDGE_SALIENCE_MODEL.weights.specificity * 100,
-  )
+  const salienceScore = scoreKnowledgeSalienceFactors(factors)
   const rawEvidence = evidenceScore(candidate.provenance)
-  const evidence = candidate.evidenceConflict ? Math.min(44, rawEvidence) : rawEvidence
+  const evidence = applyEvidenceConflictCeiling(rawEvidence, candidate.evidenceConflict)
   const canonical = `${KNOWLEDGE_SALIENCE_MODEL.version}\0${candidate.kind}\0${semanticKey(candidate)}`
   return {
     id: `ks-${sha256(canonical).slice(0, 20)}`,
@@ -1107,6 +1099,7 @@ export function selectSalientKnowledge(input: KnowledgeSalienceInput): Knowledge
     modelVersion: KNOWLEDGE_SALIENCE_MODEL.version,
     scoreScale: KNOWLEDGE_SALIENCE_MODEL.scoreScale,
     facts: selection.facts,
+    calibrationCandidates: allFacts,
     candidateCount: allFacts.length,
     excluded: {
       unsafeOrNoisy,

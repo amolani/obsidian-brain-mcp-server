@@ -34,7 +34,8 @@ or Knowledge Inbox, not in automatic durable promotion.
 
 Initial labels remain `low`, `medium`, and `high`. They are not probabilities. A
 probabilistic interpretation is allowed only after enough reviewed outcomes exist to
-measure calibration, for example with the Brier score.
+fit a train-only versioned calibrator. Brier score and log-loss accept only that explicit
+`probability_0_1` output; dividing an ordinal score by 100 is not a valid shortcut.
 
 ## Atomic Fact Types
 
@@ -70,6 +71,15 @@ base_salience =
 
 These weights are versioned engineering defaults, not universal scientific constants.
 They must later be calibrated against reviewed, anonymized real sessions.
+
+The harvester also draws a bounded uniform evaluation sample from the safe pre-selection
+universe using a cryptographically random per-session seed that is retained across
+incremental updates. Sampled non-selections are stored only in an attested, selection-blind
+review payload; they are absent from the Markdown body and excluded from generic search,
+semantic indexing, note context, links, promotion, and the action log. Missing reviews
+remain missing rather than becoming implicit negatives. This seeded sample is the only
+input eligible for scientific weight comparison; metrics over production-selected facts
+alone are selection-biased and must be marked descriptive.
 
 Selection uses Maximal Marginal Relevance so repeated summaries do not crowd out a new
 fact:
@@ -114,8 +124,14 @@ Each selected atom must retain:
 - extractor/model version,
 - evidence score and explanation.
 
-The local V1 evidence score combines source strength, entity coverage, independent
-support, and uncertainty preservation. Provenance proves origin, not truth.
+The local V1 evidence score combines source strength, canonically deduplicated independent
+evidence components, source-type diversity, and a conflict ceiling. Provenance proves
+origin, not truth.
+
+The selector and persisted-digest verifier must use the same versioned evidence-scoring
+implementation and source-strength table. A digest rendered from an in-memory selection
+must round-trip through the parser with the same evidence score. Mixed provenance such as
+`phase` plus `error_fix` is a required regression case.
 
 Automatic durable promotion requires:
 
@@ -137,7 +153,7 @@ in the action log and persistent Inbox state.
 ## Persisted Digest Integrity
 
 Persisted Markdown is an untrusted interchange boundary. Automatic promotion may use a
-fact only when the digest carries the current `session-digest-v1` integrity record and
+fact only when the digest carries the current `session-digest-v2` integrity record and
 the parser verifies all of the following locally:
 
 - the exact allowed salience model and `knowledge-harvester` producer,
@@ -147,8 +163,11 @@ the parser verifies all of the following locally:
 - an evidence score and confidence label reproducible from those provenance sources,
 - the SHA-256 integrity digest over the complete canonical fact/provenance payload.
 
-Missing, legacy, edited, or malformed attestations remain readable review material but
-must not create claims, insights, answers, gaps, or runbook steps automatically.
+The frozen `session-digest-v1` verifier remains available for existing captures and
+accepts both historical outcomes of its former `error_fix` inconsistency. Newly rendered
+digests always use V2's single shared scorer. Missing, unsupported, edited, or malformed
+attestations remain readable review material but must not create claims, insights,
+answers, gaps, or runbook steps automatically.
 
 This checksum is tamper-evident, not a cryptographic proof of authorship. A process that
 can execute or replace project code can recompute it, and a valid digest can be replayed.
