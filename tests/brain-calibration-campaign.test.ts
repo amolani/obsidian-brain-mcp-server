@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
 import {
   chmodSync,
   existsSync,
@@ -7,10 +9,11 @@ import {
   readFileSync,
   readdirSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import {
@@ -22,6 +25,8 @@ import {
 import {
   BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV,
   BRAIN_CALIBRATION_CAMPAIGN_CLOSURE_PATH,
+  BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH,
+  BRAIN_CALIBRATION_CAMPAIGN_LOCK_STALE_AFTER_MS,
   BRAIN_CALIBRATION_CAMPAIGN_REGISTRATION_PATH,
   BRAIN_CALIBRATION_CAMPAIGN_RESULT_PATH,
   BRAIN_CALIBRATION_VAULT_ID_ENV,
@@ -190,6 +195,33 @@ function nextReviewTimestamp(registration: BrainCalibrationCampaignRegistration)
     Date.now(),
     Date.parse(registration.registeredAt),
   )).toISOString()
+}
+
+async function terminatedProcessPid(): Promise<number> {
+  const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+    stdio: 'ignore',
+  })
+  const pid = child.pid
+  assert.equal(typeof pid, 'number')
+  await once(child, 'exit')
+  return pid as number
+}
+
+function staleLockTimestamp(): Date {
+  return new Date(
+    Date.now() - BRAIN_CALIBRATION_CAMPAIGN_LOCK_STALE_AFTER_MS - 60_000,
+  )
+}
+
+function writeLockFixture(
+  vaultPath: string,
+  metadata: unknown,
+  modifiedAt = new Date(),
+): string {
+  const path = join(vaultPath, BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH)
+  writeFileSync(path, `${JSON.stringify(metadata)}\n`, 'utf8')
+  utimesSync(path, modifiedAt, modifiedAt)
+  return path
 }
 
 function recordReviewerMatrix(
@@ -431,6 +463,116 @@ describe('irreversible brain calibration campaign', () => {
     } finally {
       if (existsSync(lock.path)) unlinkSync(lock.path)
     }
+  })
+
+  test('never reclaims an old lock whose owner process is alive', async () => {
+    const targetVault = await initializeFrame()
+    const old = staleLockTimestamp()
+    const path = writeLockFixture(vaultPath, {
+      acquiredAt: old.toISOString(),
+      hostname: hostname(),
+      pid: process.pid,
+    }, old)
+
+    assert.throws(
+      () => acquireBrainCalibrationCampaignLock(targetVault),
+      /kampagne ist gesperrt/i,
+    )
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).pid, process.pid)
+  })
+
+  test('keeps a recent lock even after its owner process exited', async () => {
+    const targetVault = await initializeFrame()
+    const deadPid = await terminatedProcessPid()
+    const path = writeLockFixture(vaultPath, {
+      acquiredAt: new Date().toISOString(),
+      hostname: hostname(),
+      pid: deadPid,
+    })
+
+    assert.throws(
+      () => acquireBrainCalibrationCampaignLock(targetVault),
+      /kampagne ist gesperrt/i,
+    )
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).pid, deadPid)
+  })
+
+  test('reclaims an old local lock after its owner process exited', async () => {
+    const targetVault = await initializeFrame()
+    const deadPid = await terminatedProcessPid()
+    const old = staleLockTimestamp()
+    const path = writeLockFixture(vaultPath, {
+      acquiredAt: old.toISOString(),
+      hostname: hostname(),
+      pid: deadPid,
+    }, old)
+
+    const lock = acquireBrainCalibrationCampaignLock(targetVault)
+    try {
+      const replacement = JSON.parse(readFileSync(path, 'utf8'))
+      assert.equal(replacement.pid, process.pid)
+      assert.equal(typeof replacement.hostname, 'string')
+      assert.notEqual(replacement.hostname.trim(), '')
+    } finally {
+      releaseBrainCalibrationCampaignLock(lock)
+    }
+    assert.equal(existsSync(path), false)
+    assert.equal(existsSync(`${path}.reclaim`), false)
+  })
+
+  test('does not race another stale-lock reclaimer', async () => {
+    const targetVault = await initializeFrame()
+    const deadPid = await terminatedProcessPid()
+    const old = staleLockTimestamp()
+    const path = writeLockFixture(vaultPath, {
+      acquiredAt: old.toISOString(),
+      hostname: hostname(),
+      pid: deadPid,
+    }, old)
+    writeFileSync(`${path}.reclaim`, 'another-reclaimer\n', 'utf8')
+
+    assert.throws(
+      () => acquireBrainCalibrationCampaignLock(targetVault),
+      /kampagne ist gesperrt/i,
+    )
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).pid, deadPid)
+    assert.equal(
+      readFileSync(`${path}.reclaim`, 'utf8'),
+      'another-reclaimer\n',
+    )
+  })
+
+  test('does not reclaim old foreign-host, legacy, or malformed locks', async () => {
+    const targetVault = await initializeFrame()
+    const deadPid = await terminatedProcessPid()
+    const old = staleLockTimestamp()
+    const path = writeLockFixture(vaultPath, {
+      acquiredAt: old.toISOString(),
+      hostname: 'foreign-host.invalid',
+      pid: deadPid,
+    }, old)
+
+    assert.throws(
+      () => acquireBrainCalibrationCampaignLock(targetVault),
+      /kampagne ist gesperrt/i,
+    )
+    unlinkSync(path)
+    writeLockFixture(vaultPath, {
+      acquiredAt: old.toISOString(),
+      pid: deadPid,
+    }, old)
+    assert.throws(
+      () => acquireBrainCalibrationCampaignLock(targetVault),
+      /kampagne ist gesperrt/i,
+    )
+    unlinkSync(path)
+    writeFileSync(path, 'damaged-lock\n', 'utf8')
+    utimesSync(path, old, old)
+    assert.throws(
+      () => acquireBrainCalibrationCampaignLock(targetVault),
+      /kampagne ist gesperrt/i,
+    )
+    assert.equal(readFileSync(path, 'utf8'), 'damaged-lock\n')
   })
 
   test('enforces the registered reviewer roster and requires the complete matrix', async () => {

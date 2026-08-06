@@ -4,6 +4,7 @@ import {
   existsSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -14,6 +15,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { hostname } from 'node:os'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Vault } from '../vault.ts'
@@ -68,12 +70,18 @@ export const BRAIN_CALIBRATION_CAMPAIGN_RESULT_PATH =
   `${BRAIN_CALIBRATION_CAMPAIGN_DIRECTORY}/result.json`
 export const BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH =
   '.brain-calibration-campaign.lock'
+/**
+ * A dead owner is not enough on its own: a grace period avoids reclaiming a
+ * lock while its owner is still publishing the freshly-created metadata.
+ */
+export const BRAIN_CALIBRATION_CAMPAIGN_LOCK_STALE_AFTER_MS = 10 * 60 * 1000
 export const BRAIN_CALIBRATION_ANCHOR_DIRECTORY_ENV =
   'BRAIN_CALIBRATION_ANCHOR_DIR'
 export const BRAIN_CALIBRATION_VAULT_ID_ENV = 'BRAIN_CALIBRATION_VAULT_ID'
 
 const REVIEW_PROTOCOL_VERSION = 'brain-calibration-blind-review-v1'
 const SAMPLE_POLICY_VERSION = 'seeded_uniform_candidate_sample_v2'
+const BRAIN_CALIBRATION_CAMPAIGN_LOCK_RECLAIM_SUFFIX = '.reclaim'
 const ASSURANCE_PROFILE = {
   anchor:
     'external-retention-must-enforce-append-only-or-worm-v1',
@@ -363,38 +371,195 @@ function localPath(vault: Vault, path: string): string {
   return vaultJoin(vault.vaultPath, path)
 }
 
+interface BrainCalibrationCampaignLockMetadata {
+  acquiredAtMs: number
+  pid: number
+  hostname: string
+}
+
+type ProcessLiveness = 'alive' | 'dead' | 'unknown'
+
+function parseBrainCalibrationCampaignLockMetadata(
+  value: string,
+): BrainCalibrationCampaignLockMetadata | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed)) return null
+
+  const acquiredAt = parsed.acquiredAt
+  const pid = parsed.pid
+  const ownerHostname = parsed.hostname
+  if (
+    typeof acquiredAt !== 'string'
+    || !ISO_INSTANT.test(acquiredAt)
+    || !Number.isFinite(Date.parse(acquiredAt))
+    || new Date(acquiredAt).toISOString() !== acquiredAt
+    || !Number.isSafeInteger(pid)
+    || (pid as number) <= 0
+    || (pid as number) > 0xffff_ffff
+    || typeof ownerHostname !== 'string'
+    || ownerHostname.trim() === ''
+  ) {
+    return null
+  }
+
+  return {
+    acquiredAtMs: Date.parse(acquiredAt),
+    pid: pid as number,
+    // Host identity is mandatory: a PID from a shared/remote vault must never
+    // be interpreted in the local machine's process namespace.
+    hostname: ownerHostname.trim().toLowerCase(),
+  }
+}
+
+function processLiveness(pid: number): ProcessLiveness {
+  if (pid === process.pid) return 'alive'
+  try {
+    process.kill(pid, 0)
+    return 'alive'
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ESRCH') return 'dead'
+    // EPERM means that the process exists but cannot be signalled. Any other
+    // platform-specific result is also kept fail-closed.
+    return 'unknown'
+  }
+}
+
+function sameFile(
+  left: { dev: number; ino: number },
+  right: { dev: number; ino: number },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino
+}
+
+/**
+ * Reclaims one demonstrably stale local lock. Every ambiguous condition is
+ * fail-closed; callers then report the ordinary "campaign locked" error.
+ */
+function reclaimStaleBrainCalibrationCampaignLock(path: string): boolean {
+  let descriptor: number | null = null
+  let inspected: { dev: number; ino: number } | null = null
+  let ownsReclaimLink = false
+  const reclaimPath = `${path}${BRAIN_CALIBRATION_CAMPAIGN_LOCK_RECLAIM_SUFFIX}`
+  try {
+    descriptor = openSync(path, 'r')
+    const opened = fstatSync(descriptor)
+    inspected = opened
+    const linked = lstatSync(path)
+    if (
+      !opened.isFile()
+      || !linked.isFile()
+      || !sameFile(opened, linked)
+      || opened.size > 4096
+    ) {
+      return false
+    }
+
+    const metadata = parseBrainCalibrationCampaignLockMetadata(
+      readFileSync(descriptor, 'utf8').trim(),
+    )
+    if (!metadata) return false
+
+    if (
+      metadata.hostname !== hostname().trim().toLowerCase()
+    ) {
+      return false
+    }
+
+    // Both independently observable timestamps must be old. In particular, a
+    // forged old acquiredAt cannot make a freshly replaced file reclaimable.
+    const newestTimestamp = Math.max(metadata.acquiredAtMs, opened.mtimeMs)
+    if (
+      !Number.isFinite(newestTimestamp)
+      || Date.now() - newestTimestamp
+        < BRAIN_CALIBRATION_CAMPAIGN_LOCK_STALE_AFTER_MS
+      || processLiveness(metadata.pid) !== 'dead'
+    ) {
+      return false
+    }
+
+    closeSync(descriptor)
+    descriptor = null
+
+    // A canonical hard-link claim serializes concurrent reclaimers before any
+    // unlink. It points at the inspected inode, so a replacement at the main
+    // path can be detected before unlinking.
+    linkSync(path, reclaimPath)
+    ownsReclaimLink = true
+    const claim = lstatSync(reclaimPath)
+    const current = lstatSync(path)
+    if (!sameFile(opened, claim) || !sameFile(opened, current)) return false
+    unlinkSync(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // The owner released the lock between our open attempt and inspection;
+      // acquisition can safely retry without deleting anything.
+      return true
+    }
+    return false
+  } finally {
+    if (descriptor !== null) {
+      try { closeSync(descriptor) } catch {}
+    }
+    if (ownsReclaimLink && inspected !== null) {
+      try {
+        const claim = lstatSync(reclaimPath)
+        if (sameFile(inspected, claim)) unlinkSync(reclaimPath)
+      } catch {}
+    }
+  }
+}
+
 export function acquireBrainCalibrationCampaignLock(
   vault: Vault,
 ): BrainCalibrationCampaignLock {
   const path = localPath(vault, BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH)
-  let descriptor: number | null = null
-  try {
-    descriptor = openSync(path, 'wx', 0o600)
-    writeFileSync(descriptor, `${canonicalBrainCalibrationCampaignJson({
-      acquiredAt: now(),
-      pid: process.pid,
-    })}\n`, 'utf8')
-    fsyncSync(descriptor)
-    const info = fstatSync(descriptor)
-    return {
-      descriptor,
-      path,
-      device: info.dev,
-      inode: info.ino,
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let descriptor: number | null = null
+    try {
+      descriptor = openSync(path, 'wx', 0o600)
+      writeFileSync(descriptor, `${canonicalBrainCalibrationCampaignJson({
+        acquiredAt: now(),
+        hostname: hostname(),
+        pid: process.pid,
+      })}\n`, 'utf8')
+      fsyncSync(descriptor)
+      const info = fstatSync(descriptor)
+      return {
+        descriptor,
+        path,
+        device: info.dev,
+        inode: info.ino,
+      }
+    } catch (error) {
+      if (descriptor !== null) {
+        try { closeSync(descriptor) } catch {}
+        // A partial lock remains fail-closed. Removing by path could delete a
+        // replacement lock acquired by another process.
+      }
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        if (
+          attempt === 0
+          && reclaimStaleBrainCalibrationCampaignLock(path)
+        ) {
+          continue
+        }
+        throw new Error(
+          `Kalibrierungskampagne ist gesperrt (${BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH})`,
+        )
+      }
+      throw error
     }
-  } catch (error) {
-    if (descriptor !== null) {
-      try { closeSync(descriptor) } catch {}
-      // A partial lock remains fail-closed. Removing by path could delete a
-      // replacement lock acquired by another process.
-    }
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new Error(
-        `Kalibrierungskampagne ist gesperrt (${BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH})`,
-      )
-    }
-    throw error
   }
+  throw new Error(
+    `Kalibrierungskampagne ist gesperrt (${BRAIN_CALIBRATION_CAMPAIGN_LOCK_PATH})`,
+  )
 }
 
 export function releaseBrainCalibrationCampaignLock(

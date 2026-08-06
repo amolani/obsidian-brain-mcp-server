@@ -34,6 +34,9 @@ describe('cli setup and hooks', () => {
     assert.ok(!existsSync(settingsPath))
     assert.equal((result.after.env as any).VAULT_PATH, '/tmp/example-vault')
     assert.ok(JSON.stringify(result.after).includes('session-checkpoint.ts'))
+    const stopHandler = (result.after.hooks as any).Stop[0].hooks[0]
+    assert.equal(stopHandler.timeout, 120)
+    assert.equal(stopHandler.async, true)
   })
 
   test('applies hooks with backup and preserves unrelated settings', () => {
@@ -95,6 +98,42 @@ describe('cli setup and hooks', () => {
     const matching = written.hooks.PostToolUse.filter((entry: any) => JSON.stringify(entry).includes('session-checkpoint.ts'))
     assert.equal(matching.length, 1)
     assert.match(matching[0].matcher, /Bash/)
+  })
+
+  test('repairs existing harvester timeout and async options idempotently', () => {
+    const root = tempDir('obsidian-hooks-')
+    const settingsPath = join(root, 'settings.json')
+    const baseline = planClaudeHookInstall({
+      vaultPath: '/tmp/example-vault',
+      settingsPath,
+    }).after as any
+    const stopHandler = baseline.hooks.Stop[0].hooks[0]
+    stopHandler.timeout = 15
+    stopHandler.async = false
+    stopHandler.statusMessage = 'Preserve this custom message'
+    writeFileSync(settingsPath, JSON.stringify(baseline, null, 2), 'utf-8')
+
+    const result = installClaudeHooks({
+      vaultPath: '/tmp/example-vault',
+      settingsPath,
+      apply: true,
+    })
+
+    assert.equal(result.changed, true)
+    assert.ok(result.changes.some(change => change.id.endsWith('.timeout')))
+    assert.ok(result.changes.some(change => change.id.endsWith('.async')))
+    const written = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    const repaired = written.hooks.Stop[0].hooks[0]
+    assert.equal(repaired.timeout, 120)
+    assert.equal(repaired.async, true)
+    assert.equal(repaired.statusMessage, 'Preserve this custom message')
+
+    const second = installClaudeHooks({
+      vaultPath: '/tmp/example-vault',
+      settingsPath,
+      apply: true,
+    })
+    assert.equal(second.changed, false)
   })
 
   test('demo generator creates a health-checkable vault', async () => {

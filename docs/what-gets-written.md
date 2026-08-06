@@ -1,13 +1,14 @@
 # What Gets Written To Your Vault
 
-Obsidian Brain MCP writes plain local files. There is no hosted processing, no hidden database, and no automatic vault refactor.
+Obsidian Brain MCP writes plain local files and runs no hosted Brain storage service. Claude interactions still follow the configured Claude/provider account. There is no hidden Brain database and no automatic vault refactor.
 
 ## Automatic Session Writes
 
 Claude Code hooks may create:
 
 - `Daily/YYYY-MM-DD.md`
-- `Kunden/{Client}/Captures/*.md`
+- `Kunden/{Client}/*.md` for exact customer-path matches
+- `Technik/**/*.md` or `Referenz/*.md` when customer routing abstains
 - `Knowledge/Checkpoints/*.md`
 - `Maintenance/Auto-Build/*.md`
 - `Maintenance/Session Impact/*.md`

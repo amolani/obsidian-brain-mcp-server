@@ -26,6 +26,8 @@ export interface HookInstallResult {
 }
 
 const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+export const CLAUDE_HARVESTER_TIMEOUT_SECONDS = 120
+export const CLAUDE_HARVESTER_ASYNC = true
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -47,6 +49,23 @@ function commandContains(value: unknown, needle: string): boolean {
   if (Array.isArray(value)) return value.some(item => commandContains(item, needle))
   if (isRecord(value)) return Object.values(value).some(item => commandContains(item, needle))
   return false
+}
+
+function findCommandHandler(value: unknown, needle: string): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findCommandHandler(item, needle)
+      if (found) return found
+    }
+    return null
+  }
+  if (!isRecord(value)) return null
+  if (typeof value.command === 'string' && value.command.includes(needle)) return value
+  for (const item of Object.values(value)) {
+    const found = findCommandHandler(item, needle)
+    if (found) return found
+  }
+  return null
 }
 
 function matcherIncludesBash(value: unknown): boolean {
@@ -78,6 +97,7 @@ function ensureHook(
   desired: Record<string, unknown>,
   needle: string,
   requiredMatcher?: 'Bash',
+  requiredHandlerOptions: string[] = [],
 ): void {
   if (!isRecord(settings.hooks)) {
     settings.hooks = {}
@@ -100,6 +120,18 @@ function ensureHook(
       ? `${String(existing.matcher)}|Bash`
       : 'Bash'
     changes.push({ id: `hooks.${event}.matcher`, action: 'update', detail: `${event}: Bash-Matcher ergänzt` })
+  }
+  const existingHandler = findCommandHandler(existing, needle)
+  const desiredHandler = findCommandHandler(desired, needle)
+  if (!existingHandler || !desiredHandler) return
+  for (const option of requiredHandlerOptions) {
+    if (Object.is(existingHandler[option], desiredHandler[option])) continue
+    existingHandler[option] = clone(desiredHandler[option])
+    changes.push({
+      id: `hooks.${event}.${needle}.${option}`,
+      action: 'update',
+      detail: `${event}: ${needle} ${option}=${String(desiredHandler[option])}`,
+    })
   }
 }
 
@@ -152,10 +184,10 @@ export function planClaudeHookInstall(options: HookInstallOptions): HookInstallR
     hooks: [{
       type: 'command',
       command: harvester.command,
-      timeout: 15,
-      async: true,
+      timeout: CLAUDE_HARVESTER_TIMEOUT_SECONDS,
+      async: CLAUDE_HARVESTER_ASYNC,
     }],
-  }, harvester.path)
+  }, harvester.path, undefined, ['timeout', 'async'])
 
   return {
     dryRun: options.apply !== true,

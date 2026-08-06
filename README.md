@@ -2,730 +2,716 @@
 
 # Obsidian Brain MCP
 
-**Turn Claude Code sessions into a durable Obsidian knowledge system.**
+**Turn useful Claude Code work into searchable, evidence-aware Obsidian notes.**
 
-Local-first MCP server for consultants, sysadmins, and technical operators who want their real work to become searchable memory: session captures, customer context, evidence-backed claims, runbooks, dashboards, and review queues.
+Local-first knowledge capture for consultants, sysadmins, and technical teams. Your vault stays normal Markdown; automatic writes are bounded, inspectable, and separated from risky maintenance.
 
+[![CI](https://github.com/amolani/obsidian-brain-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/amolani/obsidian-brain-mcp-server/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18.0-339933?logo=node.js&logoColor=white)](package.json)
-[![TypeScript](https://img.shields.io/badge/typescript-ESM-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
-[![MCP](https://img.shields.io/badge/MCP-server-111827)](server.ts)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-hooks%20%2B%20tools-6B46C1)](hooks/)
-[![Obsidian](https://img.shields.io/badge/Obsidian-vault%20native-7C3AED?logo=obsidian&logoColor=white)](README.md)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20%2B%20hooks-6B46C1)](https://code.claude.com/docs/en/mcp)
+[![Obsidian](https://img.shields.io/badge/Obsidian-Markdown%20vault-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/)
+[![Status](https://img.shields.io/badge/status-public%20beta-f59e0b)](docs/public-beta.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**[Quick Start](#quick-start)** · **[Session Flow](#brain-workflow)** · **[What You Get](#what-lands-in-obsidian)** · **[Background Mode](#background-mode)** · **[Tools](#tool-surface)** · **[Safety](#safety-model)** · **[V1 Definition](docs/v1-product-definition.md)**
+**[Try the demo](#try-it-without-touching-your-vault)** · **[Beginner install](#beginner-installation-on-manjaro)** · **[First session](#your-first-real-session)** · **[What gets written](#what-gets-written)** · **[Safety](#safety-and-privacy)** · **[Advanced guides](#advanced-guides)**
 
-<img src="./assets/obsidian-brain-hero-v2.png" alt="Obsidian Brain MCP hero banner showing a terminal session flowing into a guarded local vault, evidence cards, runbooks, dashboards, and an Obsidian knowledge graph" width="100%">
-
-<sub>Product visual generated with OpenAI image generation; implementation is plain TypeScript, Markdown, and local files.</sub>
+<img src="./assets/obsidian-brain-hero-v2.png" alt="A Claude Code session flowing into a guarded local Obsidian vault with captures, evidence, runbooks, dashboards, and review queues" width="100%">
 
 </div>
 
----
+> [!IMPORTANT]
+> This is a public beta that writes Markdown into the vault you configure. Start with the demo or a test vault, and keep a backup of an important vault.
 
-## The Short Version
+## What this project does
 
-Obsidian Brain MCP watches Claude Code work at the session boundary and turns useful traces into structured Obsidian knowledge. It is not a hosted notes app, not a vector database you have to trust blindly, and not an auto-refactor bot. Your vault stays Markdown-first and risky maintenance stays reviewable.
+Obsidian Brain MCP connects Claude Code to an Obsidian vault in two ways:
 
-| You do the work | The MCP server extracts | Your vault gains |
-|---|---|---|
-| Debug systems, run commands, fix incidents | Commands, errors, outcomes, decisions | Session captures, TODOs, technical notes |
-| Repeat operational procedures | Steps, prerequisites, validation signals | Runbooks and troubleshooting patterns |
-| Research or compare facts | Claims, sources, confidence, contradictions | Evidence notes and recheck schedules |
-| Work across customers or projects | Current folder, client aliases, related notes | Timelines, snapshots, project memory |
-| Let the vault age | Quality gaps, missing links, stale evidence | Review queues and safe maintenance proposals |
-
-## What It Does
-
-Obsidian Brain MCP turns Claude Code into a local-first knowledge worker. It indexes your Obsidian vault directly on disk, captures meaningful Claude Code sessions, and gradually promotes operational work into reusable memory.
-
-| Layer | What happens | Output |
-|---|---|---|
-| **Observe** | Claude Code hooks detect project context, commands, errors, and outcomes | Daily notes, session captures |
-| **Promote** | Auto-build classifies captures by source and status, then promotes reviewable candidates | Insights, answers, gaps, provisional/confirmed claims, runbooks |
-| **Verify** | Evidence metadata tracks confidence, sources, rechecks, and contradictions | Claims, evidence reports, schedules |
-| **Maintain** | Review tools propose cleanup while executors stay dry-run-first | Dashboards, MOCs, link fixes, lifecycle updates |
-| **Learn** | Archived auto-build artifacts become feedback for stricter future gates | Usefulness score, adaptive promotion behavior |
-
-## What Lands In Obsidian
-
-The output is deliberately boring in the best way: normal Markdown files in normal folders.
+1. **MCP tools** let Claude search, read, capture, review, and maintain knowledge when you ask.
+2. **Claude Code hooks** add limited project context, checkpoint long terminal sessions, and capture durable results automatically.
+3. **Auto-build** turns sufficiently strong captures into reviewable claims, runbooks, dashboards, customer timelines, and maintenance views.
 
 ```text
-YourVault/
-├── Daily/2026-05-12.md                  # session notes and TODOs
-├── Kunden/Client/_timeline.md           # project memory over time
-├── Kunden/Client/_snapshot.md           # current client context
-├── Knowledge/Claims/                    # evidence-backed statements
-├── Knowledge/Runbooks/                  # reusable procedures
-├── Knowledge/_brain.md                  # operating dashboard
-├── Knowledge/index.md                   # knowledge map
-├── Knowledge/hot.md                     # current high-value context
-├── Maintenance/Auto-Build/              # reports, reviews, feedback
-├── Maintenance/Knowledge Inbox.md       # review queue with persistent item state
-├── Maintenance/Background Run Report.md # unattended run report
-└── .brain-*.json / .semantic-index.json # local manifests, feedback, state, caches
+Claude works  ->  local hook extracts useful evidence  ->  Markdown capture
+      |                                                   |
+      +---- MCP search and explicit tools <---------------+
+                                                          |
+                                      policy-gated auto-build and review
 ```
 
-## Quick Start
+This is **not** an Obsidian Community Plugin. Obsidian does not need to be open. The server reads and writes the vault directly on disk.
 
-Node.js 22.18.0 or newer is required. The CLI, hooks, and MCP server run the TypeScript entrypoints directly with `node`.
+### What happens automatically?
+
+| Event | Automatic behavior | Typical result |
+|---|---|---|
+| A new Claude session starts | Detect the current client/project and provide limited metadata | Daily note and project context |
+| A long command-heavy session continues | Save a rate-limited checkpoint | Provisional checkpoint note |
+| Claude finishes a normal response | Start the asynchronous Knowledge Harvester | One capture is created or updated for that transcript |
+| A capture passes policy gates | Run safe auto-build steps | Review items, claims, runbook candidates, dashboards |
+
+`Stop` means “Claude finished a response”; it does not mean “the terminal session was closed.” An interrupted response does not produce the same event. The first-session section below shows how to close a session safely.
+
+## Try it without touching your vault
+
+After cloning the repository and installing its dependencies, create a disposable demo:
 
 ```bash
-git clone https://github.com/amolani/obsidian-brain-mcp-server.git
-cd obsidian-brain-mcp-server
-npm install
-export VAULT_PATH=/path/to/your/obsidian/vault
-```
-
-Run the local setup doctor:
-
-```bash
-node cli.ts doctor --vault "$VAULT_PATH"
-node cli.ts install-hooks --vault "$VAULT_PATH"
-node cli.ts install-hooks --vault "$VAULT_PATH" --apply
-```
-
-The first `install-hooks` command is a dry-run and prints the planned `~/.claude/settings.json` changes. The `--apply` run creates a backup before writing.
-
-If hooks drift later, repair them dry-run-first:
-
-```bash
-node cli.ts repair-hooks --vault "$VAULT_PATH"
-node cli.ts repair-hooks --vault "$VAULT_PATH" --apply
-```
-
-Register the MCP server globally for Claude Code:
-
-Node 22.18.0+ runs the TypeScript entrypoint directly:
-
-```bash
-claude mcp add-json -s user obsidian-brain '{
-  "command": "node",
-  "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
-  "env": {
-    "VAULT_PATH": "/path/to/your/obsidian/vault"
-  }
-}'
-```
-
-Then open a fresh Claude Code session and run:
-
-```text
-brain_health_check
-```
-
-If the health check is clean, just work normally. Captures, dashboards, evidence, timelines, and maintenance views are built around your actual Obsidian files.
-
-Want to see the value before touching your vault?
-
-```bash
+cd "$HOME/.local/share/obsidian-brain-mcp-server"
 node cli.ts demo --out /tmp/obsidian-brain-demo --force
 node cli.ts doctor --vault /tmp/obsidian-brain-demo --skip-hooks
 ```
 
-Run the local quality harness before release work:
-
-```bash
-npm run brain-quality
-```
-
-It replays anonymized golden fixtures in temporary vaults and checks capture recall, late-session updates, retrieval ranking, promotion precision, faithfulness, evidence coverage, review stability, background lock/report behavior, redaction, idempotency, and policy safety gates.
-
-For unattended operation, see [Production Setup](docs/production-setup.md).
-
-## Session Experience
-
-This is the intended loop:
+Expected result:
 
 ```text
-> brain_health_check
-Status: ok
-Checks: policy ok, hooks ok, auto-build manifest ok, action log ok
-
-> Work normally in Claude Code: debug, inspect, edit, verify
-SessionStart -> client context and daily note
-PostToolUse -> debounced long-session checkpoint -> provisional review candidates
-Stop -> Knowledge Harvester -> salient knowledge atoms -> typed Auto-Capture -> gated Auto-Build
-
-> brain_metrics
-Auto-Captures: 18
-Auto-promoted: 42
-Auto-build usefulness score: 0.86
+Health: ok
+Checks: ... fail 0
 ```
 
-### Before and after one troubleshooting session
+Open `/tmp/obsidian-brain-demo` as a vault in Obsidian if you want to inspect the generated dashboard, capture review, evidence view, inbox, customer timeline, and change ledger.
 
-Consider a fictional Example Co session investigating intermittent DHCP failures.
+## Beginner installation on Manjaro
 
-Before the session, the vault has a customer folder and a few network notes, but no dated account of this incident, no source-backed claim about the failure mode, and no review task. The useful context still lives only in the terminal conversation.
+This path assumes you are comfortable copying commands into a terminal, but does not assume Node.js, MCP, or Git knowledge.
 
-During the session:
+### Before you start
 
-1. `SessionStart` resolves the customer context and opens the daily note.
-2. The operator reproduces the failure, inspects logs, changes the relay configuration, and verifies a successful lease.
-3. A debounced checkpoint preserves substantial mid-session progress without creating a final runbook.
-4. On `Stop`, the Knowledge Harvester redacts secret-like values, ranks atomic facts by salience, and writes a typed source capture only when durable information exists.
-5. Evidence is evaluated separately: important but weakly supported facts remain visible in Review, while policy-controlled auto-build creates only derived artifacts that pass both salience and evidence gates.
+You need:
 
-After the session, the result is inspectable as ordinary Markdown:
+- a Manjaro user account with `sudo` access;
+- an Obsidian vault, or a folder you will open as a vault;
+- a Claude Code-compatible Anthropic plan or API/Console access;
+- an internet connection for installation and Claude Code.
 
-| Vault artifact | What changed |
-|---|---|
-| `Daily/2026-06-18.md` | Links the work to the day it happened |
-| `Kunden/Example Co/Captures/2026-06-18-network-debug.md` | Preserves the redacted source trace, intent, scores, and outcome |
-| `Knowledge/Insights/DHCP relay failure signature.md` | Stores the reusable observation with a source backlink |
-| `Knowledge/Claims/DHCP relay requirement.md` | Starts as `provisional`, not silently confirmed |
-| `Maintenance/Session Impact/2026-06-18-network-debug.md` | Explains created, skipped, and review-required work |
-| `Maintenance/Knowledge Inbox.md` | Gives the claim and runbook preview stable, actionable IDs |
-| `Maintenance/Change Ledger.md` | Shows the recent Brain writes and their targets |
+The example uses these permanent locations:
 
-The operator opens Session Impact first, previews the inbox action, and confirms or rejects it explicitly. Duplicate merges, renames, folder moves, and link rewrites remain untouched.
+```text
+Program: ~/.local/share/obsidian-brain-mcp-server
+Vault:   ~/Documents/Obsidian/MyBrain
+```
 
-## Background Mode
+You may use different paths. Always put paths containing spaces inside quotes.
 
-The background runner is the V1 unattended path: it refreshes safe generated surfaces, keeps risky maintenance in dry-run preview, prevents concurrent runs with a lock, and writes an inspectable report.
+### 1. Install the system packages
+
+Update Manjaro and install Git, curl, the Node.js 22 LTS line, npm, and Obsidian:
 
 ```bash
-node cli.ts background --vault "$VAULT_PATH"        # preview
-node cli.ts background --vault "$VAULT_PATH" --apply
+sudo pacman -Syu --needed git curl nano nodejs-lts-jod npm obsidian
 ```
 
-It writes `Maintenance/Background Run Report.md` and `.brain-background-last-run.json`. Reviewed Knowledge Inbox items are persisted in `.brain-knowledge-inbox-state.json`, so old accepted/rejected review items do not keep reappearing unless their source changes.
-
-For scale testing:
+Verify the command-line tools:
 
 ```bash
-node cli.ts benchmark --out /tmp/obsidian-brain-benchmark --notes 5000 --force
+git --version
+node --version
+npm --version
 ```
 
-## Demo Surfaces
+Node must report `v22.18.0` or newer. Newer supported Node releases are also accepted.
 
-These repo-native mockups use fictional, anonymized data and mirror the generated Markdown surfaces.
+### 2. Install and sign in to Claude Code
 
-Session Impact explains one session's outcome; Knowledge Inbox turns uncertainty into explicit review work:
+Use Anthropic's native Linux installer:
 
-<p>
-  <img src="./assets/demo-session-impact.svg" alt="Session Impact demo with generated artifacts, guarded skips, traceability, and next review actions" width="49%">
-  <img src="./assets/demo-knowledge-inbox.svg" alt="Knowledge Inbox demo with persisted queue state and actionable review items" width="49%">
-</p>
-
-Change Ledger answers what the Brain wrote; Evidence Dashboard shows which knowledge still needs proof or rechecking:
-
-<p>
-  <img src="./assets/demo-change-ledger.svg" alt="Change Ledger demo with timestamped Brain writes, modes, summaries, and linked targets" width="49%">
-  <img src="./assets/demo-evidence-dashboard.svg" alt="Evidence Dashboard demo with missing sources, due rechecks, contradictions, and high-risk claims" width="49%">
-</p>
-
-The unattended path has its own inspectable report:
-
-<p>
-  <img src="./assets/demo-background-report.svg" alt="Background Run Report demo with safe jobs, duration, and lock status" width="70%">
-</p>
-
-## Brain Workflow
-
-The important part is the policy gate: automatic writes are for derived knowledge and generated surfaces; risky refactors remain explicit.
-
-```mermaid
-flowchart LR
-  A[Claude Code Session] --> B[SessionStart Hook]
-  B --> C[Daily Note + Client Context]
-  A --> D[PostToolUse Hook]
-  D --> E[Long-Session Checkpoint]
-  A --> F[Stop Hook]
-  F --> G[Knowledge Harvester]
-  G --> S[Salience + Evidence Selection]
-  S --> H[Typed Auto-Capture Note]
-  H --> I[Policy-Controlled Auto-Build]
-  E --> Q[Provisional Claims / Review Candidates]
-  Q --> I
-  I --> J[Insights / Answers / Gaps]
-  I --> K[Claims + Evidence Status]
-  I --> L[Runbooks + Customer Timeline]
-  I --> M[Brain Dashboard + Index + Hot Cache]
-  M --> N[Brain Review]
-  N --> O[Dry-Run Executors]
-  O --> P[Action Log + Feedback Learning]
-  P --> I
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-## Why It Feels Different
+Open a new terminal, then run:
 
-Most note systems wait for you to organize after the work is done. This one watches the work itself.
+```bash
+claude --version
+claude doctor
+claude auth login
+claude auth status
+```
 
-- **Claude Code-native**: MCP tools plus SessionStart, Bash PostToolUse, and Stop hooks.
-- **Obsidian-native**: plain Markdown, local folders, backlinks, frontmatter, no database lock-in.
-- **Sysadmin-friendly**: customer folders, runbooks, commands, incidents, TODOs, evidence, lifecycle state.
-- **Evidence-backed distillation**: session knowledge is ranked by explicit salience and evidence factors; important but weakly supported facts go to review instead of being treated as confirmed knowledge.
-- **Safe automation**: auto-build can write derived knowledge; risky operations stay out of automatic apply.
-- **Adaptive**: archiving noisy auto-build output teaches the next run to be stricter.
+The login command opens the browser flow. See the official [Claude Code installation guide](https://code.claude.com/docs/en/installation) if `claude` is not found after reopening the terminal.
 
-## Tool Surface
+### 3. Create or choose your Obsidian vault
 
-<details open>
-<summary><strong>Read & Navigate</strong></summary>
+Open Obsidian and choose **Create new vault**, or use an existing vault. For this example, create:
 
-| Tool | Purpose |
+```text
+/home/YOUR-NAME/Documents/Obsidian/MyBrain
+```
+
+Replace `YOUR-NAME` with your Linux username. You can also create the folder first:
+
+```bash
+mkdir -p "$HOME/Documents/Obsidian/MyBrain"
+```
+
+Obsidian can then open that folder as a vault. Existing notes may use any structure, but generated Brain artifacts use folders such as `Daily/`, `Knowledge/`, and `Maintenance/`.
+
+### 4. Download and install Obsidian Brain MCP
+
+Clone the repository into a location you will not move later:
+
+```bash
+mkdir -p "$HOME/.local/share"
+export BRAIN_DIR="$HOME/.local/share/obsidian-brain-mcp-server"
+
+git clone https://github.com/amolani/obsidian-brain-mcp-server.git "$BRAIN_DIR"
+cd "$BRAIN_DIR"
+npm ci
+```
+
+The MCP registration and hooks store absolute paths. If you move the repository later, repair the hooks and re-register the MCP server.
+
+### 5. Set the two paths for this setup terminal
+
+```bash
+export BRAIN_DIR="$HOME/.local/share/obsidian-brain-mcp-server"
+export VAULT_PATH="$HOME/Documents/Obsidian/MyBrain"
+
+test -f "$BRAIN_DIR/server.ts" && echo "Brain server found"
+test -d "$VAULT_PATH" && echo "Vault found"
+```
+
+Both confirmation lines should appear. Change the second path if your vault lives elsewhere.
+
+These exports only prepare the current terminal. The next steps save the absolute paths into Claude's configuration. Copying `.env.example` to `.env` is **not** sufficient; this project does not automatically load `.env` files.
+
+### 6. Check customer routing before the first real capture
+
+`clients.json` maps exact folder-name aliases to customer names. Review it before using a cloned public configuration:
+
+```bash
+cd "$BRAIN_DIR"
+nano clients.json
+```
+
+A minimal fictional example looks like this:
+
+```json
+{
+  "_comment": "Canonical customer name -> exact folder aliases",
+  "Example Co": ["example-co", "example"]
+}
+```
+
+If Claude runs inside `/work/example-co/firewall`, the capture can be routed to `Kunden/Example Co/`. Without a confident exact alias, the Harvester deliberately uses `Technik/...` or `Referenz/...` instead of guessing a customer.
+
+`clients.json` is tracked by Git. Never commit or push confidential customer names to a public repository. Teams that need private aliases should keep a private configuration outside the clone via `CLIENTS_PATH` and set that variable consistently for both the MCP server and Claude hooks.
+
+### 7. Install the automatic Claude Code hooks
+
+First preview the change:
+
+```bash
+cd "$BRAIN_DIR"
+node cli.ts install-hooks --vault "$VAULT_PATH"
+```
+
+The preview does not write anything. If the paths look correct, apply it:
+
+```bash
+node cli.ts install-hooks --vault "$VAULT_PATH" --apply
+```
+
+The installer preserves unrelated Claude settings and creates a timestamped backup when an existing `~/.claude/settings.json` is changed.
+
+Hooks are optional only if you want manual MCP tools without automatic session context, checkpoints, or captures. They are required for the automatic workflow described in this README.
+
+The installer writes user-level hooks to `~/.claude/settings.json`; they therefore apply to every Claude Code project for that user unless the policy excludes a working directory.
+
+### 8. Register the MCP server for Claude Code
+
+Register the local stdio server at user scope so it is available in all your projects:
+
+```bash
+claude mcp add \
+  --transport stdio \
+  --scope user \
+  --env "VAULT_PATH=$VAULT_PATH" \
+  obsidian-brain \
+  -- node "$BRAIN_DIR/server.ts"
+```
+
+This is equivalent to an `add-json` configuration, but is easier to copy safely. The syntax follows the official [Claude Code MCP guide](https://code.claude.com/docs/en/mcp).
+
+If Claude says that `obsidian-brain` already exists, remove only that registration and run the add command again:
+
+```bash
+claude mcp remove --scope user obsidian-brain
+```
+
+### 9. Run the setup checks
+
+Check the vault and hook configuration:
+
+```bash
+cd "$BRAIN_DIR"
+node cli.ts doctor --vault "$VAULT_PATH"
+```
+
+Interpret the result like this:
+
+| Status | Meaning on first setup |
 |---|---|
-| `vault_search` | Structured search across title, tags, folders, status, and content |
-| `semantic_search` | Local semantic-style search with weighted note vectors and snippets |
-| `get_note_context` | Full note context with frontmatter, backlinks, outgoing links, TODOs, related notes |
-| `build_context_pack` / `recall_context` | Explicit read-only recall; never auto-injected into working memory |
-| `vault_overview`, `todo_list`, `weekly_review`, `daily_note` | Operating views for the vault and daily work |
+| `fail` | Fix this before using the vault |
+| `warn` | Often normal for a fresh vault whose generated views do not exist yet |
+| `ok` | The check is fully satisfied |
 
-</details>
+The important first milestone is **0 failed checks**.
 
-<details open>
-<summary><strong>Create, Capture & Promote</strong></summary>
+Ask Claude Code to verify the actual MCP connection. Start a completely new Claude session after changing hooks or MCP configuration:
 
-| Tool | Purpose |
-|---|---|
-| `capture_v2` | Smart capture with client/Technik routing, normalized tags, and dry-run previews |
-| `save_insight` / `save_decision` / `save_answer` | Durable manual memory under `Knowledge/` |
-| `ingest_source` / `extract_claims` | Source ingestion and claim extraction with evidence fields |
-| `generate_runbook` | Runbook generation from captured operational sessions |
-| `extract_troubleshooting_pattern`, `promote_capture_to_runbook`, `generate_postmortem` | Incident and troubleshooting workflows |
+```bash
+mkdir -p "$HOME/obsidian-brain-test"
+cd "$HOME/obsidian-brain-test"
+claude
+```
 
-</details>
+Then type this as a Claude prompt, not as a shell command:
 
-<details open>
-<summary><strong>Brain Layer</strong></summary>
+```text
+Use the brain_health_check tool. Do not change anything yet.
+Explain every warning in simple language.
+```
 
-| Tool | Purpose |
-|---|---|
-| `brain_health_check` | Readiness check for policy, hooks, generated surfaces, manifest, and action log |
-| `brain_review` / `brain_apply_review_item` | Central operational review queue plus one-action dry-run-first executor; sealed reviewer archives stay isolated from this analyst surface |
-| `brain_auto_build` | Policy-controlled promotion of captures into durable memory and generated surfaces |
-| `archive_auto_build_run` | Archive one auto-build run's artifacts and record negative learning feedback |
-| `brain_checkpoint` | Long-session checkpoint note with optional incremental auto-build |
-| `brain_run_background` | Lock-protected unattended safe refresh run with Markdown/JSON report |
-| `brain_metrics` / `brain_schedule` | Health metrics and propose-only upkeep schedule |
-| `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard` | Obsidian-visible operating and trust surfaces |
-| `build_session_impact_report`, `build_knowledge_inbox`, `build_change_ledger` | Explain one session's vault impact, collect review work, and show recent Brain writes |
-| `brain_apply_inbox_item`, `brain_review_inbox_items` | Dry-run-first single-item and safe batch review actions with persistent lifecycle state |
-| `brain_calibration_review_batch` | Selection-blind batch over the reproducible V3 evaluation sample; shows attested R-references, statements, evidence, opaque record tokens, and only unweighted overall response progress |
-| `record_calibration_judgement`, `record_calibration_label`, `brain_calibration_summary` | Atomically freeze useful+supported through an opaque token, record separate temporal validity rechecks, and inspect aggregate counts |
-| `brain_calibration_evaluate` | IPW-weighted shadow comparison with strict chronological embargo, monotone train-only calibration, response/MNAR diagnostics, and cluster-bootstrap intervals |
-| `brain_calibration_register_campaign`, `brain_calibration_close_campaign` | Dry-run-first enrollment before review and data closure after the fixed reviewer roster completes the frozen frame |
-| `brain_calibration_evaluate_sealed` | One-shot, option-free evaluation of the externally anchored campaign snapshot; exact retries replay the persisted result |
-| `repair_generated_surfaces`, `migrate_brain_metadata` | Rebuild owned operating surfaces, explicitly adopt narrowly recognized pre-marker surfaces, and repair legacy metadata without reorganizing notes |
-| `build_knowledge_index`, `update_hot_cache` | Knowledge map and manual hot context cache |
-| `build_memory_timeline`, `build_customer_snapshot` | Customer/project memory surfaces |
+You can also enter `/mcp` inside Claude and confirm that `obsidian-brain` is connected. If Claude can call `brain_health_check` and reports no failures, the essential installation works.
 
-</details>
+## Your first real session
 
-<details>
-<summary><strong>Maintenance</strong></summary>
+Use a dedicated test directory for the first automatic capture. Keep Claude open and start a second terminal with:
 
-| Tool | Purpose |
-|---|---|
-| `find_duplicates` / `merge_duplicates` | Duplicate analysis and dry-run-first merge workflow |
-| `rename_note` | Rename/move refactor with wikilink and frontmatter updates |
-| `triage_note` / `triage_inbox` | Inbox classification, target folders, duplicate checks, link suggestions |
-| `score_note_quality` / `list_low_quality_notes` | Quality scoring for title, metadata, tags, links, TODOs, structure, and freshness |
-| `find_broken_links` / `fix_broken_links` | Broken link detection and repair |
-| `list_suggestions` / `promote_suggestion` | Inspect hook suggestions and safely promote selected aliases/categories into config |
-| `lint_frontmatter` / `fix_frontmatter` | Profile-aware frontmatter schemas |
-| `generate_mocs`, `run_safe_maintenance`, `run_vault_maintenance` | Generated structure and safe batch maintenance |
+```bash
+tail -F /tmp/knowledge-harvester.log
+```
 
-</details>
+In Claude, use this reproducible test prompt:
 
-## Safety Model
+```text
+Create brain-test.json in the current test directory with a valid JSON object.
+Record this explicit test decision: the fictional service demo-api uses port 43123
+because port 3000 is reserved. Read the file back, parse it, and verify the exact
+service name, port, and reason. Then give a final factual summary with these
+headings: Goal, Decision, Change, Verification, Result, Open Points.
+Do not use more tools after that summary.
+```
 
-`brain-policy.json` is the local safety contract.
+Let Claude finish the final response normally. The `Stop` hook starts the local Harvester in the background. In the second terminal, expect one of these sequences:
+
+```text
+Captured: ...
+Auto-build: ...
+```
+
+or, when an existing session capture was updated:
+
+```text
+Updated capture: ...
+Auto-build: ...
+```
+
+If the session is intentionally rejected by the quality gate, the log instead explains that no sufficiently salient knowledge was found. That is a healthy skip, not a broken hook. If none of these messages appears within 120 seconds, press `Ctrl+C` and use the troubleshooting section before closing Claude.
+
+After a healthy skip, you can still verify an explicit write safely by asking Claude to run `capture_v2` for the fictional test decision as a dry run first, show the proposed path, and apply it only after you approve the preview.
+
+After `Auto-build:`, a healthy skip, or the troubleshooting check, press `Ctrl+C` in the log terminal. Use `/exit` in Claude only after any started capture has finished.
+
+Important behavior:
+
+- Do not interrupt the final Claude response.
+- Do not use `/exit` immediately after the final response; wait for `Auto-build:`. If auto-build is disabled, wait for `Captured:` or `Updated capture:`.
+- Not every conversation creates a note. Sessions without durable information are intentionally skipped.
+- The Harvester updates the same session capture when the transcript changes; it does not create a new note after every response.
+- Non-interactive `claude -p` runs may end before asynchronous hooks finish. Use an interactive session for this first test.
+
+After a successful run, inspect the vault. Depending on routing and evidence quality, you should see a capture under `Kunden/{Client}/`, `Technik/{Category}/`, or `Referenz/`, plus generated views under `Knowledge/` and `Maintenance/`.
+
+## Everyday workflow
+
+Once installed, the normal loop is short:
+
+1. Open a terminal inside the customer or project directory and run `claude`.
+2. Let Claude use `vault_search` before creating duplicate knowledge.
+3. Work normally: investigate, edit, run commands, and verify results.
+4. Ask for a factual closing summary when the session contains important work.
+5. Wait for the Harvester log confirmation before the final `/exit`.
+6. Review uncertain claims and risky proposals later; they are not silently treated as confirmed facts.
+
+Useful example prompts:
+
+```text
+Search the vault for everything we know about Example Co's firewall.
+
+Use get_note_context for the most relevant note and show unresolved TODOs.
+
+Capture this decision with capture_v2 as a dry run first.
+
+Run brain_review and explain which item has the highest review value.
+
+Show brain_metrics and explain whether capture quality is improving.
+```
+
+## What gets written
+
+The output is ordinary Markdown plus local JSON state and caches:
+
+```text
+YourVault/
+├── Daily/2026-08-06.md                     # daily work and capture links
+├── Kunden/Example Co/                      # exact customer routing
+│   ├── Example Co — Firewall change.md     # session capture
+│   ├── _timeline.md                        # generated customer history
+│   └── _snapshot.md                        # generated current context
+├── Technik/                                # categorized technical knowledge
+├── Referenz/                               # neutral staging when routing abstains
+├── Knowledge/
+│   ├── Claims/                             # evidence-aware statements
+│   ├── Runbooks/                           # verified reusable procedures
+│   ├── _brain.md                           # operating dashboard
+│   ├── index.md                            # knowledge map
+│   └── evidence.md                         # evidence and recheck view
+├── Maintenance/
+│   ├── Auto-Build/                         # per-capture reports
+│   ├── Session Impact/                     # what one session changed
+│   ├── Knowledge Inbox.md                  # persistent review queue
+│   ├── Capture Review.md                   # capture quality surface
+│   └── Change Ledger.md                    # recent Brain writes
+├── .action-log.jsonl                       # append-only local action history
+└── .brain-*.json / .semantic-index.json    # manifests, state, and caches
+```
+
+For an exact producer-by-producer inventory, see [What Gets Written](docs/what-gets-written.md).
+
+## Safety and privacy
+
+`brain-policy.json` is the local automation contract.
 
 | Rule | Behavior |
 |---|---|
-| Working memory is manual | `recall_context` only runs when you ask for it |
-| Safe auto-build is allowed | Captures can become derived knowledge, reports, dashboards, timelines |
-| Risky refactors are blocked from auto-apply | Duplicate merges, renames, folder organization, broken-link rewrites, link application |
-| Every write is observable | Applied file mutations append to `.action-log.jsonl`; orchestration tools retain provenance through their delegated action entries |
-| Dry-run-first remains the default for risky operations | Apply modes are explicit and policy guarded |
-| Feedback changes future behavior | Archived auto-build artifacts make noisy categories stricter |
+| Vault remains filesystem-native | Notes stay Markdown; there is no hosted Brain database |
+| Full note recall is explicit | `recall_context` runs only when requested; SessionStart injects only limited project metadata such as detected client, note paths, and aggregate TODO counts |
+| Secret-like text is filtered | Automatic captures audit and redact recognized credential patterns before writing |
+| Evidence and importance are separate | A useful statement is not automatically treated as well supported |
+| Risky refactors stay manual | Duplicate merges, renames, moves, broken-link rewrites, and link application are never auto-applied |
+| Risky tools are dry-run-first | Preview changes before explicitly applying them |
+| Writes are observable | Applied mutations are recorded in `.action-log.jsonl` or delegated to an operation that records them |
+| Protected folders remain protected | Guarded writers reject `.obsidian/`, `.trash/`, `System/`, `Templates/`, traversal, and symlink escapes |
 
-## How It Works
+“Local-first” does not mean that Claude is offline. The index, generated notes, manifests, and hook processing stay on your machine. When an MCP tool returns note content to Claude, that returned content becomes part of the Claude interaction and is handled according to your Claude account and provider settings.
 
-The server indexes your vault on start and keeps an in-memory index of notes, tags, backlinks, TODOs, frontmatter, and links. It watches the vault directory and updates incrementally as Markdown files change.
+Recommended precautions:
 
-Classification is local and rule-based:
+- back up an important vault before enabling automatic writes;
+- begin with the demo or a test vault;
+- review `clients.json` before the first capture;
+- never place API keys or passwords in prompts or notes merely because redaction exists;
+- use dedicated reviewer profiles for blind calibration work.
 
-- `clients.json` — known clients and keyword aliases
-- `technik-categories.json` — technical categories and subcategories
-- `tag-aliases.json` — tag normalization map
-- `tech-terms.json` — auto-tag vocabulary for captures
+## Configuration
 
-All files are editable JSON and live in the repo by default.
+The default configuration lives next to the source code:
 
-## Requirements
+| File | Purpose |
+|---|---|
+| `clients.json` | Exact customer names and path/content aliases |
+| `technik-categories.json` | Technical categories, subcategories, and routing keywords |
+| `tag-aliases.json` | Normalizes alternate tag spellings |
+| `tech-terms.json` | Vocabulary for automatic technical tags |
+| `brain-policy.json` | Automation limits, protected paths, write risks, and dry-run rules |
 
-- Node.js ≥ 22.18.0
-- An Obsidian vault (structure doesn't matter — the server adapts)
+Configuration is loaded from JSON. Edit carefully, keep valid JSON, and restart Claude after changes that affect a running MCP process.
 
-## Full Installation
+Common environment overrides:
 
-### 1. Clone and install
+| Variable | Purpose | Default |
+|---|---|---|
+| `VAULT_PATH` | Required vault root | none |
+| `CLIENTS_PATH` | Alternative customer configuration | `{project}/clients.json` |
+| `TECHNIK_CATEGORIES_PATH` | Alternative category configuration | `{project}/technik-categories.json` |
+| `TAG_ALIASES_PATH` | Alternative tag normalization map | `{project}/tag-aliases.json` |
+| `TECH_TERMS_PATH` | Alternative technical vocabulary | `{project}/tech-terms.json` |
+| `HARVESTER_LOG` | Automatic capture log | `/tmp/knowledge-harvester.log` |
+| `HARVESTER_STATE_DIR` | Per-session capture state | `/tmp/knowledge-harvester-state` |
+
+The complete scientific/reviewer variables are documented in [Scientific Engineering Contract](docs/scientific-engineering-contract.md) and [What Gets Written](docs/what-gets-written.md).
+
+## Troubleshooting
+
+### `node --version` is too old
+
+Install Manjaro's Node.js 22 LTS package:
 
 ```bash
-git clone https://github.com/amolani/obsidian-brain-mcp-server.git
-cd obsidian-brain-mcp-server
-npm install
+sudo pacman -Syu --needed nodejs-lts-jod npm
 ```
 
-### 2. Configure your vault path
+Then reopen the terminal and verify that the version is at least `v22.18.0`.
 
-Set via environment variable:
+### `claude: command not found`
+
+Open a new terminal after the native installer. Then run:
 
 ```bash
-export VAULT_PATH=/path/to/your/obsidian/vault
+claude --version
+claude doctor
 ```
 
-### 3. Register the MCP server with Claude Code
+If it is still missing, follow the official [Claude Code installation troubleshooting](https://code.claude.com/docs/en/troubleshoot-install).
 
-Globally (available in every session):
+### Doctor shows warnings on an empty vault
+
+Warnings for missing dashboards, manifests, action logs, or review views can be normal before the first build. Fix every `fail`; use the first real session to create the initial generated surfaces.
+
+### Claude cannot see `brain_health_check`
+
+Confirm the stored registration and then restart Claude completely:
 
 ```bash
-claude mcp add-json -s user obsidian-brain '{
+claude mcp get obsidian-brain
+claude mcp list
+```
+
+These commands perform a live connection check and can take up to 30 seconds. In heavily sandboxed terminals they may time out even when a direct MCP client works; the decisive user-level test is whether a fresh interactive Claude session can call `brain_health_check`.
+
+If the saved path is wrong, re-register it with the commands from installation step 8. Also verify the vault and hook inputs independently:
+
+```bash
+export BRAIN_DIR="$HOME/.local/share/obsidian-brain-mcp-server"
+export VAULT_PATH="$HOME/Documents/Obsidian/MyBrain"
+
+cd "$BRAIN_DIR"
+node cli.ts doctor --vault "$VAULT_PATH"
+```
+
+### No capture appears
+
+Check the Harvester log:
+
+```bash
+tail -n 50 /tmp/knowledge-harvester.log
+```
+
+Typical reasons are an interrupted final response, no durable information, a protected/excluded path, a detected secret with blocking enabled, or a lock held by an active calibration campaign.
+
+### The repository was moved
+
+Repair hooks at the new location, then remove and re-add the MCP registration:
+
+```bash
+export VAULT_PATH="$HOME/Documents/Obsidian/MyBrain"
+
+cd "/new/absolute/path/obsidian-brain-mcp-server"
+node cli.ts repair-hooks --vault "$VAULT_PATH"
+node cli.ts repair-hooks --vault "$VAULT_PATH" --apply
+
+claude mcp remove --scope user obsidian-brain
+```
+
+Run the registration command again with the new absolute server path. Inspect `~/.claude/settings.json` for obsolete hook entries from the old repository path; `repair-hooks` does not delete unrelated or unknown handlers.
+
+### Paths contain spaces
+
+Quote every variable expansion and path:
+
+```bash
+node cli.ts doctor --vault "$VAULT_PATH"
+```
+
+Do not write `--vault $VAULT_PATH` without quotes.
+
+## Update or remove the installation
+
+### Update
+
+```bash
+export BRAIN_DIR="$HOME/.local/share/obsidian-brain-mcp-server"
+export VAULT_PATH="$HOME/Documents/Obsidian/MyBrain"
+
+cd "$BRAIN_DIR"
+git pull --ff-only
+npm ci
+node cli.ts repair-hooks --vault "$VAULT_PATH"
+node cli.ts repair-hooks --vault "$VAULT_PATH" --apply
+npm run release-check
+```
+
+Restart Claude after the update. If you edited tracked JSON configuration locally, save those changes before `git pull` and resolve any reported conflict deliberately.
+
+### Remove
+
+Remove the MCP registration first:
+
+```bash
+claude mcp remove --scope user obsidian-brain
+```
+
+There is not yet an `uninstall-hooks` command. Either:
+
+- restore the timestamped `~/.claude/settings.json.bak-*` created during installation **only if you have made no later Claude settings changes**, or
+- edit `~/.claude/settings.json` and remove only the three handlers pointing to this repository: `session-context.ts`, `session-checkpoint.ts`, and `knowledge-harvester.ts`.
+
+After that, you may delete the cloned repository. Existing vault notes, generated Markdown, and Brain state remain in the vault until you review and remove them yourself.
+
+## Selected MCP tools
+
+The server exposes a large tool surface, but daily use usually needs only these:
+
+| Tool | Use it for |
+|---|---|
+| `brain_health_check` | Verify policy, hooks, generated views, manifest, and action log |
+| `vault_search` | Search titles, content, tags, folders, status, and projects |
+| `get_note_context` | Read one note with links, backlinks, TODOs, and related notes |
+| `capture_v2` | Preview and create a routed capture |
+| `brain_review` | See the operational review queue |
+| `brain_apply_inbox_item` | Preview or apply one explicit inbox action |
+| `brain_metrics` | Inspect capture, promotion, evidence, and feedback health |
+| `brain_run_background` | Refresh safe generated surfaces under a lock |
+
+<details>
+<summary><strong>More tool groups</strong></summary>
+
+- **Read and recall:** `semantic_search`, `recall_context`, `build_context_pack`, `vault_overview`, `todo_list`, `weekly_review`
+- **Durable memory:** `save_insight`, `save_decision`, `save_answer`, `ingest_source`, `extract_claims`, `generate_runbook`
+- **Generated views:** `build_brain_dashboard`, `build_capture_review`, `build_evidence_dashboard`, `build_session_impact_report`, `build_change_ledger`
+- **Dry-run maintenance:** `find_duplicates`, `rename_note`, `find_broken_links`, `lint_frontmatter`, `organize_referenz`, `run_safe_maintenance`
+- **Scientific calibration:** `brain_calibration_review_batch`, `record_calibration_judgement`, `brain_calibration_evaluate`, campaign registration/closure, and sealed evaluation
+
+Reviewer-only calibration tools are hidden from the default MCP mode and require a separate restricted server/profile.
+
+</details>
+
+## Background mode
+
+The background runner refreshes safe generated surfaces, keeps risky maintenance in preview, prevents concurrent runs with a lock, and writes an inspectable report.
+
+```bash
+node cli.ts background --vault "$VAULT_PATH"          # preview
+node cli.ts background --vault "$VAULT_PATH" --apply  # apply safe jobs
+```
+
+It writes `Maintenance/Background Run Report.md` and `.brain-background-last-run.json`. See [Production Setup](docs/production-setup.md) for unattended operation and runtime budgets.
+
+## Product surfaces
+
+These repository-native mockups use fictional data and mirror the generated Markdown views.
+
+<p>
+  <img src="./assets/demo-session-impact.svg" alt="Session Impact demo showing created artifacts, guarded skips, traceability, and review actions" width="49%">
+  <img src="./assets/demo-knowledge-inbox.svg" alt="Knowledge Inbox demo showing persistent review items and actions" width="49%">
+</p>
+
+<p>
+  <img src="./assets/demo-change-ledger.svg" alt="Change Ledger demo showing timestamped Brain writes" width="49%">
+  <img src="./assets/demo-evidence-dashboard.svg" alt="Evidence Dashboard demo showing missing sources, rechecks, and contradictions" width="49%">
+</p>
+
+## Evidence and scientific calibration
+
+The production model intentionally keeps **importance** and **support** separate:
+
+- salience factors rank task relevance, decision/outcome utility, novelty, reusability, and specificity;
+- evidence factors describe provenance quality, independent support, and conflicts;
+- scores are ordinal engineering signals, not probabilities;
+- weak or ambiguous knowledge goes to review rather than silent confirmation;
+- seeded evaluation samples and blind reviewer tokens allow later calibration without exposing production rank during judgement;
+- optional irreversible campaigns freeze the frame, reviewer roster, split plan, labels, runtime/source hashes, and externally anchored receipts before sealed evaluation.
+
+The sealed evaluator never changes active weights and never grants a release decision automatically.
+
+Start with ordinary capture and review. Calibration campaigns are an advanced, bounded workflow—not a task that must run after every Claude session.
+
+Detailed contracts:
+
+- [Scientific Engineering Contract](docs/scientific-engineering-contract.md)
+- [Knowledge Distillation Contract](docs/knowledge-distillation-contract.md)
+- [Session Digest Contract](docs/session-digest-contract.md)
+- [Brain Quality Contract](docs/brain-quality-contract.md)
+- [V1 Product Definition](docs/v1-product-definition.md)
+
+<details>
+<summary><strong>Dedicated blind-review MCP profile</strong></summary>
+
+Use one isolated Claude profile/process per registered reviewer. Do not enable the normal production server in that reviewer session.
+
+```bash
+claude mcp add-json --scope user obsidian-brain-review '{
+  "type": "stdio",
   "command": "node",
   "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
   "env": {
-    "VAULT_PATH": "/path/to/your/obsidian/vault"
-  }
-}'
-```
-
-Verify: `claude mcp list` should show `obsidian-brain: ✓ Connected`.
-
-For an actual blind calibration review, register a separate reviewer process/profile with
-only the restricted tool surface, and do not enable the normal `obsidian-brain` server in
-that reviewer session:
-
-```bash
-claude mcp add-json -s user obsidian-brain-review '{
-  "command": "node",
-  "args": ["/absolute/path/to/obsidian-brain-mcp-server/server.ts"],
-  "env": {
-    "VAULT_PATH": "/path/to/your/obsidian/vault",
+    "VAULT_PATH": "/absolute/path/to/your/vault",
     "OBSIDIAN_BRAIN_MCP_MODE": "calibration-review",
     "BRAIN_CALIBRATION_REVIEWER_ID": "reviewer-a",
     "BRAIN_CALIBRATION_VAULT_ID": "work-vault",
-    "BRAIN_CALIBRATION_ANCHOR_DIR": "/absolute/path/to/calibration-anchors"
+    "BRAIN_CALIBRATION_ANCHOR_DIR": "/absolute/path/to/external-anchors"
   }
 }'
 ```
 
-That mode requires one stable opaque `BRAIN_CALIBRATION_REVIEWER_ID` at startup, advertises
-and accepts only `brain_calibration_review_batch` and `record_calibration_judgement`, and
-injects the configured identity into both calls. Their public input schemas contain no
-reviewer selector. The judgement schema also contains no `recorded_at`; the server binds
-the current UTC time when it receives the call. Caller-supplied reviewer identities or
-recording times are rejected. Conversely, the default mode neither advertises nor accepts
-these two reviewer-only tools. Run one isolated server/profile per registered reviewer. A
-separate OS account or otherwise isolated reviewer profile is still required if the
-reviewer could open the vault directly outside MCP.
+The reviewer ID is process-bound, not a digital signature. For regulated or externally published studies, combine isolated profiles with reviewer-specific credentials/signatures and independently operated timestamping or transparency infrastructure.
 
-For an irreversible campaign, configure the normal analyst server with a stable vault id
-and an anchor directory outside the vault:
+</details>
 
-```bash
-export BRAIN_CALIBRATION_VAULT_ID='work-vault'
-export BRAIN_CALIBRATION_ANCHOR_DIR='/absolute/path/to/calibration-anchors'
+## Architecture
+
+```mermaid
+flowchart LR
+  A[Claude Code] --> B[SessionStart]
+  A --> C[PostToolUse checkpoint]
+  A --> D[Stop hook]
+  B --> E[Limited project context]
+  C --> F[Provisional checkpoint]
+  D --> G[Redaction and knowledge selection]
+  G --> H[Typed Markdown capture]
+  H --> I[Policy-gated auto-build]
+  I --> J[Claims and runbooks]
+  I --> K[Dashboards and timelines]
+  I --> L[Review queues]
+  L --> M[Dry-run-first actions]
+  M --> N[Action log and feedback]
 ```
 
-The server creates each enrollment, closure, and result receipt only once. Protect this
-directory independently with append-only/WORM retention or immutable backups. A normal
-writable directory makes rollback detectable while it survives, but it is not itself a
-cryptographic timestamp or physical immutability guarantee.
-
-The receipt chain attests the frozen content and ordering, not a human's legal identity.
-`BRAIN_CALIBRATION_REVIEWER_ID` is process-bound, not a digital signature. For externally
-published or regulated multi-reviewer studies, combine the isolated profiles with
-reviewer-specific credentials/signatures and an independently operated timestamp or
-transparency service.
-
-### 4. (Optional) Register hooks for automation
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "env": {
-    "VAULT_PATH": "/path/to/your/obsidian/vault"
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node /absolute/path/to/obsidian-brain-mcp-server/hooks/session-context.ts",
-            "timeout": 8
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node /absolute/path/to/obsidian-brain-mcp-server/hooks/session-checkpoint.ts",
-            "timeout": 12,
-            "statusMessage": "Checking long-session checkpoint..."
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node /absolute/path/to/obsidian-brain-mcp-server/hooks/knowledge-harvester.ts",
-            "timeout": 15,
-            "async": true
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-The checkpoint hook should be registered for `PostToolUse` with `matcher: "Bash"` so long-running terminal-heavy sessions can be checkpointed without firing on every edit.
-
-### 5. (Optional) Add client instructions
-
-Create `CLAUDE.md` in your vault or globally at `~/.claude/CLAUDE.md`:
-
-```markdown
-The obsidian-brain MCP server is available. Use it as the primary source of knowledge.
-- Search knowledge → vault_search
-- Get note context → get_note_context
-- Capture new knowledge → capture
-```
-
-## Configuration files
-
-### `clients.json`
-
-```json
-{
-  "AKBD": ["AKBD", "albert-kleiner"],
-  "Neckartenzlingen": ["naik"],
-  "Merian": ["niarian"]
-}
-```
-
-Keys = canonical client names. Values = keyword aliases matched against CWD and content.
-
-### `technik-categories.json`
-
-```json
-{
-  "Linuxmuster": {
-    "keywords": ["linuxmuster", "sophomorix", "lmn"],
-    "filenameHints": ["lmn", "linuxmuster"],
-    "priority": 10,
-    "subcategories": {
-      "Linbo": {
-        "keywords": ["linbo", "linbofs", "patchclass"],
-        "filenameHints": ["linbo"]
-      }
-    }
-  }
-}
-```
-
-### `tag-aliases.json`
-
-```json
-{
-  "lmn": "linuxmuster",
-  "pve": "proxmox",
-  "ad": "active-directory"
-}
-```
-
-Left side = alternate spelling. Right side = canonical form.
-
-## Environment variables
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `VAULT_PATH` | **Required.** Path to your Obsidian vault root. | — |
-| `OBSIDIAN_BRAIN_MCP_MODE` | `calibration-review` exposes only the blind batch and opaque-token label writer; `default` hides and rejects both reviewer-only tools. | `default` |
-| `BRAIN_CALIBRATION_REVIEWER_ID` | Required in `calibration-review` mode: stable opaque ID bound to that isolated server/profile and injected into both review calls; judgement time is likewise generated server-side. | — |
-| `BRAIN_CALIBRATION_ANCHOR_DIR` | Required for sealed campaigns: existing external directory for create-only enrollment, closure, and result receipts. Protect it with independent append-only/WORM retention. | — |
-| `BRAIN_CALIBRATION_VAULT_ID` | Required for sealed campaigns: stable opaque namespace for the vault's external receipt chain. | — |
-| `CLIENTS_PATH` | Override path to `clients.json`. | `{project}/clients.json` |
-| `TECHNIK_CATEGORIES_PATH` | Override path to `technik-categories.json`. | `{project}/technik-categories.json` |
-| `TAG_ALIASES_PATH` | Override path to `tag-aliases.json`. | `{project}/tag-aliases.json` |
-| `HARVESTER_LOG` | Knowledge Harvester log file. | `/tmp/knowledge-harvester.log` |
-| `HARVESTER_STATE_DIR` | Per-session state dir (prevents re-processing). | `/tmp/knowledge-harvester-state` |
-| `HARVESTER_SUGGESTIONS_LOG` | Log for client/subcategory suggestions. | `/tmp/knowledge-harvester-suggestions.log` |
-| `SESSION_CHECKPOINT_LOG` | Long-session checkpoint hook log file. | `/tmp/obsidian-brain-session-checkpoint.log` |
-| `SESSION_CHECKPOINT_STATE_DIR` | Long-session state dir for debounce/command counts. | `/tmp/obsidian-brain-session-state` |
-| `TECHNIK_SUGGESTIONS_LOG` | Log for category suggestions. | `/tmp/technik-suggestions.log` |
-
-## Usage
-
-Once registered, just work normally in Claude Code. Ask things like:
-
-- "What do we know about Neckartenzlingen?"
-- "Show me all open TODOs."
-- "Save this: The DHCP server needs to run on the firewall, not the LMN."
-- "Generate a runbook for the linuxmuster installation."
-- "Run vault maintenance."
-
-The Knowledge Harvester runs at `Stop` when `brain-policy.json` allows `hooks.autoCapture`. It no longer uses transcript length or Bash volume as a value proxy: a short decision without commands can be captured, while a long read-only debug session without a reproducible finding is skipped. The distiller selects at most a small set of typed atoms (`problem`, `cause`, `decision`, `change`, `verification`, `result`, `constraint`, `open_question`) and writes no raw assistant-summary or phase-narration blocks. Captures expose the versioned importance model, salience/evidence scores, provenance references, `capture_value`, `runbook_readiness`, `review_need`, intent, and routing evidence. A separate seeded calibration sample is stored only as attested internal frontmatter and is excluded from normal search, semantic indexing, note context, links, and promotion. Capture V3 binds the complete deduplicated candidate-ID universe so the parser can reconstruct the exact sample; legacy V2 remains read-only and cannot enter a sealed campaign. Secret-like source values are audited and redacted before write.
-
-Only an exact customer alias as a complete CWD segment permits direct physical customer routing. Fuzzy, content-only, unknown, and ambiguous matches stay in a neutral Technik/Referenz capture path with their match reason in Review; they never silently create a confident customer assignment.
-
-When `automation.mode` is `auto_build`, a safe auto-build pass runs immediately after a successful session capture:
-
-- promotes only typed facts with complete provenance, sufficient salience, and strong evidence; importance and evidential support remain separate axes
-- turns only a concrete `open_question` atom into a gap instead of reacting to generic words such as "prüfen" or "offen"
-- records processed source hashes in `.brain-auto-build-manifest.json` to prevent repeated promotion of the same capture
-- enforces policy limits for maximum new notes, claim count, and runtime
-- creates an Auto-Build report under `Maintenance/Auto-Build/`
-- creates a Session Impact report under `Maintenance/Session Impact/` explaining what changed, what skipped, and what needs review
-- promotes runbooks only when a strongly supported change and a strongly supported verification are both present; checkpoints and research-only reads remain review candidates
-- learns from archived auto-build artifacts and repeated rejected feedback, making noisy promotion categories stricter over time
-- extracts claims from structured digest atoms instead of arbitrary source sentences; checkpoint and capture-derived claims start as `claim_status: provisional`
-- updates evidence metadata without treating the automation itself as a factual reviewer (`confirmed_by` and `checked_at` remain unset)
-- refreshes `Knowledge/_brain.md`, `Knowledge/index.md`, `Knowledge/hot.md`
-- refreshes `Maintenance/Knowledge Inbox.md` with provisional claims, uncertain clients, runbook candidates, and auto-build skips
-- refreshes `Kunden/{Client}/_timeline.md` and `Kunden/{Client}/_snapshot.md` when a client was detected
-
-Risky operations such as duplicate merges, note renames, folder reorganization, broken-link rewrites, and link suggestion application stay out of automatic apply.
-
-## Brain Policy
-
-`brain-policy.json` is the local safety contract for hooks, protected paths, and manual memory behavior.
-
-- Working memory is `manual_only`: `recall_context` runs only when explicitly called, and no context is injected automatically.
-- `update_hot_cache` is also manual-only; it writes `Knowledge/hot.md` only when explicitly applied.
-- Evidence, dashboard, timeline, feedback, and claim extraction tools are explicit/dry-run-first; `brain_schedule` only proposes work.
-- `automation.mode=auto_build` allows safe after-session writes that create derived knowledge and refresh generated surfaces.
-- `automation.duringSession.autoCheckpoint=true` enables debounced long-session checkpoints; `minMinutesBetweenCheckpoints`, `minCommandsBetweenCheckpoints`, and `maxCheckpointsPerSession` limit write frequency.
-- `automation.neverAutoApply` blocks risky refactors from automatic execution.
-- Hook auto-organization is disabled by the V1 safety contract: `hooks.autoOrganize=false`; folder moves require an explicit dry-run-first tool call.
-- Auto-capture and daily-note creation are policy-controlled.
-- Protected folders such as `.obsidian/`, `.trash/`, `System/`, and `Templates/` are blocked for guarded writers.
-- Tool policies declare write capability, risk level, and whether dry-run-first behavior is expected.
-- Source ingest uses `.raw/.manifest.json` to skip unchanged sources unless `force=true`.
-
-## Recommended Workflow
-
-Use the vault as a dry-run-first operating loop:
-
-1. Start work normally in Claude Code. The SessionStart hook creates today's Daily note when policy allows it and detects the client from your current folder when possible. Automatic Referenz→Technik organization is disabled by the V1 policy contract; moves require the explicit dry-run-first `organize_referenz` tool.
-2. Before creating new knowledge, search first with `vault_search` or `semantic_search`. Use `recall_context` when you explicitly want manual working-memory recall for a topic.
-3. Capture rough knowledge with `capture_v2` in `review` or `dry_run` mode for important notes, then apply once the suggested folder/title/tags look right. Use `save_insight`, `save_decision`, or `save_answer` when you want an explicit durable memory instead of an auto-classified capture.
-4. During work, use `daily_note` for lightweight chronological notes and TODOs. Use `todo_list` or `weekly_review` to pull open work back into focus.
-5. When a question remains open or two notes disagree, use `flag_knowledge_gap` or `flag_contradiction`. Resolve it later with `resolve_gap`, so the vault keeps uncertainty visible instead of silently mixing weak facts with confirmed knowledge.
-6. At session `Stop`, let the hook distill durable decisions, causes, changes, checks, constraints, and open questions. No minimum command count is required. Review important/weak-evidence atoms before promotion; a verified change can become a runbook candidate automatically.
-7. For bigger investigations, create a `create_research_plan` first. It pulls local context and gives you a checklist for source ingest, final answer/decision capture, and contradiction handling.
-8. Ingest durable sources with `ingest_source`, then use `extract_claims` to turn source text into explicit claims. Use `update_evidence` to set confidence, sources, recheck dates, and contradiction references.
-9. For a confirmatory run, first preview `brain_calibration_register_campaign` in the analyst role. Review the complete plan, then apply it with `expected_registration_root` and `expected_registered_at` copied exactly from that preview. Apply rebuilds the artifact with the preview timestamp and rejects any intervening frame, source, cutoff, or split drift. This is the manual campaign boundary: it freezes the complete V3 candidate universe and frame, reviewer roster, label-independent chronological cutoff, full-frame leakage components, each observation's train/test/embargo assignment, gates, code/model versions, and bootstrap plan before review. Reviewer ties may abstain but cannot rewire that partition. For ordinary exploratory work, skip registration and keep using `brain_calibration_evaluate`. While a campaign is registered or closed, the Harvester pauses calibration-capture writes and exploratory summary/evaluation is blocked so the frame cannot drift.
-10. Hand `brain_calibration_review_batch` to each registered dedicated reviewer role, which cannot use production notes, vault/semantic search, note context, summaries, or either evaluator during judgement. Within the campaign, the batch automatically serves only the enrolled archive; after each batch the reviewer submits `useful` and `supported` together with `record_calibration_judgement`. The user does not need to start a separate review after every source session—the explicit registration begins one bounded review campaign. An identical judgement retry is a no-op; a divergent retry fails closed.
-11. When every registered reviewer has completed every enrolled observation, preview and apply `brain_calibration_close_campaign`, then invoke `brain_calibration_evaluate_sealed` once with explicit confirmation. The sealed evaluator accepts no adjustable analysis parameters and uses only the frozen frame and labels. It persists and externally anchors the aggregate result before returning it; retries replay that receipt. It never changes active weights or grants a release decision. After the result receipt exists, normal captures and exploratory diagnostics resume; later data is not retroactively added to the consumed campaign.
-12. Outside an active campaign, `brain_calibration_evaluate` remains the exploratory shadow loop. It applies inverse-probability/Hájek weights, a strict chronological leakage-group split with boundary embargo, monotone train-only calibration, response coverage, conservative MNAR bounds, proper scoring rules, and paired cluster-bootstrap intervals. Repeated exploratory inspection is not a confirmatory release test.
-13. Periodically refresh `Knowledge/_brain.md`, `Knowledge/hot.md`, `Knowledge/index.md`, and customer timelines with `build_brain_dashboard`, `update_hot_cache`, `build_knowledge_index`, and `build_memory_timeline`.
-14. Let `brain_auto_build` process captures through the Stop hook. It may promote only atoms that pass the salience, evidence, provenance, intent, and type gates. During long sessions the checkpoint hook can write `Knowledge/Checkpoints/`; checkpoint-derived claims stay provisional and runbooks remain review candidates until a real implemented-and-verified procedure exists.
-15. If an auto-build run produced noisy derived notes, run `archive_auto_build_run` with the original `source_path`; preview first, then archive only that run's generated artifacts without touching the capture. The archive action records negative feedback for the affected auto-build categories.
-16. Use `brain_metrics` to watch whether auto-build is producing useful knowledge, whether archived/rejected categories are accumulating, and whether evidence issues grow.
-17. In a fresh Claude session, run `brain_health_check` first. It reports whether policy, hooks, generated surfaces, manifest, and action log are ready.
-18. Use `brain_schedule` for propose-only upkeep: due evidence rechecks, open contradictions, missing dashboards, and explicit next tools.
-19. For maintenance, run `run_safe_maintenance` first as dry-run. Apply individual executors only after reviewing changes: lifecycle updates, link suggestions, frontmatter fixes, broken-link fixes, MOCs, and semantic-index rebuild.
-20. Periodically run `organize_referenz` dry-run, then apply manually. Flat `Referenz/` is treated as staging; durable technical knowledge should end up in `Technik/{category}/{sub}/`.
-
-## Folder conventions
-
-The server assumes (but doesn't require) this structure:
-
-```
-YourVault/
-├── Kunden/                # Client projects
-│   └── {ClientName}/
-├── Technik/               # Technical reference
-│   ├── Linuxmuster/
-│   │   ├── Linbo/
-│   │   └── Sophomorix/
-│   ├── Docker/
-│   └── Proxmox/
-├── Daily/                 # Daily notes (auto-created)
-├── Knowledge/             # Manual memory, claims, evidence, dashboard, hot cache, index, gaps, contradictions
-├── Maintenance/           # Review queues (auto-generated)
-├── .raw/                  # Immutable source documents and ingest manifest
-├── Inbox/                 # Unsorted captures
-├── Referenz/              # Staging for references; organization is manual and dry-run-first
-└── Persönlich/            # Private
-```
-
-## Roadmap
-
-Current focus is the fixed [v1 product definition](docs/v1-product-definition.md), the measurable [Brain Quality Contract](docs/brain-quality-contract.md), then a smoother plugin experience.
-
-| Area | Direction |
-|---|---|
-| Plugin packaging | Claude Code plugin template is scaffolded; CLI remains the Public Beta install path |
-| First-run setup | `obsidian-brain doctor`, `install-hooks`, `repair-hooks`, `init`, `demo`, `background`, `benchmark`, `brain-quality`, and `release-check` |
-| Visual surfaces | Brain dashboard, capture review, evidence dashboard, session impact reports, knowledge inbox, change ledger, background report, runbook lists, and customer snapshots |
-| Feedback loop | Inbox actions with persistent state plus archive/reject/retry guidance for noisy auto-build output |
-| Production safety | CI, secret redaction, dry-run-first metadata migration, capture scoring, lock-protected background runs, large-vault benchmark, and Brain Quality gates |
-| Import paths | Source ingest profiles for markdown, tickets, web exports, and incident logs |
-| Collaboration | Shareable policy presets while keeping vault data local |
+- **CLI path:** setup, doctor, demo, background, benchmark, quality, and release commands call focused services directly.
+- **MCP path:** `server.ts` exposes schemas and dispatches tool requests through the `Vault` facade.
+- **Hook path:** SessionStart adds bounded context, PostToolUse checkpoints long sessions, and Stop runs the asynchronous Harvester.
+- **Service layer:** capture, retrieval, evidence, review, generated surfaces, maintenance, calibration, and safety remain separate modules.
 
 ## Development
 
-### Run tests
-
 ```bash
+npm ci
 npm test
+npm run typecheck
+npm run brain-quality
+npm run release-check
 ```
 
-The test suite covers vault indexing, link resolution, search, templates, capture categorization, duplicate detection, broken links, frontmatter linting, MOC generation, brain auto-build, health checks, Knowledge Inbox state, background runs, benchmark generation, Brain Quality fixtures, and the Knowledge Harvester end-to-end.
+CI runs the release check on supported Node 22 and Node 24 lines. The quality harness replays anonymized fixtures in temporary vaults and checks capture recall, retrieval, promotion precision, faithfulness, evidence coverage, redaction, review stability, idempotency, and policy safety.
 
-### Project structure
+Project map:
 
-```
-obsidian-brain-mcp-server/
-├── cli.ts                         # setup, background, demo, benchmark, quality, release checks
-├── server.ts                      # MCP stdio entry point
-├── server-tools.ts                # MCP tool schemas
-├── tool-handlers.ts               # domain-handler dispatch
-├── tool-handlers/                 # search, knowledge, overview, links, maintenance
-├── vault.ts                       # live Markdown index and service facade
-├── services/                      # capture, retrieval, review, auto-build, background, safety
-├── hooks/
-│   ├── session-context.ts         # SessionStart context and daily note
-│   ├── session-checkpoint.ts      # debounced long-session checkpoint
-│   ├── knowledge-harvester.ts     # Stop capture, redaction, scoring, auto-build handoff
-│   └── daily-note-hook.ts         # standalone daily-note hook
-├── brain-policy.json              # tool risks, automation limits, protected paths
-├── clients.json                   # client aliases
-├── technik-categories.json        # technical routing rules
-├── tag-aliases.json               # tag normalization
-├── demo/                          # local sample transcript
-├── docs/                          # product, quality, safety, and operations contracts
-└── tests/
-    ├── fixtures/                  # transcript and Brain Quality fixtures
-    └── *.test.ts                  # unit, integration, safety, and release behavior
+```text
+cli.ts                         setup and operational CLI
+server.ts                      MCP stdio entry point
+server-tools.ts                MCP schemas and modes
+tool-handlers/                 domain request handlers
+vault.ts                       live Markdown index and service facade
+hooks/                         Claude Code automation hooks
+services/                      capture, evidence, review, safety, calibration
+brain-policy.json              automation and risk contract
+clients.json                   customer aliases
+technik-categories.json        technical routing
+docs/                          product, operations, safety, and science contracts
+tests/                         unit, integration, safety, and quality tests
 ```
 
-### Architecture
+## Advanced guides
 
-- **CLI path**: `cli.ts` parses setup and operations commands. Setup, demo, benchmark, and quality commands call their focused services directly; vault commands initialize `Vault` and use the same service layer as MCP tools.
-- **MCP path**: `server.ts` publishes schemas from `server-tools.ts`, dispatches calls through the domain registries in `tool-handlers/`, and invokes the `Vault` facade. `Vault` owns the live Markdown/tag/link index and delegates behavior to `services/`.
-- **Hook path**: SessionStart establishes local context, PostToolUse creates policy-limited checkpoints, and Stop runs the Knowledge Harvester. The Harvester parses the transcript, filters and redacts sensitive material, scores and writes the source capture, then may hand it to policy-controlled auto-build.
-- **Service layer**: focused modules implement capture, retrieval, evidence, review, generated surfaces, maintenance, auto-build, background operation, and repair. Read-only analyzers stay separate from dry-run-first executors.
-- **Policy and observability**: `brain-policy.json` defines automatic-write limits, protected paths, tool risk, and operations that may never be auto-applied. Mutating services are expected to pass policy checks and either append an entry to `.action-log.jsonl`, delegate exclusively to operations that do, or provide an explicit no-op reason.
-- **Background and review**: the background runner acquires a vault-local lock, runs the safe job set within a runtime budget, and writes Markdown/JSON results. Knowledge Inbox and Brain Review keep uncertain or risky follow-up work explicit; risky refactors never run automatically.
-
-Generated-surface builders use their `quelle` frontmatter marker to recognize output they own and avoid replacing an unrelated user note. Explicit executor tools such as rename, merge, frontmatter, and link repair are different: they may modify user-authored notes only after an explicit apply request, with dry-run-first and policy safeguards. Hooks and background jobs do not auto-apply those risky executors.
+| Guide | Read it when you need |
+|---|---|
+| [Public Beta](docs/public-beta.md) | current supported scope and limitations |
+| [Production Setup](docs/production-setup.md) | unattended background runs and operating checks |
+| [What Gets Written](docs/what-gets-written.md) | exact files, locks, manifests, and cleanup behavior |
+| [Release Checklist](docs/release-checklist.md) | release and packaging verification |
+| [Scientific Engineering](docs/scientific-engineering-contract.md) | scoring, blind review, evaluation, and sealed campaigns |
+| [Brain Quality](docs/brain-quality-contract.md) | measurable quality and safety gates |
 
 ## License
 
