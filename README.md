@@ -13,7 +13,7 @@ Local-first knowledge capture for consultants, sysadmins, and technical teams. Y
 [![Status](https://img.shields.io/badge/status-public%20beta-f59e0b)](docs/public-beta.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**[Try the demo](#try-it-without-touching-your-vault)** · **[Beginner install](#beginner-installation-on-manjaro)** · **[First session](#your-first-real-session)** · **[What gets written](#what-gets-written)** · **[Safety](#safety-and-privacy)** · **[Advanced guides](#advanced-guides)**
+**[Try the demo](#try-it-without-touching-your-vault)** · **Install: [Manjaro](#beginner-installation-on-manjaro) / [macOS](docs/install-macos.md)** · **[First session](#your-first-real-session)** · **[What gets written](#what-gets-written)** · **[Safety](#safety-and-privacy)** · **[Advanced guides](#advanced-guides)**
 
 <img src="./assets/obsidian-brain-hero-v2.png" alt="A Claude Code session flowing into a guarded local Obsidian vault with captures, evidence, runbooks, dashboards, and review queues" width="100%">
 
@@ -69,6 +69,8 @@ Checks: ... fail 0
 ```
 
 Open `/tmp/obsidian-brain-demo` as a vault in Obsidian if you want to inspect the generated dashboard, capture review, evidence view, inbox, customer timeline, and change ledger.
+
+Using a Mac? Follow the standalone **[beginner installation for macOS](docs/install-macos.md)**. Its repeatable Homebrew path covers macOS 14 or newer on both Apple silicon and Intel Macs.
 
 ## Beginner installation on Manjaro
 
