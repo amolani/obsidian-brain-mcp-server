@@ -34,7 +34,7 @@
           {
             "type": "command",
             "command": "node \"/absolute/path/to/obsidian-brain-mcp-server/hooks/knowledge-harvester.ts\"",
-            "timeout": 15,
+            "timeout": 120,
             "async": true
           }
         ]

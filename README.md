@@ -483,7 +483,7 @@ Add to `~/.claude/settings.json`:
           {
             "type": "command",
             "command": "node /absolute/path/to/obsidian-brain-mcp-server/hooks/knowledge-harvester.ts",
-            "timeout": 15,
+            "timeout": 120,
             "async": true
           }
         ]
@@ -580,6 +580,8 @@ Once registered, just work normally in Claude Code. Ask things like:
 - "Run vault maintenance."
 
 The Knowledge Harvester runs at `Stop` when `brain-policy.json` allows `hooks.autoCapture`. It no longer uses transcript length or Bash volume as a value proxy: a short decision without commands can be captured, while a long read-only debug session without a reproducible finding is skipped. The distiller selects at most a small set of typed atoms (`problem`, `cause`, `decision`, `change`, `verification`, `result`, `constraint`, `open_question`) and writes no raw assistant-summary or phase-narration blocks. Captures expose the versioned importance model, salience/evidence scores, provenance references, `capture_value`, `runbook_readiness`, `review_need`, intent, and routing evidence. A separate seeded calibration sample is stored only as attested internal frontmatter and is excluded from normal search, semantic indexing, note context, links, and promotion. Capture V3 binds the complete deduplicated candidate-ID universe so the parser can reconstruct the exact sample; legacy V2 remains read-only and cannot enter a sealed campaign. Secret-like source values are audited and redacted before write.
+
+The Stop hook stays asynchronous so it does not delay every Claude response. Its 120-second timeout covers the capture plus the normal auto-build budget. Before terminating a session immediately after its final response, wait for `Auto-build:` in `HARVESTER_LOG` (or `Captured:`/`Updated capture` when auto-build is disabled); non-interactive `claude -p` runs cancel unfinished async hooks during teardown.
 
 Only an exact customer alias as a complete CWD segment permits direct physical customer routing. Fuzzy, content-only, unknown, and ambiguous matches stay in a neutral Technik/Referenz capture path with their match reason in Review; they never silently create a confident customer assignment.
 

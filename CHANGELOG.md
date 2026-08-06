@@ -41,6 +41,8 @@
 
 ### Changed
 
+- Claude Stop-hook repair now enforces asynchronous capture with a 120-second budget, and health checks flag stale timeout/async settings before they can truncate auto-build.
+- Campaign locks now record their host identity and safely reclaim only old locks whose local owner is provably dead; foreign, active, legacy, and malformed locks remain fail-closed.
 - Large-vault link and duplicate analysis now uses deterministic candidate indexes, bounded dashboard result sets, and checked performance/stability gates instead of quadratic review scans.
 - `generate_runbook` now supports dry-run previews through the MCP tool surface.
 - Brain Dashboard links to Capture Review and Evidence Dashboard.

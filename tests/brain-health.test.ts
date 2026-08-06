@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Vault } from '../vault.ts'
 import { cleanupVault, createTempVault, writeNote } from './helpers.ts'
@@ -9,6 +9,7 @@ describe('brain health check', () => {
   let vaultPath: string
   let vault: Vault
   const originalClientsPath = process.env.CLIENTS_PATH
+  const originalHome = process.env.HOME
 
   beforeEach(async () => {
     vaultPath = createTempVault()
@@ -53,6 +54,8 @@ describe('brain health check', () => {
   afterEach(() => {
     if (originalClientsPath === undefined) delete process.env.CLIENTS_PATH
     else process.env.CLIENTS_PATH = originalClientsPath
+    if (originalHome === undefined) delete process.env.HOME
+    else process.env.HOME = originalHome
     vault.shutdown()
     cleanupVault(vaultPath)
   })
@@ -101,5 +104,37 @@ describe('brain health check', () => {
 
     assert.equal(result.status, 'fail')
     assert.ok(result.checks.some(check => check.id === 'auto_build_manifest' && check.status === 'fail'))
+  })
+
+  test('warns when the Stop harvester timeout cannot cover auto-build', () => {
+    const fakeHome = join(vaultPath, '.test-home')
+    const settingsPath = join(fakeHome, '.claude', 'settings.json')
+    mkdirSync(join(fakeHome, '.claude'), { recursive: true })
+    process.env.HOME = fakeHome
+    const settings = {
+      env: { VAULT_PATH: vaultPath },
+      hooks: {
+        Stop: [{
+          hooks: [{
+            type: 'command',
+            command: 'node /opt/obsidian-brain-mcp/hooks/knowledge-harvester.ts',
+            timeout: 15,
+            async: true,
+          }],
+        }],
+      },
+    }
+    writeFileSync(settingsPath, JSON.stringify(settings), 'utf-8')
+
+    const shortTimeout = vault.brainHealthCheck()
+    const shortCheck = shortTimeout.checks.find(check => check.id === 'hook_stop')
+    assert.equal(shortCheck?.status, 'warn')
+    assert.match(shortCheck?.message ?? '', /timeout=15s .*mindestens 120s/)
+
+    settings.hooks.Stop[0].hooks[0].timeout = 120
+    writeFileSync(settingsPath, JSON.stringify(settings), 'utf-8')
+    const repaired = vault.brainHealthCheck()
+    const repairedCheck = repaired.checks.find(check => check.id === 'hook_stop')
+    assert.equal(repairedCheck?.status, 'ok')
   })
 })

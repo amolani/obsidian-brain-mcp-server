@@ -3,6 +3,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Vault } from '../vault.ts'
 import { diagnoseConfigFiles } from '../config.ts'
+import {
+  CLAUDE_HARVESTER_ASYNC,
+  CLAUDE_HARVESTER_TIMEOUT_SECONDS,
+} from './claude-hooks.ts'
 import { isRecognizedLegacyGeneratedSurface } from './generated-surface-ownership.ts'
 import { parseFrontmatter } from './note-parser.ts'
 import { diagnoseBrainPolicy, loadBrainPolicy } from './policy.ts'
@@ -146,6 +150,28 @@ function containsCommand(value: unknown, needle: string): boolean {
   return false
 }
 
+function findCommandHandler(value: unknown, needles: string[]): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findCommandHandler(item, needles)
+      if (found) return found
+    }
+    return null
+  }
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const command = record.command
+  if (
+    typeof command === 'string'
+    && needles.some(needle => command.includes(needle))
+  ) return record
+  for (const item of Object.values(record)) {
+    const found = findCommandHandler(item, needles)
+    if (found) return found
+  }
+  return null
+}
+
 function nextActions(checks: BrainHealthCheck[]): string[] {
   return checks
     .filter(check => check.status !== 'ok')
@@ -233,7 +259,29 @@ export function brainHealthCheck(vault: Vault, options: BrainHealthOptions = {})
       const checkpoint = `node ${join(PROJECT_ROOT, 'hooks', 'session-checkpoint.ts')}`
       add('hook_vault_path', 'Hook VAULT_PATH', settingsVaultPath === vault.vaultPath ? 'ok' : 'warn', settingsVaultPath ? `VAULT_PATH=${settingsVaultPath}` : 'VAULT_PATH fehlt in ~/.claude/settings.json env')
       add('hook_session_start', 'SessionStart hook', containsCommand(settings, sessionContext) || containsCommand(settings, 'hooks/session-context.ts') ? 'ok' : 'warn', 'session-context.ts')
-      add('hook_stop', 'Stop hook', containsCommand(settings, harvester) || containsCommand(settings, 'hooks/knowledge-harvester.ts') ? 'ok' : 'warn', 'knowledge-harvester.ts')
+      const stopHandler = findCommandHandler(settingsObj.hooks?.Stop, [harvester, 'hooks/knowledge-harvester.ts'])
+      if (!stopHandler) {
+        add('hook_stop', 'Stop hook', 'warn', 'knowledge-harvester.ts fehlt')
+      } else {
+        const timeout = stopHandler.timeout
+        const timeoutOk = typeof timeout === 'number'
+          && Number.isFinite(timeout)
+          && timeout >= CLAUDE_HARVESTER_TIMEOUT_SECONDS
+        const asyncOk = stopHandler.async === CLAUDE_HARVESTER_ASYNC
+        const issues: string[] = []
+        if (!timeoutOk) {
+          issues.push(`timeout=${typeof timeout === 'number' ? timeout : 'fehlt'}s (mindestens ${CLAUDE_HARVESTER_TIMEOUT_SECONDS}s)`)
+        }
+        if (!asyncOk) issues.push(`async=${String(stopHandler.async ?? 'fehlt')} (erwartet true)`)
+        add(
+          'hook_stop',
+          'Stop hook',
+          issues.length === 0 ? 'ok' : 'warn',
+          issues.length === 0
+            ? `knowledge-harvester.ts, timeout=${String(timeout)}s, async=true`
+            : `knowledge-harvester.ts falsch konfiguriert: ${issues.join(', ')}; repair-hooks ausführen`,
+        )
+      }
       add('hook_post_tool_use', 'PostToolUse hook', containsCommand(settings, checkpoint) || containsCommand(settings, 'hooks/session-checkpoint.ts') ? 'ok' : 'warn', 'session-checkpoint.ts')
     }
   }

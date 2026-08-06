@@ -11,6 +11,14 @@ describe('client resolver', () => {
     assert.match(result.reason, /CWD-Segment/)
   })
 
+  test('routes the nested AMG migration workspace to the AMG client', () => {
+    const result = resolveClientContext('/home/amo/Documents/code/amo/xgs/amg/amg/sophos-utm-to-xgs')
+    assert.equal(result.client, 'AMG')
+    assert.equal(result.confidence, 'high')
+    assert.equal(result.method, 'exact_cwd')
+    assert.equal(result.matched, 'amg')
+  })
+
   test('does not treat an alias embedded in a cwd segment as exact evidence', () => {
     const result = resolveClientContext('/home/amo/Documents/code/amo/myhugproject')
     assert.equal(result.client, null)
