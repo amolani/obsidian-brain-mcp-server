@@ -13,7 +13,7 @@ Local-first knowledge capture for consultants, sysadmins, and technical teams. Y
 [![Status](https://img.shields.io/badge/status-public%20beta-f59e0b)](docs/public-beta.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**[Try the demo](#try-it-without-touching-your-vault)** · **Install: [Manjaro](#beginner-installation-on-manjaro) / [macOS](docs/install-macos.md)** · **[First session](#your-first-real-session)** · **[What gets written](#what-gets-written)** · **[Safety](#safety-and-privacy)** · **[Advanced guides](#advanced-guides)**
+**[Try the demo](#try-it-without-touching-your-vault)** · **Install: [Claude setup prompt](#let-claude-set-it-up) / [Manjaro](#beginner-installation-on-manjaro) / [macOS](docs/install-macos.md)** · **[First session](#your-first-real-session)** · **[What gets written](#what-gets-written)** · **[Safety](#safety-and-privacy)** · **[Advanced guides](#advanced-guides)**
 
 <img src="./assets/obsidian-brain-hero-v2.png" alt="A Claude Code session flowing into a guarded local Obsidian vault with captures, evidence, runbooks, dashboards, and review queues" width="100%">
 
@@ -71,6 +71,137 @@ Checks: ... fail 0
 Open `/tmp/obsidian-brain-demo` as a vault in Obsidian if you want to inspect the generated dashboard, capture review, evidence view, inbox, customer timeline, and change ledger.
 
 Using a Mac? Follow the standalone **[beginner installation for macOS](docs/install-macos.md)**. Its repeatable Homebrew path covers macOS 14 or newer on both Apple silicon and Intel Macs.
+
+## Let Claude set it up
+
+If Claude Code is already installed and signed in, it can guide the remaining installation. This prompt supports Manjaro and the documented macOS 14+ Homebrew path.
+
+1. Open a terminal and run `claude`.
+2. Paste the complete prompt below.
+3. Tell Claude which Obsidian vault to use when it asks.
+4. Review the plan, every permission request, and the hook dry-run before approving changes.
+
+> [!CAUTION]
+> The prompt may install system packages and modify your user-level Claude configuration. It explicitly requires previews and approval, but you must still read Claude's proposed commands. Start with a test vault or back up an important vault first.
+
+```text
+Set up Obsidian Brain MCP for me as a careful, interactive installer.
+
+Repository:
+https://github.com/amolani/obsidian-brain-mcp-server.git
+
+Default program directory:
+$HOME/.local/share/obsidian-brain-mcp-server
+
+My vault path is not specified yet. Ask me for the exact existing vault path, or
+ask whether you should create $HOME/Documents/Obsidian/MyBrain as a new test vault.
+Do not guess a vault and do not write into an existing vault until I confirm it.
+
+Communicate in the language I use. Use the repository's README, CLAUDE.md, and
+platform installation guide as the authority after cloning it. Work through the
+following phases and keep a visible checklist.
+
+Safety rules:
+
+1. Begin with read-only inspection. Detect the OS, version, architecture, current
+   shell, package manager, Git, Node.js, npm, Obsidian, Claude Code, the target
+   directory, the vault path, existing Claude hooks, and any existing
+   obsidian-brain MCP registration.
+2. Support only Manjaro and macOS 14 or newer in this guided path. If the system is
+   different, or macOS is older, stop and explain which manual path is needed.
+3. Show me a short plan and ask before installing packages, using sudo, creating a
+   vault, changing ~/.claude/settings.json, or adding, removing, or replacing an MCP
+   registration.
+   Combine related approvals instead of asking after every harmless read-only check.
+   Never ask me to send a sudo password, login secret, token, or private customer
+   name in the chat; passwords belong only in the terminal's own prompt.
+4. Never delete, reset, overwrite, move, or reorganize an existing vault. Do not run
+   risky Brain maintenance tools. Installation checks must remain read-only for the
+   vault. Never use rm -rf, git reset --hard, or a force option on an unknown target.
+5. Preserve all unrelated Claude settings and hooks. Before changing an existing
+   ~/.claude/settings.json, verify that it is valid JSON and create a timestamped
+   backup. Never replace the whole file with a minimal template.
+6. Never edit the repository's tracked clients.json with private information. Create
+   $HOME/.config/obsidian-brain/clients.json instead. Start with an empty valid
+   configuration, set restrictive user-only permissions, and let me add real aliases
+   locally later; do not ask me to paste them into this conversation. Persist its
+   absolute path as CLIENTS_PATH both for future terminal sessions and in the top-level
+   env object of ~/.claude/settings.json, then pass the same path to the MCP server
+   registration. Do not display or commit confidential customer names.
+7. Quote every path. Do not assume shell variables or a changed working directory
+   persist between separate tool calls; reuse verified absolute paths explicitly.
+8. Do not commit or push anything, and do not claim success merely because a command
+   started.
+
+Installation procedure:
+
+1. Verify that Claude Code is already installed and authenticated because this prompt
+   cannot install the Claude process that is currently running.
+2. On Manjaro, keep an existing Node.js if it is at least v22.18.0. Otherwise propose
+   the documented pacman installation. The documented packages are git, curl, nano,
+   nodejs-lts-jod, npm, and Obsidian. Install only what is missing, and do so only
+   after approval.
+3. On macOS, require macOS 14 or newer. Use Homebrew, prefer node@24, configure its
+   absolute bin directory for Zsh, and do not reinstall Obsidian if Obsidian.app is
+   already present. Ask before installing Homebrew, formulae, or casks.
+4. If the program directory does not exist, clone the repository there. If it already
+   contains the correct repository, inspect its remote, branch, status, and divergence.
+   Only use git pull --ff-only when it tracks the intended repository and the worktree
+   is clean. If it is dirty, divergent, or contains something else, stop and explain;
+   never delete or reset it.
+5. Run npm ci in the verified repository. Confirm that node --version is at least
+   v22.18.0. Then run npm run typecheck and npm test. Stop on a failed dependency,
+   typecheck, or test and diagnose it before continuing.
+6. Ask me to confirm the exact vault. Create its directory only if I explicitly chose
+   a new test vault. Resolve and retain its canonical absolute path, reject the Brain
+   repository itself as a vault, ask whether an important vault is actually backed up,
+   and warn against simultaneous Brain writers when the vault is synced.
+7. Create the private CLIENTS_PATH file outside the repository. A valid empty starting
+   file is an object containing only a _comment field. Set its permissions with
+   chmod 600.
+   Do not collect real aliases during this setup. Persist CLIENTS_PATH idempotently in
+   the correct profile for the detected shell so future terminal-started Claude
+   processes inherit it. Also store it in Claude's user settings as described below.
+   Do not claim that this changes the environment of the already-running session.
+8. Run node cli.ts install-hooks --vault "ABSOLUTE_VAULT_PATH" without --apply first.
+   Show me the preview. Apply it only after I approve. Preserve unrelated settings and
+   report the backup path. Then safely add the absolute CLIENTS_PATH to the existing
+   top-level env object, with another backup if this requires a separate write, and
+   validate the final JSON.
+9. Inspect existing MCP registrations named obsidian-brain, including local, project,
+   and user scopes that could shadow one another. Keep the user registration if it
+   already has the exact intended values. Otherwise show the difference and ask before
+   removing only the incorrect registration. Do not repeatedly retry a live MCP check
+   if it hangs; defer the live check to the fresh session. Use this exact add shape with
+   verified absolute values:
+   claude mcp add \
+     --transport stdio \
+     --scope user \
+     --env "VAULT_PATH=ABSOLUTE_VAULT_PATH" \
+     --env "CLIENTS_PATH=ABSOLUTE_CLIENTS_PATH" \
+     obsidian-brain \
+     -- node "ABSOLUTE_BRAIN_DIR/server.ts"
+10. Run the repository doctor against the confirmed vault with CLIENTS_PATH set to the
+    private configuration. The required installation milestone is zero failed checks;
+    explain warnings instead of silently treating them as failures or success.
+
+Final handoff:
+
+- Report the detected OS, Node/npm/Claude versions, program path, vault path, private
+  client-config path, files changed, backups created, tests, doctor totals, and any
+  remaining warnings.
+- Do not try to prove the newly registered MCP connection from this already-running
+  Claude session. Tell me to close all Claude sessions normally, open a fresh terminal
+  in a disposable test directory, start claude, use /mcp, and confirm obsidian-brain
+  is connected.
+- Give me this exact final verification prompt for the new Claude session:
+  "Use the brain_health_check tool. Do not change anything yet. Explain every warning
+  in simple language."
+- Mark only the local setup complete after the local tests and doctor have zero
+  failures. Clearly label the fresh-session MCP check as pending until I perform it.
+```
+
+The final restart is necessary because the Claude session receiving this prompt began before the new MCP server and hooks were registered. After the fresh-session health check succeeds, continue with [Your first real session](#your-first-real-session).
 
 ## Beginner installation on Manjaro
 

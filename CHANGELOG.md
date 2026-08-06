@@ -4,6 +4,7 @@
 
 ### Added
 
+- Copy-paste Claude Code setup prompt with OS detection, approval gates, private customer configuration, hook previews, MCP registration, and explicit end-to-end verification.
 - Standalone beginner installation guide for macOS 14 or newer, covering Apple silicon and Intel, Homebrew, Node.js 24, Obsidian, Claude Code, private customer routing, MCP registration, hooks, verification, and macOS-specific troubleshooting.
 - Public Beta CLI with `doctor`, `install-hooks`, `init`, `demo`, and `release-check`.
 - Dry-run-first Claude Code hook installer with settings preservation and backups on apply.
